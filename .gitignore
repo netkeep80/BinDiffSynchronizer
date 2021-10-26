@@ -1,3 +1,6 @@
+main.exe
+*.extend
+*.persist
 err.json
 .vscode/
 .DS_Store

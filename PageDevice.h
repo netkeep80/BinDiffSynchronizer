@@ -30,7 +30,7 @@ public:
 		for( int i = 0; i < CacheSize; i++ )
 		{
 			Pool[i].Index = -1;
-			Pool[i].Durty = false;
+			Pool[i].Dirty = false;
 		}
 	}
 
@@ -43,7 +43,7 @@ public:
 	{
 		if( VMap[Index] != NULL )
 		{
-			VMap[Index]->Durty |= ForWrite;
+			VMap[Index]->Dirty |= ForWrite;
 			return &VMap[Index]->Obj;
 		}
 		else
@@ -53,14 +53,14 @@ public:
 
 			if( Pool[PoolPos].Index >= 0 )
 			{
-				if( Pool[PoolPos].Durty )
+				if( Pool[PoolPos].Dirty )
 				{
 					if( !Save( Pool[PoolPos].Index, Pool[PoolPos].Obj ) )
 					{
 						// ошибка сохранения страницы
 						return NULL;
 					}
-					Pool[PoolPos].Durty = false;
+					Pool[PoolPos].Dirty = false;
 				}
 				VMap[Pool[PoolPos].Index] = NULL;
 			}
@@ -71,7 +71,7 @@ public:
 			{	//	если загрузили страницу
 				LastLoadedIndex = PoolPos;
 				VMap[Index] = &Pool[PoolPos];
-				VMap[Index]->Durty = ForWrite;
+				VMap[Index]->Dirty = ForWrite;
 				return &Pool[PoolPos].Obj;
 			}
 			else
@@ -90,7 +90,7 @@ private:
 	{
 		__T	 Obj;
 		int	 Index;
-		bool Durty;
+		bool Dirty;
 	};
 	vector< Container<_T> >  Pool;
 	vector< Container<_T> * > VMap;

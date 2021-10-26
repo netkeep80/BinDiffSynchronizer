@@ -97,20 +97,12 @@ bool	test3( void )
 
 void	main( void )
 {
-	CHECK( test1 );
-	CHECK( test2 );
-	CHECK( test3 );
-}
-
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-/*
-void main( void )
-{
+	//CHECK( test1 );
+	//CHECK( test2 );
+	//CHECK( test3 );
 	
-	unsigned char* p1ptr;
-	p1ptr = thePageDevice.GetData( 1, true )->Data;
+	//unsigned char* p1ptr;
+	//p1ptr = SPD.GetData( 1, true )->Data;
 
     fptr< page > p1 = "page.p1";
 
@@ -129,23 +121,17 @@ void main( void )
         for( int i = 0; i < 1024; i++ )
             p2->ptr[i] = 0;
     }
-
-
  
     for( int i = 0; i < 1024; i++ )
         p1->ptr[i] ++;
 
-	cout << sizeof(bool) << endl;
+    fptr< double >  a("main.a");
+ 
+    if( a == NULL )
+    {
+        a.New("main.a");
+        *a = 0.0;
+    }
+    *a += 1.0;
+    cout << *a << endl;
 }
-*/
-
-//     fptr< double >  a("main.a");
-// 
-//     if( a == NULL )
-//     {
-//         a.New("main.a");
-//         *a = 0.0;
-//     }
-//     *a += 1.0;
-//     cout << *a << endl;
-//}
