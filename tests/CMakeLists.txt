@@ -12,6 +12,9 @@ set(TEST_SOURCES
     test_serialization.cpp
     test_hash.cpp
     test_object_store.cpp
+    test_commit.cpp
+    test_refs.cpp
+    test_repository.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})

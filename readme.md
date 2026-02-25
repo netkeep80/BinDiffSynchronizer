@@ -13,9 +13,11 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 
 Проект является фундаментом для разработки системы **jgit** — темпоральной базы данных для JSON-документов, аналогичной Git по модели версионирования, но специализированной для иерархических JSON-структур.
 
-### Текущее состояние: Фаза 1 завершена ✓
+### Текущее состояние: Фаза 1 завершена ✓, Фаза 2 в процессе
 
 Фаза 1 реализует минимальный жизнеспособный фундамент — компилируемую, кросс-платформенную, покрытую тестами кодовую базу с рабочим объектным хранилищем JSON-данных в бинарном формате.
+
+Фаза 2 добавляет систему версионирования — коммиты, ветки, теги и историю изменений.
 
 **Что реализовано в Фазе 1:**
 
@@ -28,6 +30,18 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | Unit-тесты (29 тестов, все проходят) | ✓ Готово |
 | CI с GitHub Actions (Linux GCC/Clang, Windows MSVC) | ✓ Готово |
 
+**Что реализовано в Фазе 2:**
+
+| Задача | Статус |
+|--------|--------|
+| Система коммитов (`jgit/commit.h`) | ✓ Готово |
+| Управление ветками и тегами (`jgit/refs.h`) | ✓ Готово |
+| Высокоуровневый API репозитория (`jgit/repository.h`) | ✓ Готово |
+| Unit-тесты (61 тест, все проходят) | ✓ Готово |
+| Интеграция JSON Patch (RFC 6902) | В планах |
+| Поддержка `$ref`-ссылок | В планах |
+| CLI-интерфейс jgit | В планах |
+
 ### Основные возможности
 
 - **Бинарная синхронизация** — отслеживание изменений объектов путём сравнения снимков памяти
@@ -36,7 +50,45 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 - **Система протоколов** — макросы для декларативного описания межобъектного взаимодействия
 - **Объектное хранилище jgit** — content-addressed хранение JSON в бинарном формате CBOR
 
-### Быстрый старт: ObjectStore (jgit)
+### Быстрый старт: Repository (jgit)
+
+```cpp
+#include "jgit/repository.h"
+#include <nlohmann/json.hpp>
+
+// Создать новый jgit репозиторий
+auto repo = jgit::Repository::init("./my_repo");
+
+// Сохранить первую версию JSON-документа
+nlohmann::json v1 = {{"name", "Alice"}, {"age", 30}};
+jgit::ObjectId cid1 = repo.commit(v1, "Initial commit", "alice");
+
+// Сохранить обновлённую версию
+nlohmann::json v2 = {{"name", "Alice"}, {"age", 31}};
+jgit::ObjectId cid2 = repo.commit(v2, "Happy birthday!", "alice");
+
+// Просмотреть историю
+auto history = repo.log();
+// history[0] → (cid2, Commit{message="Happy birthday!", parent=cid1, ...})
+// history[1] → (cid1, Commit{message="Initial commit", parent=nullopt, ...})
+
+// Восстановить данные из произвольного коммита
+auto old_data = repo.get_data(cid1);
+// old_data.value() == v1
+
+// Вернуться к старой версии
+repo.checkout(cid1);
+
+// Работа с ветками
+repo.create_branch("feature", cid2);
+repo.switch_branch("feature");
+repo.commit({{"name", "Alice"}, {"age", 31}, {"role", "admin"}}, "Add role", "alice");
+
+// Теги
+repo.create_tag("v1.0.0", cid1);
+```
+
+### Быстрый старт: ObjectStore (низкоуровневый API)
 
 ```cpp
 #include "jgit/object_store.h"
@@ -100,6 +152,9 @@ submodules              $ref-ссылки между репозиториями
 | `jgit/hash.h` | SHA-256 контентная адресация (`ObjectId`, `hash_object`) |
 | `jgit/serialization.h` | JSON ↔ CBOR сериализация (`to_bytes`, `from_bytes`) |
 | `jgit/object_store.h` | Объектное хранилище с контентной адресацией (`ObjectStore`) |
+| `jgit/commit.h` | Объект коммита с сериализацией (`Commit`) |
+| `jgit/refs.h` | Управление ссылками: HEAD, ветки, теги (`Refs`) |
+| `jgit/repository.h` | Высокоуровневый API репозитория (`Repository`) |
 | `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON для Modern C++ |
 | `third_party/sha256.hpp` | SHA-256 (public domain, single header) |
 
@@ -122,6 +177,7 @@ ctest --test-dir build --output-on-failure
 - [Анализ проекта](analysis.md) — подробный анализ сильных и слабых сторон, оценка концепции jgit и интеграции с nlohmann/json
 - [План развития](plan.md) — перспективные направления и задачи, детальный план реализации jgit
 - [План Фазы 1](phase1-plan.md) — детальный план реализации Phase 1 (выполнен)
+- [План Фазы 2](phase2-plan.md) — детальный план реализации Phase 2 (Task 1 выполнен)
 
 ---
 
@@ -134,9 +190,11 @@ BinDiffSynchronizer is a C++ library for binary differential object synchronizat
 
 The project serves as the foundation for developing **jgit** — a temporal database for JSON documents, similar to Git in its versioning model, but specialized for hierarchical JSON structures.
 
-### Current Status: Phase 1 Complete ✓
+### Current Status: Phase 1 Complete ✓, Phase 2 In Progress
 
 Phase 1 establishes the minimum viable foundation — a compilable, cross-platform, tested codebase with a working content-addressed object store for JSON data in binary format.
+
+Phase 2 adds the temporal versioning layer — commits, branches, tags, checkout, and history log.
 
 **What was implemented in Phase 1:**
 
@@ -149,6 +207,18 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | Unit tests (29 tests, all passing) | ✓ Done |
 | CI with GitHub Actions (Linux GCC/Clang, Windows MSVC) | ✓ Done |
 
+**What was implemented in Phase 2:**
+
+| Task | Status |
+|------|--------|
+| Commit system (`jgit/commit.h`) | ✓ Done |
+| Branch and tag management (`jgit/refs.h`) | ✓ Done |
+| High-level repository API (`jgit/repository.h`) | ✓ Done |
+| Unit tests (61 tests, all passing) | ✓ Done |
+| JSON Patch integration (RFC 6902) | Planned |
+| `$ref` link support | Planned |
+| CLI interface for jgit | Planned |
+
 ### Key Features
 
 - **Binary synchronization** — tracking object changes by comparing memory snapshots
@@ -157,7 +227,45 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 - **Protocol system** — macros for declarative description of inter-object interaction
 - **jgit object store** — content-addressed JSON storage in binary CBOR format
 
-### Quick Start: ObjectStore (jgit)
+### Quick Start: Repository (jgit)
+
+```cpp
+#include "jgit/repository.h"
+#include <nlohmann/json.hpp>
+
+// Initialize a new jgit repository
+auto repo = jgit::Repository::init("./my_repo");
+
+// Commit the first version of a JSON document
+nlohmann::json v1 = {{"name", "Alice"}, {"age", 30}};
+jgit::ObjectId cid1 = repo.commit(v1, "Initial commit", "alice");
+
+// Commit an updated version
+nlohmann::json v2 = {{"name", "Alice"}, {"age", 31}};
+jgit::ObjectId cid2 = repo.commit(v2, "Happy birthday!", "alice");
+
+// Browse history (newest first)
+auto history = repo.log();
+// history[0] → (cid2, Commit{message="Happy birthday!", parent=cid1, ...})
+// history[1] → (cid1, Commit{message="Initial commit", parent=nullopt, ...})
+
+// Retrieve data at any historical commit
+auto old_data = repo.get_data(cid1);
+// old_data.value() == v1
+
+// Restore an older version (detaches HEAD)
+repo.checkout(cid1);
+
+// Branch management
+repo.create_branch("feature", cid2);
+repo.switch_branch("feature");
+repo.commit({{"name", "Alice"}, {"age", 31}, {"role", "admin"}}, "Add role", "alice");
+
+// Tags
+repo.create_tag("v1.0.0", cid1);
+```
+
+### Quick Start: ObjectStore (low-level API)
 
 ```cpp
 #include "jgit/object_store.h"
@@ -221,6 +329,9 @@ Creation and deletion of persistent objects is no different from regular objects
 | `jgit/hash.h` | SHA-256 content addressing (`ObjectId`, `hash_object`) |
 | `jgit/serialization.h` | JSON ↔ CBOR serialization (`to_bytes`, `from_bytes`) |
 | `jgit/object_store.h` | Content-addressed object store (`ObjectStore`) |
+| `jgit/commit.h` | Commit object with JSON serialization (`Commit`) |
+| `jgit/refs.h` | HEAD, branch, and tag reference management (`Refs`) |
+| `jgit/repository.h` | High-level repository API (`Repository`) |
 | `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON for Modern C++ |
 | `third_party/sha256.hpp` | SHA-256 (public domain, single header) |
 
@@ -243,6 +354,7 @@ ctest --test-dir build --output-on-failure
 - [Project Analysis](analysis.md) — detailed analysis of strengths and weaknesses, evaluation of the jgit concept and nlohmann/json integration
 - [Development Plan](plan.md) — promising directions and tasks, detailed jgit implementation plan
 - [Phase 1 Plan](phase1-plan.md) — detailed Phase 1 implementation plan (completed)
+- [Phase 2 Plan](phase2-plan.md) — detailed Phase 2 implementation plan (Task 1 completed)
 
 ---
 
