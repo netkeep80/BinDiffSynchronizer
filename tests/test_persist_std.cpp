@@ -50,7 +50,7 @@ bool data_is_self_contained(const T& obj, const void* data_ptr)
 // ---------------------------------------------------------------------------
 // 2.1.1 — persist<bool>: POD type, no heap allocation
 // ---------------------------------------------------------------------------
-TEST_CASE("Task 2.1.1: persist<bool> works — POD type, no heap allocation",
+TEST_CASE("Task 2.1.1: persist<bool> works - POD type, no heap allocation",
           "[task2.1][persist][pod]")
 {
     // A bool is 1 byte of raw data — persist<bool> stores exactly that.
@@ -82,7 +82,7 @@ TEST_CASE("Task 2.1.1: persist<bool> works — POD type, no heap allocation",
 // ---------------------------------------------------------------------------
 // 2.1.2 — persist<int64_t>: POD type, no heap allocation
 // ---------------------------------------------------------------------------
-TEST_CASE("Task 2.1.2: persist<int64_t> works — POD type, no heap allocation",
+TEST_CASE("Task 2.1.2: persist<int64_t> works - POD type, no heap allocation",
           "[task2.1][persist][pod]")
 {
     REQUIRE(sizeof(int64_t) == 8u);
@@ -98,7 +98,7 @@ TEST_CASE("Task 2.1.2: persist<int64_t> works — POD type, no heap allocation",
 // ---------------------------------------------------------------------------
 // 2.1.3 — persist<double>: POD type, no heap allocation
 // ---------------------------------------------------------------------------
-TEST_CASE("Task 2.1.3: persist<double> works — POD type, no heap allocation",
+TEST_CASE("Task 2.1.3: persist<double> works - POD type, no heap allocation",
           "[task2.1][persist][pod]")
 {
     REQUIRE(sizeof(double) == 8u);
