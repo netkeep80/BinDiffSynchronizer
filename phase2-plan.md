@@ -1,6 +1,6 @@
 # Phase 2 Plan: Persistent nlohmann::json Object Tree
 
-**Status:** Planned
+**Status:** In Progress (Task 2.1 Complete)
 
 ## Goal
 
@@ -31,7 +31,7 @@ The key challenge: these C++ standard library types use heap-allocated memory wi
 
 ## Phase 2 Tasks
 
-### Task 2.1 — Feasibility Study: Wrapping std Classes with `persist<T>`
+### Task 2.1 — Feasibility Study: Wrapping std Classes with `persist<T>` ✓ DONE
 
 **Objective:** Verify whether `persist<T>` can wrap the std classes used by nlohmann/json.
 
@@ -39,17 +39,22 @@ The key challenge: these C++ standard library types use heap-allocated memory wi
 - Their size is fixed (e.g., `sizeof(std::string) == 32` on most platforms), but they **own heap memory** not captured by raw byte copy.
 - Saving raw bytes saves dangling pointers, not the pointed-to data.
 
-**Experiments to run:**
-1. `persist<bool>` — trivially works (no heap allocation).
-2. `persist<int64_t>` — trivially works.
-3. `persist<double>` — trivially works.
-4. `persist<std::string>` — test: does save/load round-trip work? Expected: **fails** for non-empty strings (heap data not saved).
-5. `persist<std::vector<int>>` — Expected: **fails** (heap data not saved).
-6. `persist<std::map<std::string, int>>` — Expected: **fails** (complex heap structure).
+**Results:**
 
-**Deliverable:** Experiment script in `experiments/test_persist_std.cpp` documenting which types work and which fail.
+| Type | Works? | Reason |
+|------|--------|--------|
+| `persist<bool>` | ✓ YES | POD — raw bytes == value, no heap allocation |
+| `persist<int64_t>` | ✓ YES | POD — raw bytes == value, no heap allocation |
+| `persist<double>` | ✓ YES | POD — raw bytes == value, no heap allocation |
+| `persist<std::string>` | ✗ NO | `std::string` is not trivially copyable; long strings have data on the heap |
+| `persist<std::vector<int>>` | ✗ NO | Elements always on heap; `std::vector` is not trivially copyable |
+| `persist<std::map<std::string,int>>` | ✗ NO | Red-black tree nodes always on heap; not trivially copyable |
 
-**Conclusion (expected):** `persist<T>` cannot directly wrap `std::string`, `std::vector`, or `std::map`. Custom persistent analogs are needed.
+**Deliverables committed:**
+- `experiments/test_persist_std.cpp` — standalone executable documenting the feasibility study
+- `tests/test_persist_std.cpp` — 7 Catch2 tests integrated into the CI test suite (all passing)
+
+**Conclusion:** `persist<T>` cannot directly wrap `std::string`, `std::vector`, or `std::map`. Custom persistent analogs are required (Task 2.2).
 
 ---
 
@@ -249,7 +254,7 @@ Each task should be committed as a separate commit so progress is preserved incr
 
 ## Success Criteria
 
-- [ ] Phase 2.1: Feasibility experiment script committed and results documented.
+- [x] Phase 2.1: Feasibility experiment script committed and results documented.
 - [ ] Phase 2.2–2.4: All three persistent analogs and `persistent_json_value` implemented.
 - [ ] Phase 2.4: `PersistentJsonStore` can import any `nlohmann::json` and export it back identically.
 - [ ] Phase 2.5: `PersistentJsonStore` snapshots integrate with Phase 1 `ObjectStore`.
