@@ -37,9 +37,12 @@ TEST_CASE("ObjectStore: init creates HEAD with correct content", "[object_store]
     auto tmp = make_temp_dir("head");
     jgit::ObjectStore::init(tmp);
 
-    std::ifstream head(tmp / ".jgit" / "HEAD");
-    std::string content((std::istreambuf_iterator<char>(head)),
-                         std::istreambuf_iterator<char>());
+    std::string content;
+    {
+        std::ifstream head(tmp / ".jgit" / "HEAD");
+        content.assign((std::istreambuf_iterator<char>(head)),
+                        std::istreambuf_iterator<char>());
+    }  // head closed here — required on Windows before remove_all
     REQUIRE(content == "ref: refs/heads/main\n");
 
     fs::remove_all(tmp);
