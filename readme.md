@@ -33,11 +33,11 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | Задача | Статус |
 |--------|--------|
 | 2.1: Исследование осуществимости: `persist<T>` для std-классов | ✓ Готово |
-| 2.2: Проектирование персистентных аналогов std-типов | ○ В планах |
+| 2.2: Проектирование персистентных аналогов std-типов | ✓ Готово |
 | 2.3: Проектирование `jgit::persistent_json_value` | ○ В планах |
 | 2.4: Реализация `jgit::PersistentJsonStore` | ○ В планах |
 | 2.5: Интеграция с ObjectStore (Фаза 1) | ○ В планах |
-| 2.6: Unit-тесты (36 тестов, все проходят) | ✓ Готово (2.1) |
+| 2.6: Unit-тесты (65 тестов, все проходят) | ✓ Готово (2.1–2.2) |
 | 2.7: Сравнительный анализ производительности | ○ В планах |
 
 ### Основные возможности
@@ -112,6 +112,9 @@ submodules              $ref-ссылки между репозиториями
 | `jgit/hash.h` | SHA-256 контентная адресация (`ObjectId`, `hash_object`) |
 | `jgit/serialization.h` | JSON ↔ CBOR сериализация (`to_bytes`, `from_bytes`) |
 | `jgit/object_store.h` | Объектное хранилище с контентной адресацией (`ObjectStore`) |
+| `jgit/persistent_string.h` | Персистентная строка (`persistent_string`) — SSO + фиксированный буфер, совместима с `persist<T>` |
+| `jgit/persistent_array.h` | Персистентный массив (`persistent_array<T>`) — фиксированный слэб с поддержкой цепочки слэбов |
+| `jgit/persistent_map.h` | Персистентная карта (`persistent_map<V>`) — отсортированный массив пар ключ-значение |
 | `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON для Modern C++ |
 | `third_party/sha256.hpp` | SHA-256 (public domain, single header) |
 
@@ -167,11 +170,11 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | Task | Status |
 |------|--------|
 | 2.1: Feasibility study: `persist<T>` for std classes | ✓ Done |
-| 2.2: Design persistent analogs of std types | ○ Planned |
+| 2.2: Design persistent analogs of std types | ✓ Done |
 | 2.3: Design `jgit::persistent_json_value` | ○ Planned |
 | 2.4: Implement `jgit::PersistentJsonStore` | ○ Planned |
 | 2.5: Integration with ObjectStore (Phase 1) | ○ Planned |
-| 2.6: Unit tests (36 tests, all passing) | ✓ Done (2.1) |
+| 2.6: Unit tests (65 tests, all passing) | ✓ Done (2.1–2.2) |
 | 2.7: Performance benchmark | ○ Planned |
 
 ### Key Features
@@ -246,6 +249,9 @@ Creation and deletion of persistent objects is no different from regular objects
 | `jgit/hash.h` | SHA-256 content addressing (`ObjectId`, `hash_object`) |
 | `jgit/serialization.h` | JSON ↔ CBOR serialization (`to_bytes`, `from_bytes`) |
 | `jgit/object_store.h` | Content-addressed object store (`ObjectStore`) |
+| `jgit/persistent_string.h` | Persistent string (`persistent_string`) — SSO + fixed buffer, compatible with `persist<T>` |
+| `jgit/persistent_array.h` | Persistent array (`persistent_array<T>`) — fixed-capacity slab with multi-slab chaining |
+| `jgit/persistent_map.h` | Persistent map (`persistent_map<V>`) — sorted array of key-value pairs |
 | `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON for Modern C++ |
 | `third_party/sha256.hpp` | SHA-256 (public domain, single header) |
 
