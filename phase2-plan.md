@@ -1,6 +1,6 @@
 # Phase 2 Plan: Persistent nlohmann::json Object Tree
 
-**Status:** In Progress (Tasks 2.1 and 2.2 Complete)
+**Status:** In Progress (Tasks 2.1, 2.2, 2.3 and 2.4 Complete)
 
 ## Goal
 
@@ -120,7 +120,7 @@ All 65 tests pass (29 from Phase 1 + 36 new Task 2.2 tests) on Linux GCC.
 
 ---
 
-### Task 2.3 — Design `jgit::persistent_json_value` (Core Node)
+### Task 2.3 — Design `jgit::persistent_json_value` (Core Node) ✓ DONE
 
 **Objective:** Design the core persistent node type that replaces `nlohmann::json::json_value`.
 
@@ -148,27 +148,26 @@ Key property: **`sizeof(persistent_json_value)` is fixed** — no hidden heap po
 
 ---
 
-### Task 2.4 — Implement `jgit::PersistentJsonStore`
+### Task 2.4 — Implement `jgit::PersistentJsonStore` ✓ DONE
 
 **Objective:** Implement a persistent JSON document store that:
 1. Stores a JSON document as a tree of `persistent_json_value` nodes.
 2. Loads the entire tree from disk into memory on startup with zero parsing overhead.
-3. Uses `AddressManager<T>` to manage node lifetimes.
+3. Uses flat pools of fixed-size structs to manage node lifetimes.
 4. Provides a read/write API compatible with nlohmann::json's interface.
 
-Key files to create:
-- `jgit/persistent_string.h` — Task 2.2.1 implementation
-- `jgit/persistent_array.h` — Task 2.2.2 implementation
-- `jgit/persistent_map.h` — Task 2.2.3 implementation
-- `jgit/persistent_json_value.h` — Task 2.3 implementation
-- `jgit/persistent_json_store.h` — the unified store class
+**Deliverables committed:**
+- `jgit/persistent_json_value.h` — Task 2.3 implementation: fixed-size node with `json_type` discriminator, trivially copyable, compatible with `persist<T>`
+- `jgit/persistent_json_store.h` — the unified store class with three flat pools (value_pool, array_pool, object_pool); multi-slab chaining for arrays/objects with > 16 entries
+- `tests/test_persistent_json_value.cpp` — 14 Catch2 tests (all 7 JSON types, layout, raw-byte round-trip)
+- `tests/test_persistent_json_store.cpp` — 20 Catch2 tests (import/export round-trip, get/set, navigation helpers, multi-slab, pool counters)
 
+**Implemented API:**
 ```cpp
 namespace jgit {
     class PersistentJsonStore {
     public:
-        static PersistentJsonStore init(const std::filesystem::path& path);
-        explicit PersistentJsonStore(const std::filesystem::path& path);
+        PersistentJsonStore();                         // in-memory store, ready to use
 
         // Import from nlohmann::json (one-time conversion)
         uint32_t import_json(const nlohmann::json& doc);
@@ -183,9 +182,16 @@ namespace jgit {
         // Navigation
         uint32_t get_field(uint32_t obj_id, const char* key) const;
         uint32_t get_index(uint32_t arr_id, size_t index) const;
+
+        // Pool counters (for testing / debugging)
+        size_t node_count()   const noexcept;
+        size_t array_count()  const noexcept;
+        size_t object_count() const noexcept;
     };
 }
 ```
+
+All 99 tests pass (65 from Tasks 2.1–2.2 + 34 new from Tasks 2.3–2.4) on Linux GCC.
 
 ---
 
@@ -266,8 +272,8 @@ Each task should be committed as a separate commit so progress is preserved incr
 
 - [x] Phase 2.1: Feasibility experiment script committed and results documented.
 - [x] Phase 2.2: All three persistent analogs implemented (`persistent_string`, `persistent_array`, `persistent_map`) with 36 unit tests passing.
-- [ ] Phase 2.3–2.4: `persistent_json_value` and `PersistentJsonStore` implemented.
-- [ ] Phase 2.4: `PersistentJsonStore` can import any `nlohmann::json` and export it back identically.
+- [x] Phase 2.3–2.4: `persistent_json_value` and `PersistentJsonStore` implemented.
+- [x] Phase 2.4: `PersistentJsonStore` can import any `nlohmann::json` and export it back identically.
 - [ ] Phase 2.5: `PersistentJsonStore` snapshots integrate with Phase 1 `ObjectStore`.
 - [ ] Phase 2.6: All unit tests pass (CI green on Linux GCC, Linux Clang, Windows MSVC).
 - [ ] Phase 2.7: Benchmark shows measurable reload speedup for a 1 MB JSON document.
