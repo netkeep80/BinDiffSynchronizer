@@ -131,7 +131,9 @@ public:
 		// Zero-initialise the storage then load from file.
 		// Since _T is trivially copyable, zero-init is a valid default state.
 		std::memset( _data, 0, sizeof(_T) );
-		ifstream( _fname ).read( (char*)(&_data[0]), sizeof(_T) );
+		// Open in binary mode to preserve raw bytes on all platforms (including
+		// Windows, where text-mode I/O translates 0x0A ↔ 0x0D 0x0A).
+		ifstream( _fname, ios::binary ).read( (char*)(&_data[0]), sizeof(_T) );
     }
 
     // Value constructor: initialise from ref, no file I/O on construction.
@@ -151,7 +153,9 @@ public:
         std::strncpy( _fname, filename, faddress_size - 1 );
         _fname[faddress_size - 1] = '\0';
         std::memset( _data, 0, sizeof(_T) );
-        ifstream( _fname ).read( (char*)(&_data[0]), sizeof(_T) );
+        // Open in binary mode to preserve raw bytes on all platforms (including
+        // Windows, where text-mode I/O translates 0x0A ↔ 0x0D 0x0A).
+        ifstream( _fname, ios::binary ).read( (char*)(&_data[0]), sizeof(_T) );
     }
 
     // Named constructor (std::string): convenience overload.
@@ -159,7 +163,9 @@ public:
 
     ~persist()
     {
-		ofstream( _fname ).write( (char*)(&_data[0]), sizeof(_T) );
+		// Open in binary mode to preserve raw bytes on all platforms (including
+		// Windows, where text-mode I/O translates 0x0A ↔ 0x0D 0x0A).
+		ofstream( _fname, ios::binary ).write( (char*)(&_data[0]), sizeof(_T) );
 		// Since _T is required to be trivially copyable (enforced by
 		// static_assert above), its destructor is trivial — no explicit
 		// destructor call is needed. The compiler will handle cleanup of
