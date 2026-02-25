@@ -1,6 +1,7 @@
 main.exe
 *.extend
 *.persist
+ci-logs/
 err.json
 .vscode/
 .DS_Store

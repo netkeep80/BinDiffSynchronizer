@@ -12,6 +12,7 @@ set(TEST_SOURCES
     test_serialization.cpp
     test_hash.cpp
     test_object_store.cpp
+    test_persist_std.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})

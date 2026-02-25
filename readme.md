@@ -13,7 +13,7 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 
 Проект является фундаментом для разработки системы **jgit** — темпоральной базы данных для JSON-документов, аналогичной Git по модели версионирования, но специализированной для иерархических JSON-структур.
 
-### Текущее состояние: Фаза 1 завершена ✓
+### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 начата
 
 Фаза 1 реализует минимальный жизнеспособный фундамент — компилируемую, кросс-платформенную, покрытую тестами кодовую базу с рабочим объектным хранилищем JSON-данных в бинарном формате.
 
@@ -27,6 +27,18 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | Объектное хранилище с контентной адресацией | ✓ Готово |
 | Unit-тесты (29 тестов, все проходят) | ✓ Готово |
 | CI с GitHub Actions (Linux GCC/Clang, Windows MSVC) | ✓ Готово |
+
+**Прогресс Фазы 2 — Персистентное дерево объектов JSON:**
+
+| Задача | Статус |
+|--------|--------|
+| 2.1: Исследование осуществимости: `persist<T>` для std-классов | ✓ Готово |
+| 2.2: Проектирование персистентных аналогов std-типов | ○ В планах |
+| 2.3: Проектирование `jgit::persistent_json_value` | ○ В планах |
+| 2.4: Реализация `jgit::PersistentJsonStore` | ○ В планах |
+| 2.5: Интеграция с ObjectStore (Фаза 1) | ○ В планах |
+| 2.6: Unit-тесты (36 тестов, все проходят) | ✓ Готово (2.1) |
+| 2.7: Сравнительный анализ производительности | ○ В планах |
 
 ### Основные возможности
 
@@ -135,7 +147,7 @@ BinDiffSynchronizer is a C++ library for binary differential object synchronizat
 
 The project serves as the foundation for developing **jgit** — a temporal database for JSON documents, similar to Git in its versioning model, but specialized for hierarchical JSON structures.
 
-### Current Status: Phase 1 Complete ✓
+### Current Status: Phase 1 Complete ✓ · Phase 2 In Progress
 
 Phase 1 establishes the minimum viable foundation — a compilable, cross-platform, tested codebase with a working content-addressed object store for JSON data in binary format.
 
@@ -149,6 +161,18 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | Content-addressed object store | ✓ Done |
 | Unit tests (29 tests, all passing) | ✓ Done |
 | CI with GitHub Actions (Linux GCC/Clang, Windows MSVC) | ✓ Done |
+
+**Phase 2 Progress — Persistent JSON Object Tree:**
+
+| Task | Status |
+|------|--------|
+| 2.1: Feasibility study: `persist<T>` for std classes | ✓ Done |
+| 2.2: Design persistent analogs of std types | ○ Planned |
+| 2.3: Design `jgit::persistent_json_value` | ○ Planned |
+| 2.4: Implement `jgit::PersistentJsonStore` | ○ Planned |
+| 2.5: Integration with ObjectStore (Phase 1) | ○ Planned |
+| 2.6: Unit tests (36 tests, all passing) | ✓ Done (2.1) |
+| 2.7: Performance benchmark | ○ Planned |
 
 ### Key Features
 
