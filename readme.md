@@ -13,7 +13,7 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 
 Проект является фундаментом для разработки системы **jgit** — темпоральной базы данных для JSON-документов, аналогичной Git по модели версионирования, но специализированной для иерархических JSON-структур.
 
-### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 в процессе (задачи 2.1–2.4 выполнены)
+### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 в процессе (задачи 2.1–2.5 выполнены)
 
 Фаза 1 реализует минимальный жизнеспособный фундамент — компилируемую, кросс-платформенную, покрытую тестами кодовую базу с рабочим объектным хранилищем JSON-данных в бинарном формате.
 
@@ -36,8 +36,8 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | 2.2: Проектирование персистентных аналогов std-типов | ✓ Готово |
 | 2.3: Проектирование `jgit::persistent_json_value` | ✓ Готово |
 | 2.4: Реализация `jgit::PersistentJsonStore` | ✓ Готово |
-| 2.5: Интеграция с ObjectStore (Фаза 1) | ○ В планах |
-| 2.6: Unit-тесты (99 тестов, все проходят) | ✓ Готово (2.1–2.4) |
+| 2.5: Интеграция с ObjectStore (Фаза 1) | ✓ Готово |
+| 2.6: Unit-тесты (109 тестов, все проходят) | ✓ Готово (2.1–2.5) |
 | 2.7: Сравнительный анализ производительности | ○ В планах |
 
 ### Основные возможности
@@ -67,6 +67,32 @@ auto retrieved = store.get(id);
 
 // Проверить существование
 bool exists = store.exists(id);  // true
+```
+
+### Быстрый старт: PersistentJsonStore + интеграция с ObjectStore (jgit)
+
+```cpp
+#include "jgit/persistent_json_store.h"
+#include "jgit/object_store.h"
+
+// Открыть (или создать) ObjectStore для хранения снимков
+auto obj_store = jgit::ObjectStore::init("./my_repo");
+
+// Рабочее дерево: импортировать JSON в PersistentJsonStore
+jgit::PersistentJsonStore pjs;
+nlohmann::json doc = {{"version", 1}, {"data", {1, 2, 3}}};
+uint32_t root_id = pjs.import_json(doc);
+
+// Редактировать узел напрямую (без парсинга JSON)
+pjs.set_node(root_id, jgit::persistent_json_value::make_int(42));
+
+// Создать снимок: рабочее дерево → CBOR → ObjectStore (аналог "git commit")
+jgit::ObjectId snapshot_id = pjs.snapshot(root_id, obj_store);
+
+// Восстановить из снимка в новом экземпляре (аналог "git checkout")
+jgit::PersistentJsonStore pjs2;
+uint32_t restored_id = pjs2.restore(snapshot_id, obj_store);
+nlohmann::json restored = pjs2.export_json(restored_id);
 ```
 
 ### Концепция jgit
@@ -116,7 +142,7 @@ submodules              $ref-ссылки между репозиториями
 | `jgit/persistent_array.h` | Персистентный массив (`persistent_array<T>`) — фиксированный слэб с поддержкой цепочки слэбов |
 | `jgit/persistent_map.h` | Персистентная карта (`persistent_map<V>`) — отсортированный массив пар ключ-значение |
 | `jgit/persistent_json_value.h` | Персистентный узел JSON (`persistent_json_value`) — дискриминированный union всех 7 типов JSON, совместим с `persist<T>` |
-| `jgit/persistent_json_store.h` | Хранилище JSON-дерева (`PersistentJsonStore`) — три плоских пула фиксированного размера, импорт/экспорт `nlohmann::json` |
+| `jgit/persistent_json_store.h` | Хранилище JSON-дерева (`PersistentJsonStore`) — три плоских пула фиксированного размера, импорт/экспорт `nlohmann::json`; интеграция с `ObjectStore` через `snapshot()`/`restore()` |
 | `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON для Modern C++ |
 | `third_party/sha256.hpp` | SHA-256 (public domain, single header) |
 
@@ -152,7 +178,7 @@ BinDiffSynchronizer is a C++ library for binary differential object synchronizat
 
 The project serves as the foundation for developing **jgit** — a temporal database for JSON documents, similar to Git in its versioning model, but specialized for hierarchical JSON structures.
 
-### Current Status: Phase 1 Complete ✓ · Phase 2 In Progress (Tasks 2.1–2.4 Complete)
+### Current Status: Phase 1 Complete ✓ · Phase 2 In Progress (Tasks 2.1–2.5 Complete)
 
 Phase 1 establishes the minimum viable foundation — a compilable, cross-platform, tested codebase with a working content-addressed object store for JSON data in binary format.
 
@@ -175,8 +201,8 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | 2.2: Design persistent analogs of std types | ✓ Done |
 | 2.3: Design `jgit::persistent_json_value` | ✓ Done |
 | 2.4: Implement `jgit::PersistentJsonStore` | ✓ Done |
-| 2.5: Integration with ObjectStore (Phase 1) | ○ Planned |
-| 2.6: Unit tests (99 tests, all passing) | ✓ Done (2.1–2.4) |
+| 2.5: Integration with ObjectStore (Phase 1) | ✓ Done |
+| 2.6: Unit tests (109 tests, all passing) | ✓ Done (2.1–2.5) |
 | 2.7: Performance benchmark | ○ Planned |
 
 ### Key Features
@@ -206,6 +232,32 @@ auto retrieved = store.get(id);
 
 // Check existence
 bool exists = store.exists(id);  // true
+```
+
+### Quick Start: PersistentJsonStore + ObjectStore integration (jgit)
+
+```cpp
+#include "jgit/persistent_json_store.h"
+#include "jgit/object_store.h"
+
+// Open (or create) an ObjectStore for immutable snapshots
+auto obj_store = jgit::ObjectStore::init("./my_repo");
+
+// Working tree: import JSON into PersistentJsonStore
+jgit::PersistentJsonStore pjs;
+nlohmann::json doc = {{"version", 1}, {"data", {1, 2, 3}}};
+uint32_t root_id = pjs.import_json(doc);
+
+// Edit a node directly (zero-parse access)
+pjs.set_node(root_id, jgit::persistent_json_value::make_int(42));
+
+// Snapshot: working tree → CBOR → ObjectStore (analogous to "git commit")
+jgit::ObjectId snapshot_id = pjs.snapshot(root_id, obj_store);
+
+// Restore from snapshot in a new instance (analogous to "git checkout")
+jgit::PersistentJsonStore pjs2;
+uint32_t restored_id = pjs2.restore(snapshot_id, obj_store);
+nlohmann::json restored = pjs2.export_json(restored_id);
 ```
 
 ### The jgit Concept
@@ -255,7 +307,7 @@ Creation and deletion of persistent objects is no different from regular objects
 | `jgit/persistent_array.h` | Persistent array (`persistent_array<T>`) — fixed-capacity slab with multi-slab chaining |
 | `jgit/persistent_map.h` | Persistent map (`persistent_map<V>`) — sorted array of key-value pairs |
 | `jgit/persistent_json_value.h` | Persistent JSON node (`persistent_json_value`) — discriminated union of all 7 JSON types, compatible with `persist<T>` |
-| `jgit/persistent_json_store.h` | Persistent JSON tree store (`PersistentJsonStore`) — three flat fixed-size pools, import/export `nlohmann::json` |
+| `jgit/persistent_json_store.h` | Persistent JSON tree store (`PersistentJsonStore`) — three flat fixed-size pools, import/export `nlohmann::json`; integration with `ObjectStore` via `snapshot()`/`restore()` |
 | `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON for Modern C++ |
 | `third_party/sha256.hpp` | SHA-256 (public domain, single header) |
 

@@ -1,6 +1,6 @@
 # Phase 2 Plan: Persistent nlohmann::json Object Tree
 
-**Status:** In Progress (Tasks 2.1, 2.2, 2.3 and 2.4 Complete)
+**Status:** In Progress (Tasks 2.1, 2.2, 2.3, 2.4 and 2.5 Complete)
 
 ## Goal
 
@@ -195,7 +195,7 @@ All 99 tests pass (65 from Tasks 2.1–2.2 + 34 new from Tasks 2.3–2.4) on Lin
 
 ---
 
-### Task 2.5 — Integration with Phase 1 ObjectStore
+### Task 2.5 — Integration with Phase 1 ObjectStore ✓ DONE
 
 The Phase 1 `ObjectStore` (CBOR + SHA-256) stores immutable, content-addressed blobs — ideal for **commit history** and **diffs** (git-like versioning). The Phase 2 `PersistentJsonStore` manages the **live working tree** of mutable JSON nodes.
 
@@ -210,6 +210,24 @@ Working Tree (PersistentJsonStore)  →  Stage (diff)  →  Object Store (immuta
 - On checkout/restore, the snapshot is loaded from `ObjectStore` and imported back into `PersistentJsonStore`.
 
 This mirrors Git's model: fast live edits in the working tree, with commit history stored immutably.
+
+**Implemented API (added to `jgit/persistent_json_store.h`):**
+
+```cpp
+// Snapshot: export subtree as nlohmann::json → CBOR → ObjectStore.
+// Returns the content-addressed ObjectId of the committed snapshot.
+ObjectId snapshot(uint32_t root_id, ObjectStore& store) const;
+
+// Restore: load snapshot by ObjectId from ObjectStore → import_json.
+// Returns the uint32_t node ID of the freshly-loaded root.
+uint32_t restore(const ObjectId& id, const ObjectStore& store);
+```
+
+**Deliverables committed:**
+- `jgit/persistent_json_store.h` — `snapshot()` and `restore()` methods added (includes `object_store.h`)
+- `tests/test_persistent_json_store_integration.cpp` — 10 Catch2 integration tests
+
+All 109 tests pass (99 from Tasks 2.1–2.4 + 10 new Task 2.5 integration tests) on Linux GCC.
 
 ---
 
@@ -274,7 +292,7 @@ Each task should be committed as a separate commit so progress is preserved incr
 - [x] Phase 2.2: All three persistent analogs implemented (`persistent_string`, `persistent_array`, `persistent_map`) with 36 unit tests passing.
 - [x] Phase 2.3–2.4: `persistent_json_value` and `PersistentJsonStore` implemented.
 - [x] Phase 2.4: `PersistentJsonStore` can import any `nlohmann::json` and export it back identically.
-- [ ] Phase 2.5: `PersistentJsonStore` snapshots integrate with Phase 1 `ObjectStore`.
+- [x] Phase 2.5: `PersistentJsonStore` snapshots integrate with Phase 1 `ObjectStore`.
 - [ ] Phase 2.6: All unit tests pass (CI green on Linux GCC, Linux Clang, Windows MSVC).
 - [ ] Phase 2.7: Benchmark shows measurable reload speedup for a 1 MB JSON document.
 

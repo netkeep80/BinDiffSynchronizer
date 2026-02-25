@@ -10,6 +10,7 @@
 #include "persistent_json_value.h"
 #include "persistent_array.h"
 #include "persistent_map.h"
+#include "object_store.h"
 
 // =============================================================================
 // Task 2.4 — jgit::PersistentJsonStore
@@ -34,7 +35,7 @@
 // zero-parse reload — the pools are already laid out as flat arrays of
 // fixed-size structs, so mmap is straightforward.
 //
-// API mirrors the plan in phase2-plan.md, Task 2.4.
+// API mirrors the plan in phase2-plan.md, Tasks 2.4 and 2.5.
 // =============================================================================
 
 namespace jgit {
@@ -151,6 +152,42 @@ public:
             slab_id  = slab.next_slab_id;
         }
         return 0;
+    }
+
+    // ---- Task 2.5: integration with Phase 1 ObjectStore ----
+
+    /**
+     * Snapshot: export the subtree rooted at root_id as nlohmann::json, then
+     * serialize it to CBOR and store it as an immutable blob in the given
+     * ObjectStore.  Returns the content-addressed ObjectId of the snapshot.
+     *
+     * This is analogous to "git commit": the live working tree is serialised
+     * into an immutable, content-addressed object in the commit history store.
+     *
+     * Throws std::out_of_range if root_id is invalid.
+     */
+    ObjectId snapshot(uint32_t root_id, ObjectStore& store) const {
+        nlohmann::json doc = export_json(root_id);
+        return store.put(doc);
+    }
+
+    /**
+     * Restore: load the blob identified by id from the ObjectStore, parse it
+     * back as nlohmann::json, and import it into this PersistentJsonStore.
+     * Returns the uint32_t node ID of the freshly-imported root in value_pool_.
+     *
+     * This is analogous to "git checkout": an immutable historical snapshot is
+     * deserialised and loaded into the live working tree for further editing.
+     *
+     * Throws std::runtime_error if id does not exist in the store.
+     */
+    uint32_t restore(const ObjectId& id, const ObjectStore& store) {
+        std::optional<nlohmann::json> doc = store.get(id);
+        if (!doc) {
+            throw std::runtime_error(
+                "PersistentJsonStore::restore: ObjectId not found in store: " + id.hex);
+        }
+        return import_json(*doc);
     }
 
     // ---- pool size queries (for testing / debugging) ----
