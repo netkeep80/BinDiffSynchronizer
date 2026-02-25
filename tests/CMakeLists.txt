@@ -13,6 +13,9 @@ set(TEST_SOURCES
     test_hash.cpp
     test_object_store.cpp
     test_persist_std.cpp
+    test_persistent_string.cpp
+    test_persistent_array.cpp
+    test_persistent_map.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})

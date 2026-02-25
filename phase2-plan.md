@@ -1,6 +1,6 @@
 # Phase 2 Plan: Persistent nlohmann::json Object Tree
 
-**Status:** In Progress (Task 2.1 Complete)
+**Status:** In Progress (Tasks 2.1 and 2.2 Complete)
 
 ## Goal
 
@@ -58,7 +58,7 @@ The key challenge: these C++ standard library types use heap-allocated memory wi
 
 ---
 
-### Task 2.2 — Design Persistent Analogs of std Types
+### Task 2.2 — Design Persistent Analogs of std Types ✓ DONE
 
 **Objective:** Design drop-in persistent replacements for the three core std types used by nlohmann/json.
 
@@ -107,6 +107,16 @@ Requirements:
 - Sorted key-value store where keys are `persistent_string` and values are `persistent_json_value`.
 - Backed by a B-tree or sorted array of fixed-size nodes in `AddressManager`.
 - Each node fits in a fixed-size block (no heap allocation).
+
+**Deliverables committed:**
+- `jgit/persistent_string.h` — SSO-based inline string (≤23 chars inline, longer in `long_buf[]`); trivially copyable; compatible with `persist<T>`
+- `jgit/persistent_array.h` — Fixed-capacity inline array with `next_slab_id` for multi-slab chaining
+- `jgit/persistent_map.h` — Sorted array of key-value pairs with binary search; keys are `persistent_string`
+- `tests/test_persistent_string.cpp` — 8 Catch2 tests (layout, SSO, long path, assignment, comparison, conversion, raw-byte round-trip)
+- `tests/test_persistent_array.cpp` — 10 Catch2 tests (layout, push/pop, access, erase, clear, iteration, chaining, raw-byte round-trip)
+- `tests/test_persistent_map.cpp` — 11 Catch2 tests (layout, insert, sorted order, update, find, erase, capacity, iteration, raw-byte round-trip)
+
+All 65 tests pass (29 from Phase 1 + 36 new Task 2.2 tests) on Linux GCC.
 
 ---
 
@@ -255,7 +265,8 @@ Each task should be committed as a separate commit so progress is preserved incr
 ## Success Criteria
 
 - [x] Phase 2.1: Feasibility experiment script committed and results documented.
-- [ ] Phase 2.2–2.4: All three persistent analogs and `persistent_json_value` implemented.
+- [x] Phase 2.2: All three persistent analogs implemented (`persistent_string`, `persistent_array`, `persistent_map`) with 36 unit tests passing.
+- [ ] Phase 2.3–2.4: `persistent_json_value` and `PersistentJsonStore` implemented.
 - [ ] Phase 2.4: `PersistentJsonStore` can import any `nlohmann::json` and export it back identically.
 - [ ] Phase 2.5: `PersistentJsonStore` snapshots integrate with Phase 1 `ObjectStore`.
 - [ ] Phase 2.6: All unit tests pass (CI green on Linux GCC, Linux Clang, Windows MSVC).
