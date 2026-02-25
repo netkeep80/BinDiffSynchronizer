@@ -122,6 +122,7 @@ ctest --test-dir build --output-on-failure
 - [Анализ проекта](analysis.md) — подробный анализ сильных и слабых сторон, оценка концепции jgit и интеграции с nlohmann/json
 - [План развития](plan.md) — перспективные направления и задачи, детальный план реализации jgit
 - [План Фазы 1](phase1-plan.md) — детальный план реализации Phase 1 (выполнен)
+- [План Фазы 2](phase2-plan.md) — план Фазы 2: персистентное дерево объектов JSON с использованием `persist<T>` и `fptr<T>`
 
 ---
 
@@ -243,6 +244,7 @@ ctest --test-dir build --output-on-failure
 - [Project Analysis](analysis.md) — detailed analysis of strengths and weaknesses, evaluation of the jgit concept and nlohmann/json integration
 - [Development Plan](plan.md) — promising directions and tasks, detailed jgit implementation plan
 - [Phase 1 Plan](phase1-plan.md) — detailed Phase 1 implementation plan (completed)
+- [Phase 2 Plan](phase2-plan.md) — Phase 2 plan: persistent JSON object tree using `persist<T>` and `fptr<T>`
 
 ---
 
