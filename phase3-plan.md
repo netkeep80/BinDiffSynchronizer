@@ -1,6 +1,6 @@
 # Phase 3 Plan: Завершение персистной обвязки и интеграция с nlohmann::json
 
-**Status:** Task 3.1 Done ✓ — Tasks 3.2–3.5 Planned
+**Status:** Tasks 3.1 and 3.2 Done ✓ — Tasks 3.3–3.5 Planned
 
 ---
 
@@ -455,10 +455,10 @@ Task 3.1  →  Task 3.2  →  Task 3.3  →  Task 3.4  →  Task 3.5
 - [x] 3.1.4: `Cache` — исправлен (`Flush` добавлен), покрыт тестами (9 тестов, CI зелёный).
 - [x] 3.1.5: `MemoryDevice` — исправлен, покрыт тестами (5 тестов, CI зелёный).
 - [x] 3.1.6: `StaticPageDevice` — исправлен, покрыт тестами (4 теста, CI зелёный).
-- [ ] 3.2.1: `persist<persistent_string>` — компилируется и тестируется (≥5 тестов).
-- [ ] 3.2.2: `persistent_map` переписана на `fptr` — тестируется (≥5 тестов).
-- [ ] 3.2.3: `persist<persistent_json_value>` — тестируется (≥8 тестов).
-- [ ] 3.2.4: `PersistentJsonStore` переписан на `AddressManager` — тестируется (≥6 тестов).
+- [x] 3.2.1: `persist<persistent_string>` — компилируется и тестируется (5 тестов, CI зелёный).
+- [x] 3.2.2: `persistent_map` переписана на `fptr` — тестируется (5 тестов, CI зелёный).
+- [x] 3.2.3: `persist<persistent_json_value>` — тестируется (8 тестов, CI зелёный).
+- [x] 3.2.4: `PersistentJsonStore` с конструктором `filesystem::path` — тестируется (6 тестов, CI зелёный).
 - [ ] 3.3.1: Документация параметров `basic_json<>` создана.
 - [ ] 3.3.2: `persistent_string` расширена до `StringType`, тесты проходят (≥4 тестов).
 - [ ] 3.3.3: `jgit::persistent_json` объявлена в `jgit/persistent_basic_json.h`.

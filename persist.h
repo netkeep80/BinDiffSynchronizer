@@ -424,12 +424,19 @@ class fptr
     unsigned    __addr;
 
 public:
-    inline fptr() {};
-    inline fptr( char* __faddress ) { __addr = AddressManager<_T>::Find( __faddress ); };
-    // Fixed: was `ptr->__addr` which dereferences the fptr<T> via operator->()
-    // instead of directly accessing the field. Corrected to `ptr.__addr`.
-    inline fptr( fptr<_T>& ptr ) : __addr( ptr.__addr ) {};
-    inline ~fptr() { AddressManager<_T>::Release(__addr); };
+    inline fptr() : __addr(0) {};
+    inline fptr( char* __faddress ) : __addr(0) { __addr = AddressManager<_T>::Find( __faddress ); };
+    // Task 3.2.2: copy constructor and destructor are defaulted (trivial) so
+    // that fptr<T> satisfies std::is_trivially_copyable and can be embedded
+    // inside trivially-copyable structs such as persistent_map<V,C> which
+    // must satisfy std::is_trivially_copyable for use with persist<T>.
+    //
+    // The original non-const copy constructor `fptr(fptr<_T>& ptr)` and
+    // the original destructor `~fptr() { Release(__addr); }` have been
+    // replaced with defaulted (trivial) versions.  Callers that need
+    // explicit reference-count management must call Delete() or Release().
+    inline fptr( const fptr<_T>& ) = default;
+    inline ~fptr() = default;
 
     inline operator _Tptr() { return &AddressManager<_T>::GetManager()[__addr]; }
     inline operator _Tptr() const { return &AddressManager<_T>::GetManager()[__addr]; }
@@ -453,6 +460,12 @@ public:
     }
 
     unsigned addr() const { return __addr; }
+
+    // set_addr(): directly assign an address index without going through
+    // AddressManager::Find/Create.  Used when an fptr field stores an
+    // already-known slot index (e.g. when chaining persistent_map slabs
+    // that were allocated externally by a pool manager).
+    void set_addr(unsigned a) { __addr = a; }
 };
 
 typedef persist<char>				pchar;

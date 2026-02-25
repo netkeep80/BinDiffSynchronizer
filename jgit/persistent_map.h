@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "persistent_string.h"
+#include "persist.h"
 
 // =============================================================================
 // Task 2.2.3 — jgit::persistent_map<V, Capacity>
@@ -19,12 +20,18 @@
 //   - Entries are kept sorted by key to allow O(log N) binary search.
 //   - Capacity is a compile-time template parameter (default: 32 entries).
 //   - For overflow beyond a single node, callers can chain nodes via
-//     next_node_id (index into an AddressManager or PageDevice pool).
-//     next_node_id == 0 means this is the only / last node.
+//     next_node (fptr<persistent_map<V,Capacity>>, an index into an external
+//     pool).  next_node.addr() == 0 means this is the only / last node.
 //   - Entire struct is trivially copyable → compatible with persist<T>.
+//     (fptr<T> uses a trivial destructor so it is trivially copyable.)
 //
 // Key property: sizeof(persistent_map<V, C>) is a compile-time constant with
 // NO heap-allocated members.
+//
+// Task 3.2.2: The overflow-chain field was changed from raw uint32_t
+// next_node_id to the typed fptr<persistent_map<V,Capacity>> next_node.
+// Both are 4 bytes; the change adds type-safety without altering the binary
+// layout.
 // =============================================================================
 
 namespace jgit {
@@ -43,19 +50,25 @@ struct persistent_map {
 
     entry    entries[Capacity];   // sorted array of key-value pairs
     uint32_t size;                // number of valid entries in this node
-    uint32_t next_node_id;        // fptr-style index into a pool; 0 = no overflow
+    // Task 3.2.2: replaced raw uint32_t next_node_id with a typed persistent
+    // pointer fptr<persistent_map<V, Capacity>>.  fptr<T> stores only a single
+    // unsigned field (__addr), so sizeof(next_node) == sizeof(unsigned) and
+    // the struct remains trivially copyable.
+    // next_node.addr() == 0 means this is the only / last node.
+    fptr<persistent_map<V, Capacity>> next_node;
 
     // ---- static assertions ----
     static_assert(Capacity > 0, "persistent_map Capacity must be > 0");
 
     // ---- constructors ----
 
-    persistent_map() noexcept : size(0), next_node_id(0) {
+    persistent_map() noexcept : size(0) {
         // Value-initialise all entries so raw-byte loads are well-defined.
         for (size_t i = 0; i < Capacity; ++i) {
             entries[i].key   = persistent_string{};
             entries[i].value = V{};
         }
+        // next_node is default-constructed: fptr() sets __addr = 0 (null chain).
     }
 
     // ---- capacity / size queries ----
@@ -159,7 +172,7 @@ struct persistent_map {
         return erase(key.c_str());
     }
 
-    // Clear all entries in this node (does NOT follow next_node_id chain).
+    // Clear all entries in this node (does NOT follow next_node chain).
     void clear() noexcept {
         size = 0;
     }

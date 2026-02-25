@@ -4,6 +4,7 @@
 #include <type_traits>
 
 #include "jgit/persistent_map.h"
+#include "persist.h"
 
 // =============================================================================
 // Task 2.2.3 — Unit tests for jgit::persistent_map<V, Capacity>
@@ -18,10 +19,13 @@ TEST_CASE("Task 2.2.3.1: persistent_map is trivially copyable and fixed-size",
     using map4 = jgit::persistent_map<int32_t, 4>;
     REQUIRE(std::is_trivially_copyable<map4>::value);
 
-    // sizeof must be a deterministic compile-time constant
+    // sizeof must be a deterministic compile-time constant.
+    // Task 3.2.2: next_node_id (uint32_t) was replaced by next_node
+    // (fptr<persistent_map<V,C>>); both are 4 bytes, so the layout is unchanged.
     constexpr size_t expected =
         sizeof(jgit::persistent_map<int32_t, 4>::entry) * 4
-        + sizeof(uint32_t) * 2;  // size + next_node_id
+        + sizeof(uint32_t)                                 // size
+        + sizeof(fptr<jgit::persistent_map<int32_t, 4>>); // next_node
     REQUIRE(sizeof(map4) == expected);
 }
 
@@ -35,7 +39,7 @@ TEST_CASE("Task 2.2.3.2: persistent_map default constructor gives empty map",
     REQUIRE(m.empty());
     REQUIRE(m.size == 0u);
     REQUIRE(!m.full());
-    REQUIRE(m.next_node_id == 0u);
+    REQUIRE(m.next_node.addr() == 0u);  // Task 3.2.2: was next_node_id, now next_node
 }
 
 // ---------------------------------------------------------------------------

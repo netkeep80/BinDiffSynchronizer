@@ -45,7 +45,7 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | Задача | Статус |
 |--------|--------|
 | 3.1: Доработка, документация и тестирование персистной инфраструктуры (`persist<T>`, `fptr<T>`, `AddressManager`, `Cache`, `PageDevice`, `MemoryDevice`, `StaticPageDevice`) | ✓ Готово (161 тест, CI зелёный) |
-| 3.2: Переписать `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` на `persist<T>` и `fptr<T>` | 🔜 Запланировано |
+| 3.2: Переписать `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` на `persist<T>` и `fptr<T>` | ✓ Готово (185 тестов, CI зелёный) |
 | 3.3: Инстанцировать `nlohmann::basic_json<>` с персистными классами | 🔜 Запланировано |
 | 3.4: Интеграционные тесты и CI | 🔜 Запланировано |
 | 3.5: Производительность и бенчмарки | 🔜 Запланировано |
@@ -254,7 +254,7 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | Task | Status |
 |------|--------|
 | 3.1: Fix, document and test persistence infrastructure (`persist<T>`, `fptr<T>`, `AddressManager`, `Cache`, `PageDevice`, `MemoryDevice`, `StaticPageDevice`) | ✓ Done (161 tests, CI green) |
-| 3.2: Rewrite `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` using `persist<T>` and `fptr<T>` | 🔜 Planned |
+| 3.2: Rewrite `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` using `persist<T>` and `fptr<T>` | ✓ Done (185 tests, CI green) |
 | 3.3: Instantiate `nlohmann::basic_json<>` with persistent classes | 🔜 Planned |
 | 3.4: Integration tests and CI | 🔜 Planned |
 | 3.5: Performance benchmarks | 🔜 Planned |

@@ -27,6 +27,11 @@ set(TEST_SOURCES
     test_cache.cpp
     test_memory_device.cpp
     test_static_page_device.cpp
+    # Task 3.2 — persist<T>/fptr<T> with jgit types
+    test_persist_persistent_string.cpp
+    test_persist_persistent_map.cpp
+    test_persist_persistent_json_value.cpp
+    test_persistent_json_store_v2.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
