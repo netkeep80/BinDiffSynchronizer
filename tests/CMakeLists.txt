@@ -20,6 +20,13 @@ set(TEST_SOURCES
     test_persistent_json_store.cpp
     test_persistent_json_store_integration.cpp
     test_commit.cpp
+    # Task 3.1 — persistence infrastructure tests
+    test_persist_core.cpp
+    test_fptr.cpp
+    test_address_manager.cpp
+    test_cache.cpp
+    test_memory_device.cpp
+    test_static_page_device.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
