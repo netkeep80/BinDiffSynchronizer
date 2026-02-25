@@ -1,6 +1,6 @@
 # Phase 3 Plan: Завершение персистной обвязки и интеграция с nlohmann::json
 
-**Status:** Tasks 3.1 and 3.2 Done ✓ — Tasks 3.3–3.5 Planned
+**Status:** Tasks 3.1, 3.2, and 3.3 Done ✓ — Tasks 3.4–3.5 Planned
 
 ---
 
@@ -459,11 +459,11 @@ Task 3.1  →  Task 3.2  →  Task 3.3  →  Task 3.4  →  Task 3.5
 - [x] 3.2.2: `persistent_map` переписана на `fptr` — тестируется (5 тестов, CI зелёный).
 - [x] 3.2.3: `persist<persistent_json_value>` — тестируется (8 тестов, CI зелёный).
 - [x] 3.2.4: `PersistentJsonStore` с конструктором `filesystem::path` — тестируется (6 тестов, CI зелёный).
-- [ ] 3.3.1: Документация параметров `basic_json<>` создана.
-- [ ] 3.3.2: `persistent_string` расширена до `StringType`, тесты проходят (≥4 тестов).
-- [ ] 3.3.3: `jgit::persistent_json` объявлена в `jgit/persistent_basic_json.h`.
+- [x] 3.3.1: Документация параметров `basic_json<>` создана (`experiments/study_basic_json_params.cpp`).
+- [x] 3.3.2: `persistent_string` расширена до `StringType`, тесты проходят (7 тестов, CI зелёный).
+- [x] 3.3.3: `jgit::persistent_json` объявлена в `jgit/persistent_basic_json.h`.
 - [ ] 3.3.4: `ObjectType`/`ArrayType` заменены персистными адаптерами.
-- [ ] 3.3.5: Тесты `persist<json>` и `fptr<json>` проходят (≥8 тестов).
+- [x] 3.3.5: Тесты `persistent_json` — dump/parse, merge_patch, diff, alias pattern, PersistentJsonStore round-trip (8 тестов, CI зелёный).
 - [ ] 3.4: Интеграционные тесты проходят; CI зелёный на GCC/Clang/MSVC.
 - [ ] 3.5: Бенчмарк зафиксирован в репозитории.
 

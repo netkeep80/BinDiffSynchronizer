@@ -32,6 +32,9 @@ set(TEST_SOURCES
     test_persist_persistent_map.cpp
     test_persist_persistent_json_value.cpp
     test_persistent_json_store_v2.cpp
+    # Task 3.3 — Instantiate nlohmann::basic_json<> with persistent classes
+    test_persistent_string_extended.cpp
+    test_persist_json.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
