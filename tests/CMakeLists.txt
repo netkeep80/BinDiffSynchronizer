@@ -16,6 +16,9 @@ set(TEST_SOURCES
     test_persistent_string.cpp
     test_persistent_array.cpp
     test_persistent_map.cpp
+    test_persistent_json_value.cpp
+    test_persistent_json_store.cpp
+    test_persistent_json_store_integration.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
