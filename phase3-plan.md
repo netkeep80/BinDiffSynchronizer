@@ -408,7 +408,7 @@ using persistent_json = nlohmann::basic_json<
 
 **Цель:** Убедиться, что все новые классы корректно работают совместно в реалистичных сценариях.
 
-Файл: `tests/test_phase3_integration.cpp`
+Файл: `tests/test_phase3_integration.cpp` и `tests/test.json`
 
 1. Полный цикл: создать `PersistentJsonStore`, импортировать JSON, взять снимок через `ObjectStore`, уничтожить хранилище, восстановить из снимка.
 2. Полный цикл с перезапуском: `PersistentJsonStore` сохраняется, процесс рестартует (симулируется через уничтожение/создание объекта с тем же путём), данные доступны.
