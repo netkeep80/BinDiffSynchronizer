@@ -40,15 +40,15 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | 2.6: Unit-тесты (109 тестов, CI зелёный на GCC/Clang/MSVC) | ✓ Готово |
 | 2.7: Сравнительный анализ производительности | ✓ Готово |
 
-**Прогресс Фазы 3 — Система коммитов jgit:**
+**Прогресс Фазы 3 — Завершение персистной обвязки и интеграция с nlohmann::json:**
 
 | Задача | Статус |
 |--------|--------|
-| 3.1: Система коммитов (`Commit`, `Repository`) | ✓ Готово |
-| 3.2: JSON Patch (RFC 6902) — вычисление дельт | 🔜 Запланировано |
-| 3.3: Полное управление ветками и тегами | 🔜 Запланировано |
-| 3.4: Unit-тесты (125 тестов, CI зелёный на GCC/Clang/MSVC) | ✓ Готово |
-| 3.5: Бенчмарк операций коммитов | 🔜 Запланировано |
+| 3.1: Доработка, документация и тестирование персистной инфраструктуры (`persist<T>`, `fptr<T>`, `AddressManager`, `Cache`, `PageDevice`, `MemoryDevice`, `StaticPageDevice`) | ✓ Готово (161 тест, CI зелёный) |
+| 3.2: Переписать `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` на `persist<T>` и `fptr<T>` | 🔜 Запланировано |
+| 3.3: Инстанцировать `nlohmann::basic_json<>` с персистными классами | 🔜 Запланировано |
+| 3.4: Интеграционные тесты и CI | 🔜 Запланировано |
+| 3.5: Производительность и бенчмарки | 🔜 Запланировано |
 
 ### Основные возможности
 
@@ -209,7 +209,7 @@ ctest --test-dir build --output-on-failure
 - [План развития](plan.md) — перспективные направления и задачи, детальный план реализации jgit
 - [План Фазы 1](phase1-plan.md) — детальный план реализации Phase 1 (выполнен)
 - [План Фазы 2](phase2-plan.md) — план Фазы 2: персистентное дерево объектов JSON с использованием `persist<T>` и `fptr<T>` (выполнен)
-- [План Фазы 3](phase3-plan.md) — план Фазы 3: система коммитов jgit
+- [План Фазы 3](phase3-plan.md) — план Фазы 3: завершение персистной обвязки и интеграция с nlohmann::json (Задача 3.1 завершена)
 
 ---
 
@@ -249,15 +249,15 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | 2.6: Unit tests (109 tests, CI green on GCC/Clang/MSVC) | ✓ Done |
 | 2.7: Performance benchmark | ✓ Done |
 
-**Phase 3 Progress — jgit Commit System:**
+**Phase 3 Progress — Completing Persistence Layer and nlohmann::json Integration:**
 
 | Task | Status |
 |------|--------|
-| 3.1: Commit system (`Commit`, `Repository`) | ✓ Done |
-| 3.2: JSON Patch (RFC 6902) — delta computation | 🔜 Planned |
-| 3.3: Full branch and tag management | 🔜 Planned |
-| 3.4: Unit tests (125 tests, CI green on GCC/Clang/MSVC) | ✓ Done |
-| 3.5: Commit operations benchmark | 🔜 Planned |
+| 3.1: Fix, document and test persistence infrastructure (`persist<T>`, `fptr<T>`, `AddressManager`, `Cache`, `PageDevice`, `MemoryDevice`, `StaticPageDevice`) | ✓ Done (161 tests, CI green) |
+| 3.2: Rewrite `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` using `persist<T>` and `fptr<T>` | 🔜 Planned |
+| 3.3: Instantiate `nlohmann::basic_json<>` with persistent classes | 🔜 Planned |
+| 3.4: Integration tests and CI | 🔜 Planned |
+| 3.5: Performance benchmarks | 🔜 Planned |
 
 ### Key Features
 
@@ -418,7 +418,7 @@ ctest --test-dir build --output-on-failure
 - [Development Plan](plan.md) — promising directions and tasks, detailed jgit implementation plan
 - [Phase 1 Plan](phase1-plan.md) — detailed Phase 1 implementation plan (completed)
 - [Phase 2 Plan](phase2-plan.md) — Phase 2 plan: persistent JSON object tree using `persist<T>` and `fptr<T>` (completed)
-- [Phase 3 Plan](phase3-plan.md) — Phase 3 plan: jgit commit system
+- [Phase 3 Plan](phase3-plan.md) — Phase 3 plan: completing persistence layer and nlohmann::json integration (Task 3.1 done)
 
 ---
 

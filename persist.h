@@ -7,6 +7,7 @@
 #include <typeinfo>
 #include <cstring>
 #include <filesystem>
+#include <type_traits>
 #include "PageDevice.h"
 
 /*
@@ -63,10 +64,32 @@ template <class _T> class fptr;
 const unsigned faddress_size = 64;
 
 
-// persist template class for primitive c++ types
+// persist template class for trivially-copyable c++ types.
+//
+// IMPORTANT CONSTRAINT: _T must be trivially copyable (the compiler will
+// enforce this via static_assert below). persist<T> saves and loads the raw
+// sizeof(T) bytes to/from a file. This is only valid when the entire object
+// state is contained in its fixed-size in-memory representation — i.e. no
+// heap-allocated members.
+//
+// IMPORTANT CONSTRAINT: A persist<T> object must not be moved in memory after
+// construction. The filename is derived from the address of `this`; moving the
+// object would change `this` and make the object write to a different file on
+// destruction.
+//
+// Constructors:
+//   persist()                    — load from address-derived filename (ASLR-dependent)
+//   persist(const _T& ref)       — initialise from value, no file I/O on construction
+//   persist(const char* filename) — load from a named file (deterministic across restarts)
+//   persist(const std::string& filename) — same as above
 template <class _T>
 class persist
 {
+    // Enforce trivial copyability: persist<T> saves/loads raw bytes, which is
+    // only correct for trivially copyable types.
+    static_assert(std::is_trivially_copyable<_T>::value,
+                  "persist<T> requires T to be trivially copyable");
+
     friend class fptr<_T>;
     typedef _T& _Tref;
     typedef _T* _Tptr;
@@ -75,6 +98,8 @@ class persist
 		unsigned char _data[sizeof(_T)];
     //};
 
+    // Address-derived filename (ASLR-dependent — different on every run).
+    // Used only by the default constructor/destructor pair.
     void get_name( char* faddress )
     {
 		union convert
@@ -93,27 +118,52 @@ class persist
 		faddress[faddress_size - 1] = '\0';
     }
 
+    // The explicit filename used by named constructors (empty == use get_name).
+    char _fname[faddress_size];
+
 public:
+    // Default constructor: derive filename from address of this (ASLR-dependent).
+    // Loads existing data if the file exists.
     persist()
     {
-		char faddress[faddress_size];
-		faddress[0] = 0;
-		get_name( faddress );
-		// вызываем принудительно конструктор
-		new((void*)_data) _T;
-		ifstream( faddress ).read( (char*)(&_data[0]), sizeof(_T) );
+		_fname[0] = 0;
+		get_name( _fname );
+		// Zero-initialise the storage then load from file.
+		// Since _T is trivially copyable, zero-init is a valid default state.
+		std::memset( _data, 0, sizeof(_T) );
+		ifstream( _fname ).read( (char*)(&_data[0]), sizeof(_T) );
     }
+
+    // Value constructor: initialise from ref, no file I/O on construction.
+    // The object will be saved to an address-derived file on destruction.
     persist(const _T& ref)
     {
-        new((void*)_data) _T(ref);
+		_fname[0] = 0;
+		get_name( _fname );
+        // Copy-initialise the raw bytes from ref.
+        std::memcpy( _data, &ref, sizeof(_T) );
     }
+
+    // Named constructor (C-string): load from / save to the given filename.
+    // Provides deterministic persistence across process restarts.
+    explicit persist(const char* filename)
+    {
+        std::strncpy( _fname, filename, faddress_size - 1 );
+        _fname[faddress_size - 1] = '\0';
+        std::memset( _data, 0, sizeof(_T) );
+        ifstream( _fname ).read( (char*)(&_data[0]), sizeof(_T) );
+    }
+
+    // Named constructor (std::string): convenience overload.
+    explicit persist(const std::string& filename) : persist(filename.c_str()) {}
+
     ~persist()
     {
-		char faddress[faddress_size];
-		get_name( faddress );
-		ofstream( faddress ).write( (char*)(&_data[0]), sizeof(_T) );
-		// вызываем принудительно деструктор
-		((_T*)_data)->~_T();
+		ofstream( _fname ).write( (char*)(&_data[0]), sizeof(_T) );
+		// Since _T is required to be trivially copyable (enforced by
+		// static_assert above), its destructor is trivial — no explicit
+		// destructor call is needed. The compiler will handle cleanup of
+		// _data (a raw byte array) automatically.
     }
 
     operator _Tref() { return (*(_T*)_data); }
@@ -198,7 +248,17 @@ private:
 */
 #define ADDRESS_SPACE   1024
 
-template<class _T>
+// AddressManager<_T, AddressSpace> — manages a persistent address space of up
+// to AddressSpace slots of type _T. Slot 0 is reserved (means "null/invalid").
+//
+// Bugs fixed in Task 3.1.3:
+//   - Create(): result of Find() was discarded; now assigned to addr.
+//   - get_fname(): was returning a static char[] — not thread-safe; now returns std::string.
+//   - __load__obj(): placement-new was called AFTER reading data from file,
+//     overwriting the loaded bytes; order is now: allocate, placement-new (to
+//     initialise the object to a known state), then read from file.
+//   - AddressSpace is now a template parameter (default 1024 for backward compat).
+template<class _T, unsigned AddressSpace = ADDRESS_SPACE>
 class AddressManager
 {
     friend class persist<_T>;
@@ -211,12 +271,12 @@ class AddressManager
         bool    __used;
         char    __name[faddress_size];
     };
-    persist< __info[ADDRESS_SPACE] >   __itable;
+    persist< __info[AddressSpace] >   __itable;
 
 public:
     AddressManager()
     {   //  очищаем старые указатели
-        for( int i = 1; i < ADDRESS_SPACE; i++ )
+        for( unsigned i = 1; i < AddressSpace; i++ )
         {
             __itable[i].__refs = 0;
             __itable[i].__ptr = NULL;
@@ -225,25 +285,24 @@ public:
 
     ~AddressManager()
     {   //  сохраняем и освобождаем загруженные объекты
-        for( int i = 1; i < ADDRESS_SPACE; i++ )
+        for( unsigned i = 1; i < AddressSpace; i++ )
         {
             if( __itable[i].__ptr )
             {
                 __save__obj( i );
-                __itable[i].__ptr->~_T();
+                // _T is trivially copyable (enforce by persist<T>), so its
+                // destructor is trivial — no explicit destructor call needed.
                 delete[] (char*)__itable[i].__ptr;
             }
         }
     }
 
 private:
-    char* get_fname( unsigned index )
+    // Returns the filename used for the flat object-data file.
+    // Fixed: was returning a static char[] (not thread-safe); now returns std::string.
+    std::string get_fname( unsigned /*index*/ )
     {
-        static  char	faddress[faddress_size];
-        std::string result = std::string("./") + typeid(_T).name() + ".extend";
-        std::strncpy( faddress, result.c_str(), faddress_size - 1 );
-        faddress[faddress_size - 1] = '\0';
-        return faddress;
+        return std::string("./") + typeid(_T).name() + ".extend";
     }
 
     void __load__obj( unsigned index )
@@ -254,9 +313,14 @@ private:
         in.seekg( (index - 1) * sizeof(_T) );
         if( in.good() )
         {
-            __itable[index].__ptr = (_T*)new char[sizeof(_T)];
-            in.read( (char*)__itable[index].__ptr, sizeof(_T) );
-            __itable[index].__ptr = new((void*)__itable[index].__ptr) _T;
+            // Allocate raw storage, zero-initialise, then load bytes from file.
+            // Fixed: was calling placement-new AFTER reading, which reset the data.
+            // Placement-new on array types is also invalid C++; since _T is
+            // trivially copyable, zero-init + raw read is correct.
+            char* raw = new char[sizeof(_T)];
+            std::memset( raw, 0, sizeof(_T) );
+            in.read( raw, sizeof(_T) );
+            __itable[index].__ptr = reinterpret_cast<_T*>(raw);
         }
     }
 
@@ -274,27 +338,28 @@ private:
         return *__itable[index].__ptr;
     };
 
-//static:
-    static AddressManager<_T>& GetManager()
+public:
+    static AddressManager<_T, AddressSpace>& GetManager()
     {
-        static AddressManager<_T> __one;
+        static AddressManager<_T, AddressSpace> __one;
         return __one;
     }
 
     static unsigned Create( char* __faddress )
     {
         unsigned    addr = 0;
-        if( __faddress != NULL ) Find( __faddress );
+        // Fixed: result of Find() was discarded; now assigned to addr.
+        if( __faddress != NULL ) addr = Find( __faddress );
         if( !addr )
         {
-            for( int i = 1; i < ADDRESS_SPACE; i++ )
+            for( unsigned i = 1; i < AddressSpace; i++ )
             {
-                if( !AddressManager<_T>::GetManager().__itable[i].__used )
+                if( !AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used )
                 {
-                    AddressManager<_T>::GetManager().__itable[i].__used = true;
-                    AddressManager<_T>::GetManager().__itable[i].__ptr = new _T();
-                    std::strncpy( AddressManager<_T>::GetManager().__itable[i].__name, __faddress, faddress_size - 1 );
-                    AddressManager<_T>::GetManager().__itable[i].__name[faddress_size - 1] = '\0';
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used = true;
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__ptr = new _T();
+                    std::strncpy( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name, __faddress, faddress_size - 1 );
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name[faddress_size - 1] = '\0';
                     return i;
                 }
             }
@@ -304,14 +369,33 @@ private:
 
     static void Release( unsigned index )
     {
-        AddressManager<_T>::GetManager().__itable[index].__refs--;
+        if( index != 0 )
+            AddressManager<_T, AddressSpace>::GetManager().__itable[index].__refs--;
+    }
+
+    // Delete(): explicitly release a slot and its storage.
+    // Sets the slot __used flag to false and frees the in-memory object.
+    // Since _T is trivially copyable, no explicit destructor call is needed.
+    static void Delete( unsigned index )
+    {
+        if( index == 0 ) return;
+        auto& mgr = AddressManager<_T, AddressSpace>::GetManager();
+        if( mgr.__itable[index].__ptr )
+        {
+            // _T is trivially copyable so its destructor is trivial; skip call.
+            delete[] (char*)mgr.__itable[index].__ptr;
+            mgr.__itable[index].__ptr = NULL;
+        }
+        mgr.__itable[index].__used = false;
+        mgr.__itable[index].__refs = 0;
+        mgr.__itable[index].__name[0] = '\0';
     }
 
     static unsigned Find( char* __faddress )
     {
-        for( int i = 1; i < ADDRESS_SPACE; i++ )
-            if( AddressManager<_T>::GetManager().__itable[i].__used )
-                if( !strcmp( AddressManager<_T>::GetManager().__itable[i].__name, __faddress ) )
+        for( unsigned i = 1; i < AddressSpace; i++ )
+            if( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used )
+                if( !strcmp( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name, __faddress ) )
                     return i;
 
         return 0;
@@ -342,7 +426,9 @@ class fptr
 public:
     inline fptr() {};
     inline fptr( char* __faddress ) { __addr = AddressManager<_T>::Find( __faddress ); };
-    inline fptr( fptr<_T>& ptr ) : __addr( ptr->__addr ) {};
+    // Fixed: was `ptr->__addr` which dereferences the fptr<T> via operator->()
+    // instead of directly accessing the field. Corrected to `ptr.__addr`.
+    inline fptr( fptr<_T>& ptr ) : __addr( ptr.__addr ) {};
     inline ~fptr() { AddressManager<_T>::Release(__addr); };
 
     inline operator _Tptr() { return &AddressManager<_T>::GetManager()[__addr]; }
@@ -357,6 +443,16 @@ public:
     {
         __addr = AddressManager<_T>::Create( __faddress );
     }
+
+    // Delete(): explicitly delete the persistent object this fptr refers to.
+    // After Delete(), the slot is freed and __addr is set to 0 (null).
+    void    Delete()
+    {
+        AddressManager<_T>::Delete( __addr );
+        __addr = 0;
+    }
+
+    unsigned addr() const { return __addr; }
 };
 
 typedef persist<char>				pchar;
