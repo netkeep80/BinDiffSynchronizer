@@ -19,6 +19,7 @@ set(TEST_SOURCES
     test_persistent_json_value.cpp
     test_persistent_json_store.cpp
     test_persistent_json_store_integration.cpp
+    test_commit.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
