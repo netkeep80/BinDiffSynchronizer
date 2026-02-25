@@ -52,9 +52,12 @@ public:
 
     PersistentJsonStore() {
         // Reserve slot 0 as "null / not found" sentinel.
-        value_pool_.push_back(persistent_json_value::make_null());
-        array_pool_.push_back(json_array_slab{});
-        object_pool_.push_back(json_object_slab{});
+        // Use emplace_back() to construct large slab objects directly in heap
+        // memory, avoiding a large (~1 MB) stack-allocated temporary that would
+        // overflow the default Windows/MSVC stack (1 MB).
+        value_pool_.emplace_back();  // persistent_json_value default = null
+        array_pool_.emplace_back();  // json_array_slab default = empty slab
+        object_pool_.emplace_back(); // json_object_slab default = empty slab (~1 MB)
     }
 
     // ---- import from nlohmann::json (one-time conversion) ----
@@ -206,19 +209,19 @@ private:
 
     uint32_t alloc_node(const persistent_json_value& val) {
         uint32_t id = static_cast<uint32_t>(value_pool_.size());
-        value_pool_.push_back(val);
+        value_pool_.push_back(val);  // ~65 KB copy — val already lives on heap or caller's frame
         return id;
     }
 
     uint32_t alloc_array_slab() {
         uint32_t id = static_cast<uint32_t>(array_pool_.size());
-        array_pool_.push_back(json_array_slab{});
+        array_pool_.emplace_back();  // construct json_array_slab directly in heap (avoids stack temp)
         return id;
     }
 
     uint32_t alloc_object_slab() {
         uint32_t id = static_cast<uint32_t>(object_pool_.size());
-        object_pool_.push_back(json_object_slab{});
+        object_pool_.emplace_back();  // construct json_object_slab (~1 MB) directly in heap
         return id;
     }
 
