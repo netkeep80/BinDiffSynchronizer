@@ -178,6 +178,6 @@ if (value == NULL) {
 
 ---
 
-## License
+## Лицензия
 
-This project is open source. See the repository for license details.
+Unlicense
