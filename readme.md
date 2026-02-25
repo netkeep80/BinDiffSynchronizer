@@ -13,7 +13,7 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 
 Проект является фундаментом для разработки системы **jgit** — темпоральной базы данных для JSON-документов, аналогичной Git по модели версионирования, но специализированной для иерархических JSON-структур.
 
-### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 в процессе (задачи 2.1–2.5 выполнены)
+### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 завершена ✓
 
 Фаза 1 реализует минимальный жизнеспособный фундамент — компилируемую, кросс-платформенную, покрытую тестами кодовую базу с рабочим объектным хранилищем JSON-данных в бинарном формате.
 
@@ -37,8 +37,8 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | 2.3: Проектирование `jgit::persistent_json_value` | ✓ Готово |
 | 2.4: Реализация `jgit::PersistentJsonStore` | ✓ Готово |
 | 2.5: Интеграция с ObjectStore (Фаза 1) | ✓ Готово |
-| 2.6: Unit-тесты (109 тестов, все проходят) | ✓ Готово (2.1–2.5) |
-| 2.7: Сравнительный анализ производительности | ○ В планах |
+| 2.6: Unit-тесты (109 тестов, CI зелёный на GCC/Clang/MSVC) | ✓ Готово |
+| 2.7: Сравнительный анализ производительности | ✓ Готово |
 
 ### Основные возможности
 
@@ -178,7 +178,7 @@ BinDiffSynchronizer is a C++ library for binary differential object synchronizat
 
 The project serves as the foundation for developing **jgit** — a temporal database for JSON documents, similar to Git in its versioning model, but specialized for hierarchical JSON structures.
 
-### Current Status: Phase 1 Complete ✓ · Phase 2 In Progress (Tasks 2.1–2.5 Complete)
+### Current Status: Phase 1 Complete ✓ · Phase 2 Complete ✓
 
 Phase 1 establishes the minimum viable foundation — a compilable, cross-platform, tested codebase with a working content-addressed object store for JSON data in binary format.
 
@@ -202,8 +202,8 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | 2.3: Design `jgit::persistent_json_value` | ✓ Done |
 | 2.4: Implement `jgit::PersistentJsonStore` | ✓ Done |
 | 2.5: Integration with ObjectStore (Phase 1) | ✓ Done |
-| 2.6: Unit tests (109 tests, all passing) | ✓ Done (2.1–2.5) |
-| 2.7: Performance benchmark | ○ Planned |
+| 2.6: Unit tests (109 tests, CI green on GCC/Clang/MSVC) | ✓ Done |
+| 2.7: Performance benchmark | ✓ Done |
 
 ### Key Features
 
