@@ -3,8 +3,10 @@
 
 #include <iostream>
 #include <fstream>
-#include <strstream>
+#include <sstream>
 #include <typeinfo>
+#include <cstring>
+#include <filesystem>
 #include "PageDevice.h"
 
 /*
@@ -17,7 +19,7 @@
     Персистные объекты отличаются от обычных тем что обычный конструктор и деструктор у таких объектов
     не меняет их состояния. Персистные объекты вообще не имеют деструкторы в обычном понимании, так как
     то что они персистные уже подразумевает что они вечные. Т.е. они либо используются либо нет.
-    
+
     Вместо обычного конструктора у персистных объектов есть специальные методы для инициализации
     их состояния при создании объекта в персистном хранилище.
 
@@ -37,13 +39,13 @@
 Конструктор    |
 
 Инициализация  |
-ономить 
+ономить
 Деструктор     |
 
 Удаление       |
 
 
-ПАП будет хранить только объекты предназначенные для хранения в ПАП. 
+ПАП будет хранить только объекты предназначенные для хранения в ПАП.
 
 struct BlockInfo
 {
@@ -51,14 +53,14 @@ struct BlockInfo
       unsigned PersistAddress; // Адрес в ПАП
       unsigned ObjectSize; // Размер объекта
       unsigned NextBlobk; // Указатель на следующее звено состояния менеджера в ПАП
-}; 
-*/ 
+};
+*/
 
 using namespace std;
 
 template <class _T> class persist;
 template <class _T> class fptr;
-const unsigned faddress_size = 32;
+const unsigned faddress_size = 64;
 
 
 // persist template class for primitive c++ types
@@ -72,25 +74,23 @@ class persist
 	//	_T val;
 		unsigned char _data[sizeof(_T)];
     //};
-    
+
     void get_name( char* faddress )
     {
-		//strstreambuf buf( faddress, faddress_size );
-		//iostream	bufstream( &buf );
 		union convert
         {
 			persist<_T>* a;
-			unsigned     b;
+			std::uintptr_t b;
 		} c;
 		c.a = this;
-		//bufstream << "./" << c.b;
-		//bufstream.put(0);
 
-		char	str[10];
-		_ultoa( c.b, str, 16 );
-		strcpy( faddress, ".\\Obj_" );
-		strcat( faddress, str );
-		strcat( faddress, ".persist" );
+		std::ostringstream oss;
+		oss << std::hex << c.b;
+		std::string hexStr = oss.str();
+
+		std::string result = std::string("./Obj_") + hexStr + ".persist";
+		std::strncpy( faddress, result.c_str(), faddress_size - 1 );
+		faddress[faddress_size - 1] = '\0';
     }
 
 public:
@@ -99,12 +99,14 @@ public:
 		char faddress[faddress_size];
 		faddress[0] = 0;
 		get_name( faddress );
-        //memset( (char*)(&_data[0]), 0, sizeof(_T) ); -- уже не нужно
 		// вызываем принудительно конструктор
 		new((void*)_data) _T;
 		ifstream( faddress ).read( (char*)(&_data[0]), sizeof(_T) );
     }
-    persist(const _T& ref) : (*(_T*)_data)(ref) {}
+    persist(const _T& ref)
+    {
+        new((void*)_data) _T(ref);
+    }
     ~persist()
     {
 		char faddress[faddress_size];
@@ -147,7 +149,7 @@ public:
 	_T*			GetPtr() { return Ptr; };
 	unsigned	Size() const { return Used; };
 	void		Clear() { Used = 0; };
-	__forceinline _T&	operator[]( unsigned pos ) { return Ptr[pos]; };
+	inline _T&	operator[]( unsigned pos ) { return Ptr[pos]; };
 
 private:
 	unsigned	Allocated;
@@ -158,18 +160,18 @@ private:
 	{
 		unsigned	oldSize = Allocated;
 		_T*			oldPtr = Ptr;
-		
+
 		if( Allocated < 32 ) Allocated = 32;
 		while( Allocated < size ) Allocated += Allocated >> 2;
 		Ptr = new _T[Allocated];
-		
+
 		if( !Ptr )
 		{
 			Ptr = oldPtr;
 			Allocated = oldSize;
 			throw( "Not enough memory!" );
 		}
-		
+
 		if( oldSize )
 		{
 			memcpy( Ptr, oldPtr, Used * sizeof(_T) );
@@ -238,9 +240,9 @@ private:
     char* get_fname( unsigned index )
     {
         static  char	faddress[faddress_size];
-        strcpy( faddress, ".\\" );
-        strcat( faddress, typeid(_T).name() );
-        strcat( faddress, ".extend" );
+        std::string result = std::string("./") + typeid(_T).name() + ".extend";
+        std::strncpy( faddress, result.c_str(), faddress_size - 1 );
+        faddress[faddress_size - 1] = '\0';
         return faddress;
     }
 
@@ -266,7 +268,7 @@ private:
         else             cout << "AddressManager::__save__obj() can't save obj" << endl;
     }
 
-    __forceinline _T&	operator[]( unsigned index )
+    inline _T&	operator[]( unsigned index )
     {
         if( __itable[index].__ptr == NULL ) __load__obj( index );
         return *__itable[index].__ptr;
@@ -281,7 +283,7 @@ private:
 
     static unsigned Create( char* __faddress )
     {
-        unsigned    addr = NULL;
+        unsigned    addr = 0;
         if( __faddress != NULL ) Find( __faddress );
         if( !addr )
         {
@@ -291,7 +293,8 @@ private:
                 {
                     AddressManager<_T>::GetManager().__itable[i].__used = true;
                     AddressManager<_T>::GetManager().__itable[i].__ptr = new _T();
-                    strcpy( AddressManager<_T>::GetManager().__itable[i].__name, __faddress );
+                    std::strncpy( AddressManager<_T>::GetManager().__itable[i].__name, __faddress, faddress_size - 1 );
+                    AddressManager<_T>::GetManager().__itable[i].__name[faddress_size - 1] = '\0';
                     return i;
                 }
             }
@@ -322,7 +325,7 @@ private:
     Тело самого персистного указателя состоит из адреса (порядкового номера)
     объекта в персистном хранилище экстенда.
 
-1. так как персистный указатель сам по себе есть персистный объект то его конструктор 
+1. так как персистный указатель сам по себе есть персистный объект то его конструктор
   и деструктор не должны менять его состояния.
 */
 
@@ -337,18 +340,18 @@ class fptr
     unsigned    __addr;
 
 public:
-    __forceinline fptr() {};
-    __forceinline fptr( char* __faddress ) { __addr = AddressManager<_T>::Find( __faddress ); };
-    __forceinline fptr( fptr<_T>& ptr ) : __addr( ptr->__addr ) {};
-    __forceinline ~fptr() { AddressManager<_T>::Release(__addr); };
-    
-    __forceinline operator _Tptr() { return &AddressManager<_T>::GetManager()[__addr]; }
-    __forceinline operator _Tptr() const { return &AddressManager<_T>::GetManager()[__addr]; }
+    inline fptr() {};
+    inline fptr( char* __faddress ) { __addr = AddressManager<_T>::Find( __faddress ); };
+    inline fptr( fptr<_T>& ptr ) : __addr( ptr->__addr ) {};
+    inline ~fptr() { AddressManager<_T>::Release(__addr); };
 
-    __forceinline _T& operator*() { return AddressManager<_T>::GetManager()[__addr]; }
-    __forceinline _T* operator->() { return &AddressManager<_T>::GetManager()[__addr]; }
+    inline operator _Tptr() { return &AddressManager<_T>::GetManager()[__addr]; }
+    inline operator _Tptr() const { return &AddressManager<_T>::GetManager()[__addr]; }
 
-    __forceinline fptr<_T>& operator=( char* __faddress ) { __addr = AddressManager<_T>::Find( __faddress ); };
+    inline _T& operator*() { return AddressManager<_T>::GetManager()[__addr]; }
+    inline _T* operator->() { return &AddressManager<_T>::GetManager()[__addr]; }
+
+    inline fptr<_T>& operator=( char* __faddress ) { __addr = AddressManager<_T>::Find( __faddress ); return *this; }
 
     void    New( char* __faddress )
     {

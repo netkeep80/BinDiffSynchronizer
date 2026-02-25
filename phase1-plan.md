@@ -1,5 +1,9 @@
 # jgit — Phase 1 Implementation Plan
 
+## Status: ✓ COMPLETED (2026-02-25)
+
+All acceptance criteria have been met. 29/29 unit tests pass. CI runs on Linux (GCC, Clang) and Windows (MSVC).
+
 ## Overview
 
 This document defines the detailed implementation plan for **Phase 1** of the jgit project — a temporal JSON database inspired by Git's versioning model. It is based on the analysis of the current BinDiffSynchronizer codebase ([analysis.md](analysis.md)), the development roadmap ([plan.md](plan.md)), and the project description ([readme.md](readme.md)).
@@ -14,13 +18,13 @@ This document defines the detailed implementation plan for **Phase 1** of the jg
 
 Phase 1 corresponds to the "Краткосрочный план (1-3 месяца)" from `plan.md` and the "Высокий приоритет" tasks from Directions 1 and 2. It is deliberately limited to the minimum viable foundation:
 
-| # | Task | Source in plan.md |
-|---|------|-------------------|
-| 1 | Fix existing bugs | Direction 2, High priority, #1 |
-| 2 | Migrate to C++17 with CMake | Direction 2, High priority, #2–3 |
-| 3 | Add nlohmann/json integration | Direction 1, High priority, #2 |
-| 4 | Implement content-addressed object store | Direction 1, High priority, #1 |
-| 5 | Write unit tests for existing and new code | Direction 2, Medium priority, #5 |
+| # | Task | Source in plan.md | Status |
+|---|------|-------------------|--------|
+| 1 | Fix existing bugs | Direction 2, High priority, #1 | ✓ Done |
+| 2 | Migrate to C++17 with CMake | Direction 2, High priority, #2–3 | ✓ Done |
+| 3 | Add nlohmann/json integration | Direction 1, High priority, #2 | ✓ Done |
+| 4 | Implement content-addressed object store | Direction 1, High priority, #1 | ✓ Done |
+| 5 | Write unit tests for existing and new code | Direction 2, Medium priority, #5 | ✓ Done (29 tests) |
 
 ---
 
@@ -379,13 +383,13 @@ The following are explicitly deferred to Phase 2 and beyond:
 
 Phase 1 is complete when all of the following are true:
 
-1. **All known bugs are fixed** and covered by regression unit tests
-2. **The project compiles cleanly** with CMake on Linux (GCC 7+, Clang 5+) with `-Wall -Wextra` and no errors or warnings
-3. **All unit tests pass** (test_bugs, test_serialization, test_hash, test_object_store)
-4. **CI runs automatically** on every push and pull request
-5. **`ObjectStore::put` and `ObjectStore::get`** work correctly end-to-end: any JSON value can be stored and retrieved by its SHA-256 hash
-6. **nlohmann/json** is integrated and JSON↔CBOR round-trip is verified by tests
-7. **No MSVC-specific code** remains in the header files (`persist.h`, `PageDevice.h`)
+1. ✓ **All known bugs are fixed** and covered by regression unit tests
+2. ✓ **The project compiles cleanly** with CMake on Linux (GCC 7+, Clang 5+) with `-Wall -Wextra` and no errors or warnings
+3. ✓ **All unit tests pass** (test_bugs, test_serialization, test_hash, test_object_store) — 29/29 tests pass
+4. ✓ **CI runs automatically** on every push and pull request — GitHub Actions configured for Linux (GCC, Clang) and Windows (MSVC)
+5. ✓ **`ObjectStore::put` and `ObjectStore::get`** work correctly end-to-end: any JSON value can be stored and retrieved by its SHA-256 hash
+6. ✓ **nlohmann/json** is integrated and JSON↔CBOR round-trip is verified by tests
+7. ✓ **No MSVC-specific code** remains in the header files (`persist.h`, `PageDevice.h`)
 
 ---
 
@@ -414,4 +418,4 @@ All dependencies are header-only or fetched via CMake, maintaining the project's
 
 ---
 
-*Document created: 2026-02-25*
+*Document created: 2026-02-25. Phase 1 completed: 2026-02-25*

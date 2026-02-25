@@ -13,12 +13,49 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 
 Проект является фундаментом для разработки системы **jgit** — темпоральной базы данных для JSON-документов, аналогичной Git по модели версионирования, но специализированной для иерархических JSON-структур.
 
+### Текущее состояние: Фаза 1 завершена ✓
+
+Фаза 1 реализует минимальный жизнеспособный фундамент — компилируемую, кросс-платформенную, покрытую тестами кодовую базу с рабочим объектным хранилищем JSON-данных в бинарном формате.
+
+**Что реализовано в Фазе 1:**
+
+| Задача | Статус |
+|--------|--------|
+| Исправление ошибок (`PageDevice.h`, `persist.h`) | ✓ Готово |
+| Переход на C++17 с CMake | ✓ Готово |
+| Интеграция nlohmann/json (CBOR) | ✓ Готово |
+| Объектное хранилище с контентной адресацией | ✓ Готово |
+| Unit-тесты (29 тестов, все проходят) | ✓ Готово |
+| CI с GitHub Actions (Linux GCC/Clang, Windows MSVC) | ✓ Готово |
+
 ### Основные возможности
 
 - **Бинарная синхронизация** — отслеживание изменений объектов путём сравнения снимков памяти
 - **Персистентное хранение** — автоматическое сохранение и загрузка объектов из файлов
 - **Страничная организация памяти** — гибкая система кэширования с настраиваемой политикой
 - **Система протоколов** — макросы для декларативного описания межобъектного взаимодействия
+- **Объектное хранилище jgit** — content-addressed хранение JSON в бинарном формате CBOR
+
+### Быстрый старт: ObjectStore (jgit)
+
+```cpp
+#include "jgit/object_store.h"
+#include <nlohmann/json.hpp>
+
+// Создать новый jgit репозиторий
+auto store = jgit::ObjectStore::init("./my_repo");
+
+// Сохранить JSON-объект
+nlohmann::json doc = {{"name", "Alice"}, {"age", 30}};
+jgit::ObjectId id = store.put(doc);
+
+// Получить объект по хешу
+auto retrieved = store.get(id);
+// retrieved.value() == doc
+
+// Проверить существование
+bool exists = store.exists(id);  // true
+```
 
 ### Концепция jgit
 
@@ -60,34 +97,31 @@ submodules              $ref-ссылки между репозиториями
 | `PageDevice.h` | Страничное устройство с кэшированием (Policy-based design) |
 | `StaticPageDevice.h` | Статическая реализация страничного устройства (in-memory) |
 | `Protocol.h` | Макросы для создания протоколов межобъектного взаимодействия |
+| `jgit/hash.h` | SHA-256 контентная адресация (`ObjectId`, `hash_object`) |
+| `jgit/serialization.h` | JSON ↔ CBOR сериализация (`to_bytes`, `from_bytes`) |
+| `jgit/object_store.h` | Объектное хранилище с контентной адресацией (`ObjectStore`) |
+| `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON для Modern C++ |
+| `third_party/sha256.hpp` | SHA-256 (public domain, single header) |
 
 ### Требования
 
-- Visual Studio 2008 или новее (текущая версия)
-- Windows (для текущей реализации)
-- *В разработке*: кросс-платформенная поддержка через CMake (Linux, macOS)
+- **Компилятор**: GCC 7+, Clang 5+, MSVC 2017+ (C++17)
+- **Система сборки**: CMake 3.16+
+- **Зависимости**: автоматически загружаются через CMake FetchContent (Catch2)
 
-### Использование
+### Сборка
 
-```cpp
-#include "persist.h"
-#include "BinDiffSynchronizer.h"
-
-// Создание персистентного указателя
-fptr<double> value("my_value");
-
-if (value == NULL) {
-    value.New("my_value");
-    *value = 0.0;
-}
-
-*value += 1.0;  // Изменения автоматически сохраняются при выходе из области видимости
+```bash
+cmake -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
 ### Документация
 
 - [Анализ проекта](analysis.md) — подробный анализ сильных и слабых сторон, оценка концепции jgit и интеграции с nlohmann/json
 - [План развития](plan.md) — перспективные направления и задачи, детальный план реализации jgit
+- [План Фазы 1](phase1-plan.md) — детальный план реализации Phase 1 (выполнен)
 
 ---
 
@@ -100,12 +134,49 @@ BinDiffSynchronizer is a C++ library for binary differential object synchronizat
 
 The project serves as the foundation for developing **jgit** — a temporal database for JSON documents, similar to Git in its versioning model, but specialized for hierarchical JSON structures.
 
+### Current Status: Phase 1 Complete ✓
+
+Phase 1 establishes the minimum viable foundation — a compilable, cross-platform, tested codebase with a working content-addressed object store for JSON data in binary format.
+
+**What was implemented in Phase 1:**
+
+| Task | Status |
+|------|--------|
+| Bug fixes (`PageDevice.h`, `persist.h`) | ✓ Done |
+| Migration to C++17 with CMake | ✓ Done |
+| nlohmann/json integration (CBOR) | ✓ Done |
+| Content-addressed object store | ✓ Done |
+| Unit tests (29 tests, all passing) | ✓ Done |
+| CI with GitHub Actions (Linux GCC/Clang, Windows MSVC) | ✓ Done |
+
 ### Key Features
 
 - **Binary synchronization** — tracking object changes by comparing memory snapshots
 - **Persistent storage** — automatic saving and loading of objects from files
 - **Page-based memory organization** — flexible caching system with configurable policy
 - **Protocol system** — macros for declarative description of inter-object interaction
+- **jgit object store** — content-addressed JSON storage in binary CBOR format
+
+### Quick Start: ObjectStore (jgit)
+
+```cpp
+#include "jgit/object_store.h"
+#include <nlohmann/json.hpp>
+
+// Initialize a new jgit repository
+auto store = jgit::ObjectStore::init("./my_repo");
+
+// Store a JSON object
+nlohmann::json doc = {{"name", "Alice"}, {"age", 30}};
+jgit::ObjectId id = store.put(doc);
+
+// Retrieve the object by hash
+auto retrieved = store.get(id);
+// retrieved.value() == doc
+
+// Check existence
+bool exists = store.exists(id);  // true
+```
 
 ### The jgit Concept
 
@@ -147,37 +218,34 @@ Creation and deletion of persistent objects is no different from regular objects
 | `PageDevice.h` | Page device with caching (Policy-based design) |
 | `StaticPageDevice.h` | Static implementation of page device (in-memory) |
 | `Protocol.h` | Macros for creating inter-object interaction protocols |
+| `jgit/hash.h` | SHA-256 content addressing (`ObjectId`, `hash_object`) |
+| `jgit/serialization.h` | JSON ↔ CBOR serialization (`to_bytes`, `from_bytes`) |
+| `jgit/object_store.h` | Content-addressed object store (`ObjectStore`) |
+| `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON for Modern C++ |
+| `third_party/sha256.hpp` | SHA-256 (public domain, single header) |
 
 ### Requirements
 
-- Visual Studio 2008 or later (current version)
-- Windows (for current implementation)
-- *In development*: cross-platform support via CMake (Linux, macOS)
+- **Compiler**: GCC 7+, Clang 5+, MSVC 2017+ (C++17)
+- **Build system**: CMake 3.16+
+- **Dependencies**: automatically fetched via CMake FetchContent (Catch2)
 
-### Usage
+### Build
 
-```cpp
-#include "persist.h"
-#include "BinDiffSynchronizer.h"
-
-// Create a persistent pointer
-fptr<double> value("my_value");
-
-if (value == NULL) {
-    value.New("my_value");
-    *value = 0.0;
-}
-
-*value += 1.0;  // Changes are automatically saved when going out of scope
+```bash
+cmake -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
 ### Documentation
 
 - [Project Analysis](analysis.md) — detailed analysis of strengths and weaknesses, evaluation of the jgit concept and nlohmann/json integration
 - [Development Plan](plan.md) — promising directions and tasks, detailed jgit implementation plan
+- [Phase 1 Plan](phase1-plan.md) — detailed Phase 1 implementation plan (completed)
 
 ---
 
-## Лицензия
+## Лицензия / License
 
 Unlicense

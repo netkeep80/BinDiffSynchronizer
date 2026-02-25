@@ -1,9 +1,10 @@
-#pragma once 
+#pragma once
 #include <vector>
+#include <cstddef>
 
 using namespace std;
 /*
-	Ответственность: 
+	Ответственность:
 		1. Загрузка и сохранения страниц из некоего хранилища
 		2. Предоставление страниц на чтение и запись адресному менеджеру (он кэширует объекты отдельно)
 		3. Кэширование страниц
@@ -153,10 +154,10 @@ class MemoryDevice
 	_PageDevice< PageSize, PoolSize, MemorySize - PageSize, CachePolicy > PageDev;
 
 public:
-	__forceinline	bool	Read( unsigned Address, unsigned char* Data, unsigned Size )
+	inline	bool	Read( unsigned Address, unsigned char* Data, unsigned Size )
 	{
 		unsigned char*	PagePtr;
-		unsigned Index = (Address & PageMask) > PageSize;
+		unsigned Index = (Address & PageMask) >> PageSize;
 		unsigned Offset = Address & OffsetMask;
 		unsigned Step = (1 << PageSize) - Offset;
 		if( Step > Size ) Step = Size;
@@ -174,10 +175,10 @@ public:
 
 		return false;
 	}
-	__forceinline	bool	Write( unsigned Address, unsigned char* Data, unsigned Size )
+	inline	bool	Write( unsigned Address, unsigned char* Data, unsigned Size )
 	{
 		unsigned char*	PagePtr;
-		unsigned Index = (Address & PageMask) > PageSize;
+		unsigned Index = (Address & PageMask) >> PageSize;
 		unsigned Offset = Address & OffsetMask;
 		unsigned Step = (1 << PageSize) - Offset;
 		if( Step > Size ) Step = Size;
