@@ -723,3 +723,170 @@ DEVELOPMENT_PLAN.md       — ОБНОВЛЁН: план Phase 2
 - Перевод всех комментариев на русский язык: выполнен в `persist.h`, `pam.h`, `pstring.h`,
   `pvector.h`, `pmap.h`, `pallocator.h`, `pjson.h`.
 - `readme.md` переписан на русском языке.
+
+---
+
+# Фаза 3 — Приведение персистных контейнеров в соответствие с архитектурой Phase 2
+
+## Обзор
+
+После Phase 2 все смещения объектов в ПАП хранятся как `uintptr_t` (8 байт на 64-битных платформах).
+Однако контейнеры Phase 1 (`pstring`, `pvector`, `pmap`, `pjson`) по-прежнему используют
+`unsigned` (4 байта) для хранения смещений и размеров. Это приводит к:
+1. Несоответствию типов: `uintptr_t` vs `unsigned` при обращении к ПАП.
+2. Потенциальному переполнению: при размере ПАП > 4 ГБ смещения не помещаются в `unsigned`.
+3. Нарушению инвариантов Phase 2: `fptr<T>::addr()` возвращает `uintptr_t`, но поле
+   `chars_slot`/`data_slot`/`pairs_slot` в payload — `unsigned`.
+
+**Цель Phase 3**: привести все поля контейнеров к типу `uintptr_t`, обеспечив полную
+корректность на 64-битных платформах и согласованность с Phase 2 PAM API.
+
+---
+
+## Анализ несоответствий (выявлены при аудите кода Phase 1 → Phase 2)
+
+### `pstring_data` (`pstring.h`)
+
+```cpp
+// Phase 1 (проблема):
+struct pstring_data {
+    unsigned   length;   // 4 байта — ограничивает строки до ~4 млрд символов
+    fptr<char> chars;    // 8 байт (uintptr_t) — адрес в ПАП
+};
+// Итого: 12 байт с выравниванием до 16 байт.
+// Нарушение: length должен быть uintptr_t для согласованности с fptr<char>.
+```
+
+### `pvector_data<T>` (`pvector.h`)
+
+```cpp
+// Phase 1 (проблема):
+template<typename T>
+struct pvector_data {
+    unsigned  size;      // 4 байта
+    unsigned  capacity;  // 4 байта
+    fptr<T>   data;      // 8 байт (uintptr_t)
+};
+// Нарушение: size и capacity должны быть uintptr_t.
+```
+
+### `pjson_data` (`pjson.h`)
+
+```cpp
+// Phase 1 (проблема):
+union payload_t {
+    struct { unsigned length; unsigned chars_slot; } string_val;  // 8 байт
+    struct { unsigned size;   unsigned data_slot;  } array_val;   // 8 байт
+    struct { unsigned size;   unsigned pairs_slot; } object_val;  // 8 байт
+};
+// Нарушение: chars_slot/data_slot/pairs_slot должны быть uintptr_t,
+// так как они хранят смещения из PersistentAddressSpace (uintptr_t).
+// На 64-бит платформах текущий код усекает адреса до 32 бит!
+```
+
+---
+
+## Задачи Phase 3
+
+### Задача 3.1: Привести `pstring_data` к `uintptr_t`
+
+**Файл**: `pstring.h`
+
+**Изменения**:
+- Поле `unsigned length` → `uintptr_t length`.
+- Обновить все методы `pstring`, использующие `length`, для работы с `uintptr_t`.
+- Добавить `static_assert(sizeof(pstring_data) == 2 * sizeof(void*))`.
+
+**Тесты** (`tests/test_pstring.cpp`):
+- Добавить тест `pstring_data: sizeof == 2 * sizeof(void*)`.
+- Регрессионные тесты: все существующие тесты должны проходить без изменений.
+
+### Задача 3.2: Привести `pvector_data<T>` к `uintptr_t`
+
+**Файл**: `pvector.h`
+
+**Изменения**:
+- Поля `unsigned size` и `unsigned capacity` → `uintptr_t size`, `uintptr_t capacity`.
+- Обновить все методы `pvector`, использующие `size` и `capacity`.
+- Добавить `static_assert(sizeof(pvector_data<int>) == 3 * sizeof(void*))` (только если выравнивание позволяет).
+
+**Тесты** (`tests/test_pvector.cpp`):
+- Добавить тест `pvector_data: size and capacity are uintptr_t`.
+- Регрессионные тесты.
+
+### Задача 3.3: Привести `pmap_data<K,V>` к `uintptr_t`
+
+**Файл**: `pmap.h`
+
+**Изменения**:
+- `pmap` использует `pvector_data` внутри — обновится автоматически после задачи 3.2.
+- Проверить, что все явно используемые `unsigned`-поля заменены.
+- Добавить тест `pmap_data: size and capacity are uintptr_t`.
+
+### Задача 3.4: Привести `pjson_data` к `uintptr_t`
+
+**Файл**: `pjson.h`
+
+**Изменения**:
+- Поля `string_val.length`, `string_val.chars_slot` → `uintptr_t length`, `uintptr_t chars_slot`.
+- Поля `array_val.size`, `array_val.data_slot` → `uintptr_t size`, `uintptr_t data_slot`.
+- Поля `object_val.size`, `object_val.pairs_slot` → `uintptr_t size`, `uintptr_t pairs_slot`.
+- Обновить все методы `pjson`, использующие эти поля.
+- Добавить `static_assert` для проверки размера `pjson_data`.
+
+**Тесты** (`tests/test_pjson.cpp`):
+- Добавить тест `pjson_data: slot fields are uintptr_t`.
+- Регрессионные тесты: все 34 существующих теста должны проходить.
+
+### Задача 3.5: Обновить `pallocator.h` при необходимости
+
+**Проверка**: `pallocator<T>` использует `uintptr_t` через `AddressManager<T>` — проверить,
+нет ли скрытых `unsigned` в критических путях.
+
+### Задача 3.6: Регрессионное тестирование
+
+После всех изменений запустить полный тестовый набор (109 тестов) и убедиться, что все проходят.
+
+---
+
+## Стратегия реализации
+
+| Этап | Задача | Зависимости |
+|------|--------|-------------|
+| Этап A | 3.1: `pstring_data` | нет |
+| Этап B | 3.2: `pvector_data` | нет |
+| Этап C | 3.3: `pmap_data` | Этап B |
+| Этап D | 3.4: `pjson_data` | Этапы A, B, C |
+| Этап E | 3.5: `pallocator` | нет |
+| Этап F | 3.6: регрессия | Этапы A–E |
+
+---
+
+## Вехи Phase 3
+
+| Веха | Результат | Статус |
+|------|-----------|--------|
+| M18 | `pstring_data.length` → `uintptr_t`, тесты проходят | ✅ Выполнено |
+| M19 | `pvector_data.size/capacity` → `uintptr_t`, тесты проходят | ✅ Выполнено |
+| M20 | `pmap_data` обновлён через pvector (регрессия), тесты проходят | ✅ Выполнено |
+| M21 | `pjson_data` поля slot/size → `uintptr_t`, тесты проходят | ✅ Выполнено |
+| M22 | Все 112 тестов проходят после рефакторинга | ✅ Выполнено |
+| M23 | Обновлены `readme.md` и `DEVELOPMENT_PLAN.md` | ✅ Выполнено |
+
+---
+
+## Инвентаризация файлов после Phase 3
+
+```
+pstring.h         — ОБНОВЛЁН: length: uintptr_t
+pvector.h         — ОБНОВЛЁН: size, capacity: uintptr_t
+pmap.h            — ОБНОВЛЁН (через pvector)
+pjson.h           — ОБНОВЛЁН: chars_slot, data_slot, pairs_slot: uintptr_t
+tests/
+  test_pstring.cpp — ОБНОВЛЁН: тест sizeof pstring_data
+  test_pvector.cpp — ОБНОВЛЁН: тест sizeof pvector_data
+  test_pmap.cpp    — регрессия
+  test_pjson.cpp   — ОБНОВЛЁН: тест sizeof pjson_data
+readme.md         — ОБНОВЛЁН: описание Phase 3
+DEVELOPMENT_PLAN.md — ОБНОВЛЁН: план Phase 3
+```

@@ -23,6 +23,22 @@ TEST_CASE("pjson_kv_pair: is trivially copyable", "[pjson][layout]")
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3: поля payload.string_val, array_val, object_val используют uintptr_t
+// ---------------------------------------------------------------------------
+TEST_CASE("pjson_data: payload slot fields are uintptr_t (Phase 3)",
+          "[pjson][layout][phase3]")
+{
+    // Все поля slot/size в payload должны иметь размер sizeof(void*)
+    // для согласованности с Phase 2 PAM API.
+    REQUIRE(sizeof(pjson_data::payload_t::string_val.chars_slot) == sizeof(void*));
+    REQUIRE(sizeof(pjson_data::payload_t::string_val.length) == sizeof(void*));
+    REQUIRE(sizeof(pjson_data::payload_t::array_val.data_slot) == sizeof(void*));
+    REQUIRE(sizeof(pjson_data::payload_t::array_val.size) == sizeof(void*));
+    REQUIRE(sizeof(pjson_data::payload_t::object_val.pairs_slot) == sizeof(void*));
+    REQUIRE(sizeof(pjson_data::payload_t::object_val.size) == sizeof(void*));
+}
+
+// ---------------------------------------------------------------------------
 // null value
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: zero-initialised pjson_data is null", "[pjson][null]")

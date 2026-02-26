@@ -16,9 +16,20 @@ TEST_CASE("pstring_data: is trivially copyable",
           "[pstring][layout]")
 {
     REQUIRE(std::is_trivially_copyable<pstring_data>::value);
-    // Should be compact: unsigned (4) + fptr<char> (4) = 8 bytes minimum.
-    REQUIRE(sizeof(pstring_data) >= 8u);
-    REQUIRE(sizeof(pstring_data) < 256u);  // no runaway size
+    // Phase 3: pstring_data должен занимать 2 * sizeof(void*) байт.
+    REQUIRE(sizeof(pstring_data) == 2 * sizeof(void*));
+}
+
+// ---------------------------------------------------------------------------
+// pstring_data — Phase 3: поля имеют тип uintptr_t
+// ---------------------------------------------------------------------------
+TEST_CASE("pstring_data: length is uintptr_t (Phase 3)",
+          "[pstring][layout][phase3]")
+{
+    // sizeof(uintptr_t) == sizeof(void*) на любой платформе.
+    REQUIRE(sizeof(pstring_data::length) == sizeof(void*));
+    // Поле chars (fptr<char>) также хранит uintptr_t.
+    REQUIRE(sizeof(pstring_data::chars) == sizeof(void*));
 }
 
 // ---------------------------------------------------------------------------

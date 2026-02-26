@@ -16,8 +16,21 @@ TEST_CASE("pvector_data<int>: is trivially copyable",
 {
     REQUIRE(std::is_trivially_copyable<pvector_data<int>>::value);
     REQUIRE(std::is_trivially_copyable<pvector_data<double>>::value);
-    // size (4) + capacity (4) + fptr<T> (4) = 12 bytes minimum.
-    REQUIRE(sizeof(pvector_data<int>) >= 12u);
+    // Phase 3: size (sizeof(void*)) + capacity (sizeof(void*)) + fptr<T> (sizeof(void*)) = 3 * sizeof(void*).
+    REQUIRE(sizeof(pvector_data<int>) == 3 * sizeof(void*));
+}
+
+// ---------------------------------------------------------------------------
+// pvector_data<T> — Phase 3: поля size и capacity имеют тип uintptr_t
+// ---------------------------------------------------------------------------
+TEST_CASE("pvector_data<int>: size and capacity are uintptr_t (Phase 3)",
+          "[pvector][layout][phase3]")
+{
+    // sizeof(uintptr_t) == sizeof(void*) на любой платформе.
+    REQUIRE(sizeof(pvector_data<int>::size) == sizeof(void*));
+    REQUIRE(sizeof(pvector_data<int>::capacity) == sizeof(void*));
+    // Поле data (fptr<T>) также хранит uintptr_t.
+    REQUIRE(sizeof(pvector_data<int>::data) == sizeof(void*));
 }
 
 // ---------------------------------------------------------------------------
