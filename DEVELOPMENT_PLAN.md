@@ -172,7 +172,21 @@ After implementing `pstring`, `pvector`, and `pmap`, we have two options:
 - **Advantage**: Full control; no dependency on `nlohmann`'s internal pointer model.
 - **Recommended** for Phase 1 → Phase 2 transition.
 
-**Decision**: Attempt Option A first with a compatibility shim. If `nlohmann::basic_json` cannot be instantiated cleanly (e.g., it internally dereferences raw pointers that differ from slot-based pointers), fall back to Option B.
+**Decision**: Option B chosen. `nlohmann::basic_json` internally dereferences raw C++ pointers and assumes heap allocation, which is incompatible with the slot-index-based `AddressManager`. A custom `pjson` was implemented directly on top of `fptr<T>`, `pstring`, `pvector`, and `pmap` primitives.
+
+#### pjson implementation summary
+
+`pjson_data` is a trivially-copyable 16-byte struct containing:
+- a `pjson_type` discriminant (4 bytes),
+- a payload union holding either a primitive value (bool, int64, uint64, double) or two unsigned integers (length/size + slot index) for string/array/object types.
+
+Objects are stored as sorted arrays of `pjson_kv_pair` (pstring_data key + pjson_data value) in `AddressManager<pjson_kv_pair>`. Sorted order enables O(log n) lookup via binary search.
+
+Arrays are stored as `pjson_data[]` in `AddressManager<pjson_data>` with doubling growth.
+
+`pjson` is a thin non-owning wrapper around a `pjson_data&` reference, providing `set_*`/`get_*` accessors, `push_back`, `operator[]`, `obj_insert`, `obj_find`, `obj_erase`, and a recursive `free()`.
+
+**Bug found and fixed during implementation**: In `obj_insert`, the shift-right loop performs a shallow copy of `pjson_kv_pair`. After the shift, the source and destination entries both hold the same `chars_slot` index for the key string. When `_assign_key` was then called to write the new key, it freed the shared slot — invalidating the shifted neighbor's key. Fixed by zeroing `new_pair.key.chars` before calling `_assign_key` to mark the slot as unowned at that position before the new allocation.
 
 ---
 
@@ -217,7 +231,7 @@ CMakeLists.txt will:
 | M4 | `pvector<T>` implemented and tested | ✅ Done |
 | M5 | `pmap<K, V>` implemented and tested | ✅ Done |
 | M6 | `pallocator<T>` implemented and tested | ✅ Done |
-| M7 | `pjson` design decision and prototype | ⬜ Next |
+| M7 | `pjson` design decision and prototype | ✅ Done |
 | M8 | Updated `readme.md` and merged PR | ⬜ Pending |
 
 ---
@@ -233,14 +247,16 @@ pstring.h                 — persistent string
 pvector.h                 — persistent vector
 pmap.h                    — persistent map
 pallocator.h              — UPDATED: fixed deallocate() to use FindByPtr()
+pjson.h                   — NEW: persistent JSON discriminated union (M7)
 CMakeLists.txt            — build system
 tests/
   test_persist.cpp        — tests for persist<T>, AddressManager<T>, fptr<T>
   test_pstring.cpp        — tests for pstring
   test_pvector.cpp        — tests for pvector<T>
   test_pmap.cpp           — tests for pmap<K,V>
-  test_pallocator.cpp     — NEW: tests for pallocator<T>
-readme.md                 — UPDATED: persistent infrastructure description
+  test_pallocator.cpp     — tests for pallocator<T>
+  test_pjson.cpp          — NEW: tests for pjson (M7)
+readme.md                 — UPDATED: persistent infrastructure description + pjson
 DEVELOPMENT_PLAN.md       — UPDATED: milestones and status
 ```
 

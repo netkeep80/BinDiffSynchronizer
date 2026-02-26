@@ -153,6 +153,46 @@ v.push_back(42);
 
 ---
 
+#### `pjson` (`pjson.h`)
+
+A persistent discriminated-union JSON value — the persistent analogue of `nlohmann::json`. All JSON values live in persistent address spaces managed by `AddressManager` and survive process restarts when the backing `pjson_data` header is stored via `persist<pjson_data>`.
+
+**Design**: Option B — a custom persistent discriminated union built directly on `fptr<T>`, `pstring`, `pvector`, and `pmap` primitives.  `nlohmann::basic_json` was not used directly because it assumes heap-allocated raw pointers, which are incompatible with the slot-index-based `AddressManager`.
+
+**Value types**: `null`, `boolean`, `integer` (int64), `uinteger` (uint64), `real` (double), `string`, `array`, `object`.
+
+**Layout**: `pjson_data` is a trivially-copyable 16-byte header.  Arrays are backed by `AddressManager<pjson_data>`; objects by `AddressManager<pjson_kv_pair>` (sorted by key for O(log n) lookup).
+
+```cpp
+pjson_data d{};
+pjson v(d);
+
+// Primitive values
+v.set_bool(true);
+v.set_int(-42);
+v.set_real(3.14);
+v.set_string("hello");
+
+// Arrays
+v.set_array();
+pjson(v.push_back()).set_int(1);
+pjson(v.push_back()).set_string("two");
+
+// Objects
+v.set_object();
+pjson(v.obj_insert("name")).set_string("Alice");
+pjson(v.obj_insert("age")).set_int(30);
+pjson_data* age = v.obj_find("age");   // O(log n) binary search
+v.obj_erase("name");
+
+// Release all heap allocations
+v.free();
+```
+
+**Constraint**: `pjson_data` must be stored with zero-initialisation before first use (`pjson_data d{};`).
+
+---
+
 ### Design Principles
 
 1. **Trivial copyability**: Every struct stored via `persist<T>` or `AddressManager<T>` must satisfy `std::is_trivially_copyable`. No vtables, no non-trivial constructors/destructors, no raw heap pointers.
