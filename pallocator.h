@@ -1,19 +1,19 @@
 #pragma once
-#include "persist.h"
+#include "pam.h"
 #include <cstddef>
 #include <limits>
 
 // pallocator<T> — персистный STL-совместимый аллокатор.
 //
-// Реализован на основе AddressManager<T>. Выделяет/освобождает непрерывные массивы T
-// в персистном адресном пространстве через CreateArray/DeleteArray.
+// Реализован непосредственно на основе PersistentAddressSpace.
+// Выделяет/освобождает непрерывные массивы T в персистном адресном
+// пространстве через CreateArray/Delete.
 //
 // Ограничения:
-//   - T должен быть тривиально копируемым (проверяется AddressManager<T>).
 //   - Возвращает raw-указатели C++ (через разрешение смещения ПАП → указатель).
-//     Указатель действителен, пока AddressManager<T> жив.
+//     Указатель действителен, пока PersistentAddressSpace жив.
 //   - Стандартные STL-контейнеры, использующие этот аллокатор
-//     (например, std::vector<T, pallocator<T>>), живут только пока AddressManager<T> жив.
+//     (например, std::vector<T, pallocator<T>>), живут только пока ПАП жив.
 //   - Аллокатор сам по себе НЕ обеспечивает межпроцессную персистность —
 //     для этого вызывающий код должен отдельно сохранять смещения (fptr<T>).
 //
@@ -45,26 +45,27 @@ public:
     ~pallocator() noexcept = default;
 
     // allocate: создать n объектов в персистном адресном пространстве.
-    // Возвращает raw-указатель, действительный на время жизни AddressManager<T>.
+    // Возвращает raw-указатель, действительный на время жизни ПАП.
     pointer allocate(size_type n)
     {
         if( n == 0 ) return nullptr;
-        uintptr_t offset = AddressManager<T>::CreateArray(
+        uintptr_t offset = PersistentAddressSpace::Get().CreateArray<T>(
             static_cast<unsigned>(n), nullptr);
         if( offset == 0 )
             throw std::bad_alloc{};
-        return &AddressManager<T>::GetArrayElement(offset, 0);
+        return PersistentAddressSpace::Get().Resolve<T>(offset);
     }
 
     // deallocate: освободить массив по указателю.
-    // Использует AddressManager<T>::FindByPtr() для обратного поиска смещения по указателю.
+    // Использует PersistentAddressSpace::FindByPtr() для обратного поиска смещения.
     void deallocate(pointer p, size_type /*n*/) noexcept
     {
         if( p == nullptr ) return;
-        uintptr_t offset = AddressManager<T>::FindByPtr(p);
+        uintptr_t offset = PersistentAddressSpace::Get().FindByPtr(
+            static_cast<const void*>(p));
         if( offset != 0 )
         {
-            AddressManager<T>::DeleteArray(offset);
+            PersistentAddressSpace::Get().Delete(offset);
         }
         else
         {

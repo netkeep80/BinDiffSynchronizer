@@ -5,7 +5,6 @@
 #include <cstring>
 #include <type_traits>
 #include "pam.h"
-#include "PageDevice.h"
 
 /*
  * persist.h — Персистная инфраструктура фазы 2.
