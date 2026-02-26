@@ -264,6 +264,18 @@ private:
 //     overwriting the loaded bytes; order is now: allocate, placement-new (to
 //     initialise the object to a known state), then read from file.
 //   - AddressSpace is now a template parameter (default 1024 for backward compat).
+//
+// Task 3.4: Array allocation support.
+//   - CreateArray(count, name): allocates a contiguous array of `count` objects
+//     at a single slot.  The slot's __count field records the element count so
+//     that DeleteArray() knows exactly how many elements to release.
+//   - DeleteArray(index): frees the array and clears the slot.
+//   - Element access for arrays: GetElement(index, element) returns element #element
+//     of the array stored at slot `index`.
+//
+// Design: constructor/destructor of a persistent object must only LOAD/SAVE.
+// Allocation and deallocation of persistent memory are performed by the
+// explicit static methods Create/CreateArray/Delete/DeleteArray.
 template<class _T, unsigned AddressSpace = ADDRESS_SPACE>
 class AddressManager
 {
@@ -272,10 +284,11 @@ class AddressManager
 
     struct __info
     {
-        int     __refs;
-        _T*     __ptr;
-        bool    __used;
-        char    __name[faddress_size];
+        int      __refs;
+        _T*      __ptr;
+        bool     __used;
+        unsigned __count;    // 0 = single object, >0 = array of that many elements
+        char     __name[faddress_size];
     };
     persist< __info[AddressSpace] >   __itable;
 
@@ -284,8 +297,9 @@ public:
     {   //  очищаем старые указатели
         for( unsigned i = 1; i < AddressSpace; i++ )
         {
-            __itable[i].__refs = 0;
-            __itable[i].__ptr = NULL;
+            __itable[i].__refs  = 0;
+            __itable[i].__ptr   = NULL;
+            __itable[i].__count = 0;
         }
     }
 
@@ -304,44 +318,99 @@ public:
     }
 
 private:
-    // Returns the filename used for the flat object-data file.
-    // Fixed: was returning a static char[] (not thread-safe); now returns std::string.
+    // Returns the filename for a single-object slot.
+    // Single objects are stored at offset (index-1)*sizeof(_T) in a flat file.
     std::string get_fname( unsigned /*index*/ )
     {
         return std::string("./") + typeid(_T).name() + ".extend";
+    }
+
+    // Returns the filename for an array slot.
+    // Arrays are stored in a per-slot file to avoid overlap with adjacent slots.
+    // Format: ./<type_name>_arr_<index>.extend
+    std::string get_array_fname( unsigned index )
+    {
+        return std::string("./") + typeid(_T).name() + "_arr_"
+               + std::to_string(index) + ".extend";
     }
 
     void __load__obj( unsigned index )
     {
         if( index == 0 )    return;
         if( !__itable[index].__used )    return;    // не существует такого объекта
-        ifstream in( get_fname( index ) );
-        in.seekg( (index - 1) * sizeof(_T) );
-        if( in.good() )
+        unsigned count = __itable[index].__count;
+        if( count > 0 )
         {
-            // Allocate raw storage, zero-initialise, then load bytes from file.
-            // Fixed: was calling placement-new AFTER reading, which reset the data.
-            // Placement-new on array types is also invalid C++; since _T is
-            // trivially copyable, zero-init + raw read is correct.
-            char* raw = new char[sizeof(_T)];
-            std::memset( raw, 0, sizeof(_T) );
-            in.read( raw, sizeof(_T) );
-            __itable[index].__ptr = reinterpret_cast<_T*>(raw);
+            // Array slot: load from per-slot file.
+            size_t bytes = sizeof(_T) * count;
+            ifstream in( get_array_fname( index ), ios::binary );
+            if( in.good() )
+            {
+                char* raw = new char[bytes];
+                std::memset( raw, 0, bytes );
+                in.read( raw, (std::streamsize)bytes );
+                __itable[index].__ptr = reinterpret_cast<_T*>(raw);
+            }
+            else
+            {
+                // File not yet created — allocate zero-initialised memory.
+                char* raw = new char[bytes];
+                std::memset( raw, 0, bytes );
+                __itable[index].__ptr = reinterpret_cast<_T*>(raw);
+            }
+        }
+        else
+        {
+            // Single object: load from the shared flat file at offset.
+            ifstream in( get_fname( index ), ios::binary );
+            in.seekg( (index - 1) * sizeof(_T) );
+            if( in.good() )
+            {
+                // Allocate raw storage, zero-initialise, then load bytes from file.
+                // Fixed: was calling placement-new AFTER reading, which reset the data.
+                // Placement-new on array types is also invalid C++; since _T is
+                // trivially copyable, zero-init + raw read is correct.
+                char* raw = new char[sizeof(_T)];
+                std::memset( raw, 0, sizeof(_T) );
+                in.read( raw, sizeof(_T) );
+                __itable[index].__ptr = reinterpret_cast<_T*>(raw);
+            }
         }
     }
 
     void __save__obj( unsigned index )
     {
-        ofstream out( get_fname( index ), ios::out | ios::binary );
-        out.seekp( (index - 1) * sizeof(_T) );
-        if( out.good() ) out.write( (char*)__itable[index].__ptr, sizeof(_T) );
-        else             cout << "AddressManager::__save__obj() can't save obj" << endl;
+        unsigned count = __itable[index].__count;
+        if( count > 0 )
+        {
+            // Array slot: save to per-slot file.
+            size_t bytes = sizeof(_T) * count;
+            ofstream out( get_array_fname( index ), ios::out | ios::binary );
+            if( out.good() ) out.write( (char*)__itable[index].__ptr, (std::streamsize)bytes );
+            else             cout << "AddressManager::__save__obj() can't save array slot " << index << endl;
+        }
+        else
+        {
+            // Single object: save to shared flat file.
+            ofstream out( get_fname( index ), ios::out | ios::binary );
+            out.seekp( (index - 1) * sizeof(_T) );
+            if( out.good() ) out.write( (char*)__itable[index].__ptr, sizeof(_T) );
+            else             cout << "AddressManager::__save__obj() can't save obj" << endl;
+        }
     }
 
     inline _T&	operator[]( unsigned index )
     {
         if( __itable[index].__ptr == NULL ) __load__obj( index );
         return *__itable[index].__ptr;
+    };
+
+    // Returns element #element of an array stored at slot index.
+    // Only valid if __count > 0.
+    inline _T& GetElement( unsigned index, unsigned element )
+    {
+        if( __itable[index].__ptr == NULL ) __load__obj( index );
+        return __itable[index].__ptr[element];
     };
 
 public:
@@ -362,8 +431,9 @@ public:
             {
                 if( !AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used )
                 {
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used = true;
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__ptr = new _T();
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used  = true;
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__count = 0;  // single object
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__ptr   = new _T();
                     std::strncpy( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name, __faddress, faddress_size - 1 );
                     AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name[faddress_size - 1] = '\0';
                     return i;
@@ -371,6 +441,55 @@ public:
             }
         }
         return addr;
+    }
+
+    // CreateArray(): allocate a contiguous array of `count` elements at one slot.
+    //
+    // This is the explicit persistent-memory-allocation method for arrays.
+    // Constructor/destructor of persistent objects must ONLY load/save — allocation
+    // and deallocation must be performed here, by the persistent memory manager.
+    //
+    // Returns the slot index (≥ 1) on success, 0 if the address space is exhausted.
+    static unsigned CreateArray( unsigned count, char* __faddress )
+    {
+        if( count == 0 ) return 0;
+        unsigned addr = 0;
+        if( __faddress != NULL ) addr = Find( __faddress );
+        if( !addr )
+        {
+            for( unsigned i = 1; i < AddressSpace; i++ )
+            {
+                if( !AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used )
+                {
+                    // Allocate raw zero-initialised storage for `count` elements.
+                    // _T is trivially copyable (enforced by persist<T>), so
+                    // zero-init is a valid initial state.
+                    char* raw = new char[sizeof(_T) * count];
+                    std::memset( raw, 0, sizeof(_T) * count );
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used  = true;
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__count = count;
+                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__ptr   = reinterpret_cast<_T*>(raw);
+                    if( __faddress )
+                    {
+                        std::strncpy( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name, __faddress, faddress_size - 1 );
+                        AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name[faddress_size - 1] = '\0';
+                    }
+                    else
+                    {
+                        AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name[0] = '\0';
+                    }
+                    return i;
+                }
+            }
+        }
+        return addr;
+    }
+
+    // GetCount(): returns the element count for an array slot (0 = single object).
+    static unsigned GetCount( unsigned index )
+    {
+        if( index == 0 ) return 0;
+        return AddressManager<_T, AddressSpace>::GetManager().__itable[index].__count;
     }
 
     static void Release( unsigned index )
@@ -382,6 +501,11 @@ public:
     // Delete(): explicitly release a slot and its storage.
     // Sets the slot __used flag to false and frees the in-memory object.
     // Since _T is trivially copyable, no explicit destructor call is needed.
+    //
+    // IMPORTANT: This is the correct method for releasing resources allocated
+    // with Create().  For arrays allocated with CreateArray(), use DeleteArray().
+    // Constructor/destructor of persistent objects must ONLY load/save — this
+    // explicit method is the persistent memory deallocation entry point.
     static void Delete( unsigned index )
     {
         if( index == 0 ) return;
@@ -392,9 +516,31 @@ public:
             delete[] (char*)mgr.__itable[index].__ptr;
             mgr.__itable[index].__ptr = NULL;
         }
-        mgr.__itable[index].__used = false;
-        mgr.__itable[index].__refs = 0;
+        mgr.__itable[index].__used  = false;
+        mgr.__itable[index].__refs  = 0;
+        mgr.__itable[index].__count = 0;
         mgr.__itable[index].__name[0] = '\0';
+    }
+
+    // DeleteArray(): explicitly release a slot allocated by CreateArray().
+    //
+    // This is the explicit persistent-memory-deallocation method for arrays.
+    // Constructor/destructor of persistent objects must ONLY load/save — array
+    // deallocation must be performed here, by the persistent memory manager.
+    static void DeleteArray( unsigned index )
+    {
+        // Same implementation as Delete(): the distinction is semantic (array vs
+        // single object).  Both release the raw char[] storage via delete[].
+        Delete( index );
+    }
+
+    // GetArrayElement(): access element `elem` of an array stored at slot `index`.
+    // Only valid when the slot was allocated with CreateArray(count, ...) and
+    // elem < count.  Returns a reference to the element in the loaded array.
+    static _T& GetArrayElement( unsigned index, unsigned elem )
+    {
+        if( index == 0 ) { static _T dummy{}; return dummy; }
+        return AddressManager<_T, AddressSpace>::GetManager().GetElement( index, elem );
     }
 
     static unsigned Find( char* __faddress )
@@ -457,12 +603,63 @@ public:
         __addr = AddressManager<_T>::Create( __faddress );
     }
 
+    // NewArray(): allocate a contiguous array of `count` elements in persistent
+    // memory and make this fptr point to it.
+    //
+    // This is the explicit persistent-memory-allocation method for arrays.
+    // Constructor/destructor of persistent objects must ONLY load/save — all
+    // allocation must go through this method (or New() for single objects).
+    //
+    // The element count is stored in AddressManager<T>'s slot metadata, so
+    // fptr<T> itself stays trivially copyable (stores only __addr).
+    void    NewArray( unsigned count, char* __faddress = nullptr )
+    {
+        __addr = AddressManager<_T>::CreateArray( count, __faddress );
+    }
+
     // Delete(): explicitly delete the persistent object this fptr refers to.
     // After Delete(), the slot is freed and __addr is set to 0 (null).
+    //
+    // This is the explicit persistent-memory-deallocation method.
+    // Constructor/destructor of persistent objects must ONLY load/save — all
+    // deallocation must go through this method (or DeleteArray() for arrays).
     void    Delete()
     {
         AddressManager<_T>::Delete( __addr );
         __addr = 0;
+    }
+
+    // DeleteArray(): explicitly delete the persistent array this fptr refers to.
+    // After DeleteArray(), the slot is freed and __addr is set to 0 (null).
+    //
+    // This is the explicit persistent-memory-deallocation method for arrays.
+    // Constructor/destructor of persistent objects must ONLY load/save — all
+    // deallocation must go through this method (or Delete() for single objects).
+    void    DeleteArray()
+    {
+        AddressManager<_T>::DeleteArray( __addr );
+        __addr = 0;
+    }
+
+    // count(): returns the element count stored in this fptr's AddressManager slot.
+    // Returns 0 if the fptr is null or points to a single object (not an array).
+    unsigned count() const
+    {
+        if( __addr == 0 ) return 0;
+        return AddressManager<_T>::GetCount( __addr );
+    }
+
+    // operator[]: access element `idx` of a persistent array.
+    // Only valid when this fptr was allocated with NewArray(count, ...) and
+    // idx < count.  Returns a reference to the in-memory element.
+    _T& operator[]( unsigned idx )
+    {
+        return AddressManager<_T>::GetArrayElement( __addr, idx );
+    }
+
+    const _T& operator[]( unsigned idx ) const
+    {
+        return AddressManager<_T>::GetArrayElement( __addr, idx );
     }
 
     unsigned addr() const { return __addr; }

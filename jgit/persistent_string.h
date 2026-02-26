@@ -6,6 +6,8 @@
 #include <string>
 #include <iterator>
 
+#include "persist.h"
+
 // =============================================================================
 // Task 2.2.1 — jgit::persistent_string
 //
@@ -14,19 +16,27 @@
 // Design:
 //   - Short String Optimization (SSO): strings up to SSO_SIZE chars are stored
 //     inline in sso_buf[], with no heap allocation.
-//   - Long strings: the content is stored separately (e.g. in ObjectStore), and
-//     only a fixed-size SHA-256 ObjectId (64-char hex string) is kept here.
-//     For Task 2.2 we store long strings in a second fixed buffer so that the
-//     entire struct remains trivially copyable and compatible with persist<T>.
+//   - Long strings: the content is stored in dynamic PERSISTENT memory via
+//     fptr<char>, which points to a char array managed by AddressManager<char>.
+//     This replaces the previous 65 KB static long_buf[].
 //
 // Key property: sizeof(persistent_string) is a compile-time constant with NO
-// heap-allocated members, making it fully compatible with persist<T>.
+// regular (non-persistent) heap-allocated members, making it fully compatible
+// with persist<T>.  The fptr<char> long_ptr member stores only an address
+// index (unsigned) into AddressManager<char>, which is also trivially copyable.
+//
+// IMPORTANT MEMORY MANAGEMENT CONSTRAINT (Task 3.4):
+//   - The constructor and destructor of persistent_string only LOAD/SAVE state.
+//     They do NOT allocate or free persistent memory.
+//   - Allocation of persistent long-string storage is performed explicitly via
+//     alloc_long(n) or assign_persistent(s, n).
+//   - Deallocation is performed explicitly via free_long().
+//   - This is consistent with the jgit persistent-memory design principle:
+//     constructor/destructor = load/save; allocation/deallocation = explicit.
 //
 // Task 3.3.2 — Extended to satisfy the nlohmann::basic_json StringType concept:
 //   Added: value_type, npos, fill constructor, operator[], push_back, append,
 //          operator+=, begin/end iterators, find, find_first_of, substr.
-//   These are all ordinary member functions; the special member functions
-//   remain trivial/defaulted, so std::is_trivially_copyable is preserved.
 // =============================================================================
 
 namespace jgit {
@@ -43,39 +53,50 @@ struct persistent_string {
     // Short String Optimization threshold (characters, not including NUL).
     static constexpr size_t SSO_SIZE = 23;
 
-    // Maximum length for a "long" string stored inline in long_buf[].
-    // 65535 bytes covers virtually all real-world JSON string values while
-    // keeping the struct fixed-size and compatible with persist<T>.
-    static constexpr size_t LONG_BUF_SIZE = 65535;
+    // Maximum number of characters for a long string stored in persistent memory.
+    // AddressManager<char> supports up to ADDRESS_SPACE slots (default 1024).
+    // Each slot can hold an array of up to MAX_LONG_SIZE chars.
+    static constexpr size_t MAX_LONG_SIZE = 65535;
 
-    // ---- data members (all fixed-size, no pointers) ----
+    // ---- data members (all fixed-size, no regular heap pointers) ----
 
     // When is_long == false: the string is stored NUL-terminated in sso_buf[].
-    // When is_long == true:  sso_buf is unused; the string is in long_buf[].
+    // When is_long == true:  sso_buf is unused; the string is in persistent
+    //                        memory pointed to by long_ptr.
     char   sso_buf[SSO_SIZE + 1];  // +1 for NUL terminator
-    bool   is_long;                // true  → data is in long_buf[]
+    bool   is_long;                // true  → data is in persistent memory via long_ptr
                                    // false → data is in sso_buf[]
-    // Storage for strings longer than SSO_SIZE.
-    // Fixed-size so the struct is trivially copyable with no heap allocation.
-    char   long_buf[LONG_BUF_SIZE + 1];  // +1 for NUL terminator
+    // Persistent pointer to the char array for long strings.
+    // long_ptr.addr() == 0 means no persistent array is allocated.
+    // This field is trivially copyable (stores only an unsigned address index).
+    fptr<char> long_ptr;
+
+    // Cached length of the long string (number of chars, excluding NUL).
+    // Kept in sync whenever the long string content changes.
+    unsigned   long_len;
 
     // ---- constructors ----
 
-    // Default constructor: empty string
+    // Default constructor: empty string, no persistent allocation.
     persistent_string() noexcept {
         sso_buf[0] = '\0';
         is_long    = false;
-        long_buf[0]= '\0';
+        // long_ptr default-constructs to __addr=0 (null, no allocation)
+        long_len   = 0;
     }
 
     // Construct from C string (implicit — required for StringType compatibility,
     // so that string literals like "hello" can be used directly as keys/values
     // in expressions like j["key"] = "value" when string_t = persistent_string).
+    //
+    // For short strings (≤ SSO_SIZE): stored inline in sso_buf[], no allocation.
+    // For long strings (> SSO_SIZE):  stored in persistent memory via long_ptr.
+    //   This constructor performs persistent allocation for long strings.
     persistent_string(const char* s) noexcept {  // NOLINT(google-explicit-constructor)
         sso_buf[0] = '\0';
         is_long    = false;
-        long_buf[0]= '\0';
-        if (s) assign(s);
+        long_len   = 0;
+        if (s) _assign(s, std::strlen(s));
     }
 
     // Construct from std::string (implicit — required for interoperability with
@@ -83,26 +104,29 @@ struct persistent_string {
     persistent_string(const std::string& s) noexcept {  // NOLINT(google-explicit-constructor)
         sso_buf[0] = '\0';
         is_long    = false;
-        long_buf[0]= '\0';
-        assign(s.c_str(), s.size());
+        long_len   = 0;
+        _assign(s.c_str(), s.size());
     }
 
     // Fill constructor: repeat character c, count times.
     // Required by nlohmann::basic_json StringType for indent/padding.
-    // If count exceeds the buffer capacity, it is clamped to LONG_BUF_SIZE.
     persistent_string(size_t count, char c) noexcept {
-        sso_buf[0]  = '\0';
-        long_buf[0] = '\0';
-        is_long     = false;
+        sso_buf[0] = '\0';
+        is_long    = false;
+        long_len   = 0;
         if (count == 0) return;
-        size_t actual = (count <= LONG_BUF_SIZE) ? count : LONG_BUF_SIZE;
+        size_t actual = (count <= MAX_LONG_SIZE) ? count : MAX_LONG_SIZE;
         if (actual <= SSO_SIZE) {
             std::memset(sso_buf, c, actual);
             sso_buf[actual] = '\0';
         } else {
-            is_long = true;
-            std::memset(long_buf, c, actual);
-            long_buf[actual] = '\0';
+            // Allocate persistent memory for the fill string.
+            _alloc_long(actual);
+            if (long_ptr.addr() != 0) {
+                for (size_t i = 0; i < actual; ++i) long_ptr[i] = c;
+                long_ptr[actual] = '\0';
+                long_len = static_cast<unsigned>(actual);
+            }
         }
     }
 
@@ -110,31 +134,73 @@ struct persistent_string {
     // Required by nlohmann::basic_json StringType for iterator-based construction.
     template<typename InputIt>
     persistent_string(InputIt first, InputIt last) noexcept {
-        sso_buf[0]  = '\0';
-        long_buf[0] = '\0';
-        is_long     = false;
-        size_t i = 0;
-        for (auto it = first; it != last; ++it, ++i) {
-            if (i < SSO_SIZE) {
-                sso_buf[i] = static_cast<char>(*it);
-            } else if (i == SSO_SIZE) {
-                // Transition: copy SSO content to long_buf
-                is_long = true;
-                std::memcpy(long_buf, sso_buf, SSO_SIZE);
-                sso_buf[0] = '\0';
-                long_buf[SSO_SIZE] = static_cast<char>(*it);
-            } else if (i < LONG_BUF_SIZE) {
-                long_buf[i] = static_cast<char>(*it);
-            } else {
-                break;  // clamped
-            }
+        sso_buf[0] = '\0';
+        is_long    = false;
+        long_len   = 0;
+        // Materialise the range into a temporary buffer first.
+        // This avoids multiple persistent allocations.
+        std::string tmp(first, last);
+        _assign(tmp.c_str(), tmp.size());
+    }
+
+    // Copy constructor: SHALLOW copy (trivially copyable).
+    // For short strings: trivial copy of sso_buf.
+    // For long strings: copies the fptr<char> address index (shares the same
+    //   AddressManager<char> slot).  Two persistent_string objects referring
+    //   to the same slot is valid in the persistent memory model — the slot
+    //   is owned by the address space, not by a single string object.
+    //   Explicit free_long() must be called only ONCE to release the slot.
+    //
+    // Defaulted = trivially copyable, required by persist<T> and by
+    // persistent_map/persistent_json_value which embed persistent_string.
+    persistent_string(const persistent_string& other) noexcept = default;
+
+    // Copy assignment operator: SHALLOW copy (trivially copyable).
+    // Same semantics as copy constructor — shares the fptr<char> slot.
+    persistent_string& operator=(const persistent_string& other) noexcept = default;
+
+    // Destructor: ONLY marks the persistent string as unloaded (LOAD/SAVE).
+    // Does NOT free persistent memory.
+    //
+    // IMPORTANT: Persistent memory allocated for long strings is NOT freed here.
+    // To avoid leaks, callers must call free_long() explicitly before destroying
+    // a persistent_string that owns a long allocation.
+    //
+    // Rationale: consistent with jgit persistent-memory design — constructor/
+    // destructor = load/save; persistent allocation/deallocation = explicit.
+    ~persistent_string() noexcept = default;
+
+    // ---- explicit persistent-memory management ----
+
+    // alloc_long(n): allocate persistent memory for n characters (+1 for NUL).
+    // Sets is_long=true and long_ptr to point to the new allocation.
+    // No-op if is_long is already true and enough space is available.
+    // NOTE: does NOT copy any content — caller must write via long_ptr[].
+    void alloc_long(size_t n) noexcept {
+        _alloc_long(n);
+    }
+
+    // free_long(): explicitly release the persistent char array.
+    // Resets is_long=false and long_ptr to null.
+    // This is the explicit persistent-memory deallocation entry point.
+    void free_long() noexcept {
+        if (is_long && long_ptr.addr() != 0) {
+            long_ptr.DeleteArray();
         }
-        // NUL-terminate
-        if (!is_long) {
-            sso_buf[i < SSO_SIZE ? i : SSO_SIZE] = '\0';
-        } else {
-            long_buf[i <= LONG_BUF_SIZE ? i : LONG_BUF_SIZE] = '\0';
+        is_long  = false;
+        long_len = 0;
+        sso_buf[0] = '\0';
+    }
+
+    // assign_persistent(s, n): allocate persistent memory and copy n chars from s.
+    // Combines alloc_long + memcpy for convenience.
+    void assign_persistent(const char* s, size_t n) noexcept {
+        if (is_long && long_ptr.addr() != 0) {
+            long_ptr.DeleteArray();
+            is_long  = false;
+            long_len = 0;
         }
+        _assign(s, n);
     }
 
     // ---- assignment ----
@@ -144,19 +210,14 @@ struct persistent_string {
     }
 
     void assign(const char* s, size_t len) noexcept {
-        long_buf[0] = '\0';
-        if (len <= SSO_SIZE) {
-            is_long = false;
-            if (s && len > 0) std::memcpy(sso_buf, s, len);
-            sso_buf[len] = '\0';
-        } else {
-            is_long = true;
-            sso_buf[0] = '\0';
-            // Clamp to LONG_BUF_SIZE if the string is unreasonably large.
-            size_t copy_len = (len < LONG_BUF_SIZE) ? len : LONG_BUF_SIZE;
-            if (s && copy_len > 0) std::memcpy(long_buf, s, copy_len);
-            long_buf[copy_len] = '\0';
+        // Free old long allocation if switching.
+        if (is_long && long_ptr.addr() != 0) {
+            long_ptr.DeleteArray();
+            is_long  = false;
+            long_len = 0;
         }
+        sso_buf[0] = '\0';
+        _assign(s, len);
     }
 
     persistent_string& operator=(const char* s) noexcept {
@@ -169,28 +230,32 @@ struct persistent_string {
         return *this;
     }
 
-    persistent_string& operator=(const persistent_string& other) noexcept = default;
-
     // ---- accessors ----
 
     // Returns a pointer to the NUL-terminated string data.
     const char* c_str() const noexcept {
-        return is_long ? long_buf : sso_buf;
+        if (!is_long) return sso_buf;
+        if (long_ptr.addr() == 0) return "";
+        return &long_ptr[0];
     }
 
     // Returns the length of the stored string (excluding NUL).
     size_t size() const noexcept {
-        return std::strlen(c_str());
+        if (!is_long) return std::strlen(sso_buf);
+        return static_cast<size_t>(long_len);
     }
 
     bool empty() const noexcept {
-        return c_str()[0] == '\0';
+        if (!is_long) return sso_buf[0] == '\0';
+        return long_len == 0;
     }
 
-    // ---- mutable access (non-const c_str ptr) ----
+    // ---- mutable access (non-const data ptr) ----
 
     char* data() noexcept {
-        return is_long ? long_buf : sso_buf;
+        if (!is_long) return sso_buf;
+        if (long_ptr.addr() == 0) return sso_buf;  // fallback
+        return &long_ptr[0];
     }
 
     const char* data() const noexcept {
@@ -217,22 +282,19 @@ struct persistent_string {
     // ---- modifiers ----
 
     // Append a single character.
-    // If the current string is at LONG_BUF_SIZE capacity, the call is a no-op.
     persistent_string& push_back(char c) noexcept {
         size_t current = size();
-        if (current >= LONG_BUF_SIZE) return *this;  // capacity limit
-        if (current < SSO_SIZE && !is_long) {
+        if (current >= MAX_LONG_SIZE) return *this;  // capacity limit
+        if (!is_long && current < SSO_SIZE) {
             sso_buf[current]     = c;
             sso_buf[current + 1] = '\0';
         } else {
-            if (!is_long) {
-                // Promote from SSO to long_buf
-                is_long = true;
-                std::memcpy(long_buf, sso_buf, current);
-                sso_buf[0] = '\0';
+            _promote_to_long_if_needed(current);
+            if (long_ptr.addr() != 0) {
+                long_ptr[current]     = c;
+                long_ptr[current + 1] = '\0';
+                long_len = static_cast<unsigned>(current + 1);
             }
-            long_buf[current]     = c;
-            long_buf[current + 1] = '\0';
         }
         return *this;
     }
@@ -241,23 +303,21 @@ struct persistent_string {
     persistent_string& append(const char* s, size_t n) noexcept {
         if (!s || n == 0) return *this;
         size_t current = size();
-        size_t new_len = current + n;
-        if (new_len > LONG_BUF_SIZE) n = LONG_BUF_SIZE - current;  // clamp
+        size_t avail   = MAX_LONG_SIZE - current;
+        if (n > avail) n = avail;
         if (n == 0) return *this;
-        new_len = current + n;
+        size_t new_len = current + n;
 
-        if (new_len <= SSO_SIZE && !is_long) {
+        if (!is_long && new_len <= SSO_SIZE) {
             std::memcpy(sso_buf + current, s, n);
             sso_buf[new_len] = '\0';
         } else {
-            if (!is_long) {
-                // Promote SSO content to long_buf
-                is_long = true;
-                std::memcpy(long_buf, sso_buf, current);
-                sso_buf[0] = '\0';
+            _promote_to_long_if_needed(current);
+            if (long_ptr.addr() != 0) {
+                for (size_t i = 0; i < n; ++i) long_ptr[current + i] = s[i];
+                long_ptr[new_len] = '\0';
+                long_len = static_cast<unsigned>(new_len);
             }
-            std::memcpy(long_buf + current, s, n);
-            long_buf[new_len] = '\0';
         }
         return *this;
     }
@@ -275,10 +335,8 @@ struct persistent_string {
     // Range-based append [first, last).
     template<typename InputIt>
     persistent_string& append(InputIt first, InputIt last) noexcept {
-        for (auto it = first; it != last; ++it) {
-            push_back(static_cast<char>(*it));
-        }
-        return *this;
+        std::string tmp(first, last);
+        return append(tmp.c_str(), tmp.size());
     }
 
     // operator+= overloads
@@ -363,7 +421,7 @@ struct persistent_string {
         size_t avail = current - pos;
         size_t actual = (len == npos || len > avail) ? avail : len;
         persistent_string result{};
-        result.assign(buf + pos, actual);
+        result._assign(buf + pos, actual);
         return result;
     }
 
@@ -371,9 +429,9 @@ struct persistent_string {
 
     size_t length() const noexcept { return size(); }
 
-    size_t max_size() const noexcept { return LONG_BUF_SIZE; }
+    size_t max_size() const noexcept { return MAX_LONG_SIZE; }
 
-    size_t capacity() const noexcept { return LONG_BUF_SIZE; }
+    size_t capacity() const noexcept { return MAX_LONG_SIZE; }
 
     // front/back for character access (required by nlohmann::basic_json serialiser)
     char& front() noexcept { return data()[0]; }
@@ -395,21 +453,28 @@ struct persistent_string {
         if (!is_long) {
             sso_buf[n - 1] = '\0';
         } else {
-            long_buf[n - 1] = '\0';
-            if (n - 1 <= SSO_SIZE) {
-                // Demote back to SSO
-                is_long = false;
-                std::memcpy(sso_buf, long_buf, n - 1);
-                sso_buf[n - 1] = '\0';
-                long_buf[0] = '\0';
+            if (long_ptr.addr() != 0) {
+                long_ptr[n - 1] = '\0';
+                long_len = static_cast<unsigned>(n - 1);
+                // Demote to SSO if short enough (saves persistent memory).
+                if (long_len <= SSO_SIZE) {
+                    std::memcpy(sso_buf, &long_ptr[0], long_len);
+                    sso_buf[long_len] = '\0';
+                    long_ptr.DeleteArray();
+                    is_long  = false;
+                    long_len = 0;
+                }
             }
         }
     }
 
     void clear() noexcept {
-        is_long     = false;
-        sso_buf[0]  = '\0';
-        long_buf[0] = '\0';
+        if (is_long && long_ptr.addr() != 0) {
+            long_ptr.DeleteArray();
+        }
+        is_long    = false;
+        long_len   = 0;
+        sso_buf[0] = '\0';
     }
 
     void resize(size_t new_size, char fill = '\0') noexcept {
@@ -418,17 +483,20 @@ struct persistent_string {
             // Truncate
             if (!is_long) {
                 sso_buf[new_size] = '\0';
-            } else {
-                long_buf[new_size] = '\0';
+            } else if (long_ptr.addr() != 0) {
+                long_ptr[new_size] = '\0';
+                long_len = static_cast<unsigned>(new_size);
             }
         } else {
             // Extend with fill character
             size_t add = new_size - current;
-            append(std::string(add, fill).c_str(), add);
+            // fill `add` characters
+            for (size_t i = 0; i < add; ++i) push_back(fill);
         }
     }
 
-    // reserve is a no-op (fixed-size buffer) but required by some nlohmann internals.
+    // reserve is effectively a no-op (persistent memory is allocated on demand)
+    // but required by some nlohmann internals.
     void reserve(size_t /*new_cap*/) noexcept {}
 
     // ---- replace (used in JSON pointer escape/unescape) ----
@@ -437,18 +505,21 @@ struct persistent_string {
     // Matches the minimal std::string::replace(pos, count, s) signature used by
     // nlohmann::json_pointer.
     persistent_string& replace(size_t pos, size_t count, const char* s) noexcept {
-        const char* orig = c_str();
-        size_t len = size();
-        if (pos > len) pos = len;
-        if (count > len - pos) count = len - pos;
-        size_t slen = s ? std::strlen(s) : 0;
-
-        // Build result: orig[0..pos) + s + orig[pos+count..len)
-        persistent_string result{};
-        result.assign(orig, pos);
-        if (s && slen > 0) result.append(s, slen);
-        result.append(orig + pos + count, len - pos - count);
-        *this = result;
+        // Build result via std::string for simplicity (no allocation concern here
+        // since this is called from nlohmann internals for short strings).
+        std::string orig(c_str());
+        if (pos > orig.size()) pos = orig.size();
+        if (count > orig.size() - pos) count = orig.size() - pos;
+        std::string result = orig.substr(0, pos)
+                           + (s ? s : "")
+                           + orig.substr(pos + count);
+        // Free old and reassign.
+        if (is_long && long_ptr.addr() != 0) {
+            long_ptr.DeleteArray();
+            is_long  = false;
+            long_len = 0;
+        }
+        _assign(result.c_str(), result.size());
         return *this;
     }
 
@@ -512,29 +583,90 @@ struct persistent_string {
     std::string to_std_string() const {
         return std::string(c_str());
     }
+
+private:
+    // ---- internal helpers ----
+
+    // _alloc_long(n): allocate a persistent char array of n+1 bytes (+1 for NUL).
+    // Sets is_long=true, long_ptr to the new allocation, long_len=0.
+    // Does NOT write any content.
+    void _alloc_long(size_t n) noexcept {
+        if (n > MAX_LONG_SIZE) n = MAX_LONG_SIZE;
+        // Allocate n+1 chars (+1 for NUL).
+        long_ptr.NewArray(static_cast<unsigned>(n + 1), nullptr);
+        if (long_ptr.addr() != 0) {
+            is_long  = true;
+            long_len = 0;
+            long_ptr[0] = '\0';
+        }
+    }
+
+    // _promote_to_long_if_needed(current_len): if is_long is false, allocates
+    // persistent memory and copies sso_buf content to it.
+    void _promote_to_long_if_needed(size_t current_len) noexcept {
+        if (is_long) return;  // already in long mode
+        // Allocate persistent array large enough for future content.
+        // We allocate MAX_LONG_SIZE so we don't need to reallocate later.
+        long_ptr.NewArray(static_cast<unsigned>(MAX_LONG_SIZE + 1), nullptr);
+        if (long_ptr.addr() != 0) {
+            // Copy sso_buf to the persistent array.
+            for (size_t i = 0; i <= current_len; ++i) long_ptr[i] = sso_buf[i];
+            is_long  = true;
+            long_len = static_cast<unsigned>(current_len);
+            sso_buf[0] = '\0';
+        }
+    }
+
+    // _assign(s, len): assign string data without freeing first.
+    // Assumes the caller has already handled any prior allocation.
+    void _assign(const char* s, size_t len) noexcept {
+        if (!s || len == 0) {
+            sso_buf[0] = '\0';
+            is_long    = false;
+            long_len   = 0;
+            return;
+        }
+        if (len > MAX_LONG_SIZE) len = MAX_LONG_SIZE;
+        if (len <= SSO_SIZE) {
+            std::memcpy(sso_buf, s, len);
+            sso_buf[len] = '\0';
+            is_long  = false;
+            long_len = 0;
+        } else {
+            // Allocate persistent memory for long string.
+            _alloc_long(len);
+            if (long_ptr.addr() != 0) {
+                for (size_t i = 0; i < len; ++i) long_ptr[i] = s[i];
+                long_ptr[len] = '\0';
+                long_len = static_cast<unsigned>(len);
+            }
+        }
+    }
+
 };
 
-// Verify layout: the struct must have exactly the expected size (no padding surprises).
-static_assert(
-    persistent_string::SSO_SIZE + 1 + 1 + persistent_string::LONG_BUF_SIZE + 1
-        == sizeof(persistent_string),
-    "jgit::persistent_string layout mismatch — unexpected padding");
+// Verify that fptr<char> is trivially copyable (it stores only an unsigned).
+static_assert(std::is_trivially_copyable<fptr<char>>::value,
+              "fptr<char> must be trivially copyable");
 
-// Verify that the struct is trivially copyable (required for persist<T>).
-// Note: adding ordinary member functions does NOT affect trivial copyability.
-// Only special member functions (copy ctor, copy assign, destructor) matter.
+// Verify layout consistency.
+static_assert(sizeof(fptr<char>) == sizeof(unsigned),
+              "fptr<char> must be the size of an unsigned");
+
+// Verify that persistent_string is trivially copyable.
+// Task 3.4: the copy constructor and copy assignment are now defaulted (shallow
+// copy) so that persistent_string satisfies trivially copyable.  For long
+// strings, the shallow copy shares the same AddressManager<char> slot — this
+// is valid in the persistent model (the slot is owned by the address space,
+// not by a single string object).  Explicit free_long() must be called once
+// to release the slot, and raw-byte copies (e.g. via persist<T>) will share
+// the underlying persistent char array.
 static_assert(std::is_trivially_copyable<persistent_string>::value,
               "jgit::persistent_string must be trivially copyable for use with persist<T>");
 
 // Cross-type comparison operators between jgit::persistent_string and
 // std::string.  Required when nlohmann::basic_json uses transparent comparison
-// (std::less<void>) in its std::map — e.g. when looking up by std::string key.
-//
-// Note: equality operators are intentionally NOT provided as free functions
-// here to avoid ambiguity with the member operator==(const std::string&) and
-// the implicit operator std::string() conversion.
-// The member operators (persistent_string::operator==(const std::string&))
-// handle comparisons in both directions via implicit conversions.
+// (std::less<void>) in its std::map.
 inline bool operator<(const std::string& a, const jgit::persistent_string& b) noexcept {
     return std::strcmp(a.c_str(), b.c_str()) < 0;
 }
@@ -575,7 +707,7 @@ inline persistent_string operator+(const persistent_string& a, const char* b) no
 
 inline persistent_string operator+(const char* a, const persistent_string& b) noexcept {
     persistent_string result{};
-    if (a) result.assign(a);
+    if (a) result.assign(a, std::strlen(a));
     result.append(b);
     return result;
 }

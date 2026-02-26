@@ -183,7 +183,7 @@ public:
                 return slab[static_cast<uint32_t>(pos)];
             }
             pos     -= slab.size;
-            slab_id  = slab.next_slab_id;
+            slab_id  = slab.next_slab.addr();
         }
         return 0;
     }
@@ -343,7 +343,7 @@ private:
                     if (!array_pool_[cur_slab].push_back(elem_id)) {
                         // Current slab is full — allocate a new one and chain it.
                         uint32_t next_slab = alloc_array_slab();
-                        array_pool_[cur_slab].next_slab_id = next_slab;
+                        array_pool_[cur_slab].next_slab.set_addr(next_slab);
                         cur_slab = next_slab;
                         array_pool_[cur_slab].push_back(elem_id);
                     }
@@ -407,7 +407,7 @@ private:
                     for (uint32_t i = 0; i < slab.size; ++i) {
                         arr.push_back(export_node(slab[i]));
                     }
-                    slab_id = slab.next_slab_id;
+                    slab_id = slab.next_slab.addr();
                 }
                 return arr;
             }
