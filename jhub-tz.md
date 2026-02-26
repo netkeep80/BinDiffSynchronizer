@@ -1,9 +1,9 @@
 # ТЗ: jhub — Унифицированная JSON-инфраструктура для разработки ПО
 
-**Статус:** Черновик
-**Версия:** 1.0
+**Статус:** Актуален
+**Версия:** 1.1
 **Дата:** 2026-02-26
-**Связанные issue:** [#36](https://github.com/netkeep80/BinDiffSynchronizer/issues/36)
+**Связанные issue:** [#36](https://github.com/netkeep80/BinDiffSynchronizer/issues/36), [#38](https://github.com/netkeep80/BinDiffSynchronizer/issues/38)
 
 ---
 
@@ -121,7 +121,7 @@
 | NFR-1 | **Производительность**: чтение jgit-репозитория без парсинга JSON при old state | Открытие ≤ 100 мс для репо с 10 000 коммитов |
 | NFR-2 | **Масштабируемость**: поддержка горизонтального масштабирования через Docker Swarm | До 100 узлов кластера |
 | NFR-3 | **Надёжность**: персистное хранилище jdb с WAL (Write-Ahead Log) | RPO ≤ 1 секунда |
-| NFR-4 | **Совместимость**: импорт/экспорт существующих Git-репозиториев | Импорт стандартного Git-репо |
+| NFR-4 | **Совместимость**: jgit использует собственную модель версионирования и **не совместим с форматом Git-репозитория**; импорт стандартных Git-репо не предусмотрен | — |
 | NFR-5 | **Кросс-платформенность**: Linux, macOS, Windows | Все три платформы |
 | NFR-6 | **Отказоустойчивость**: репликация jdb между узлами через jgit push/pull | Нет единой точки отказа |
 
@@ -209,6 +209,13 @@ jgit Repository (.jgit/)
 }
 ```
 
+**Сетевой протокол jgit:**
+
+Для передачи данных между узлами jgit (push/pull) используется **HTTP/2 + REST**. Это обеспечивает:
+- Совместимость с браузерами (в т.ч. с Web GUI на WebAssembly)
+- Стандартную аутентификацию через JWT (`Authorization: Bearer <token>`)
+- Мультиплексирование запросов и server push через HTTP/2
+
 #### Компонент 2: jdb — JSON Database
 
 jdb строится поверх jgit и предоставляет мультидокументную базу данных:
@@ -291,8 +298,8 @@ jhub API Server
 ```
 
 **Технологический стек API Server:**
-- Язык: C++ (native integration с jgit/jdb) или Go (удобство разработки REST API)
-- Протокол: HTTP/1.1 + HTTP/2
+- Язык: **Go** (основной кандидат для Cloud Native стека и REST API) или **Rust** (для компонентов с требованиями к безопасности памяти и производительности); требуется дальнейший анализ — см. [migration-analysis.md](https://github.com/netkeep80/jsonRVM/blob/master/migration-analysis.md)
+- Протокол: **HTTP/2 + REST** (для совместимости и поддержки браузерных клиентов, в том числе Web GUI на WebAssembly)
 - Формат: JSON (все запросы/ответы)
 - Аутентификация: JWT в заголовке `Authorization: Bearer <token>`
 
@@ -409,7 +416,7 @@ Docker Swarm Cluster
 | 5.1 | `jdb::Database` — коллекция jgit-репозиториев | Фаза 4 |
 | 5.2 | `jdb::Collection` — именованная коллекция документов | 5.1 |
 | 5.3 | `jdb::Document` — отдельный JSON-документ в jdb | 5.2 |
-| 5.4 | Запросы: JSON Pointer, фильтрация, проекция | 5.3 |
+| 5.4 | Запросы: JSON Pointer, фильтрация, проекция; **B-tree индексы по JSON-полям для оптимизации queries** | 5.3 |
 | 5.5 | Транзакции: атомарный коммит нескольких документов | 5.3 |
 | 5.6 | Репликация: push/pull между узлами jdb | 5.5, Фаза 4 |
 | 5.7 | Интеграция с jsonRVM для исполняемых JSON-документов | 5.6 |
@@ -425,7 +432,7 @@ Docker Swarm Cluster
 
 | Задача | Описание |
 |--------|----------|
-| 6.1.1 | jhub API Server — C++ или Go HTTP-сервер |
+| 6.1.1 | jhub API Server — Go или Rust HTTP/2-сервер (HTTP/2 + REST, см. Раздел 7) |
 | 6.1.2 | Репозитории API (`/api/repos`) |
 | 6.1.3 | Issues API (`/api/issues`) |
 | 6.1.4 | Pull Requests API (`/api/pull_requests`) |
@@ -490,7 +497,37 @@ Docker Swarm Cluster
 | Децентрализованность | Ограничена | Нативная (P2P jgit) |
 | AI-интеграция | Внешние плагины | Нативная (требования + API) |
 
-### 5.3 Использование BinDiffSynchronizer
+### 5.3 Хранение бинарных файлов в jdb
+
+В `persistent_json` добавляется поддержка типа `binary` — по аналогии с `nlohmann::json`. Это позволяет хранить произвольные бинарные данные (`.so`, `.exe`, `.jpg`, Docker-слои и т.д.) непосредственно в JSON-документах jdb.
+
+**Схема работы:**
+
+| Аспект | Решение |
+|--------|---------|
+| Ссылка в JSON | `$ref` или `$bin` — указатель на бинарный объект в хранилище |
+| Хранение | ObjectStore — content-addressed CBOR-блоб (по SHA-256 хешу содержимого) |
+| Экспорт | При экспорте JSON: ссылка на jgit-объект (если получатель понимает jgit) **или** inline base64-кодирование |
+| Дедупликация | Автоматическая через content-addressing: одинаковые бинарники хранятся один раз |
+
+**Пример JSON-документа с бинарным полем:**
+```json
+{
+  "name": "myapp",
+  "version": "1.0.0",
+  "executable": {
+    "$bin": "sha256:abc123...",
+    "size": 1048576,
+    "mime": "application/octet-stream"
+  },
+  "icon": {
+    "$bin": "sha256:def456...",
+    "mime": "image/png"
+  }
+}
+```
+
+### 5.5 Использование BinDiffSynchronizer
 
 `BinDiffSynchronizer<persistent_json_value>` обеспечивает **репликацию jdb** между узлами:
 
@@ -507,7 +544,7 @@ Node A (primary)              Node B (replica)
    Передаётся только изменившееся (оптимизация трафика)
 ```
 
-### 5.4 AI-агенты и jhub
+### 5.6 AI-агенты и jhub
 
 jhub создаёт идеальную среду для AI-агентов:
 
@@ -582,16 +619,18 @@ jhub-runner: reads JSON pipeline from jdb
 
 ---
 
-## 7. Нерешённые вопросы и открытые решения
+## 7. Принятые решения по открытым вопросам
 
-| Вопрос | Варианты | Рекомендация |
-|--------|---------|--------------|
-| Язык API Server | C++ (интеграция с jgit) или Go (REST API) | C++ для первого прототипа, Go для production |
-| jsonRVM зрелость | Готов ли jsonRVM к production? | Изучить https://github.com/netkeep80/jsonRVM |
-| Совместимость с Git | Нужен ли импорт стандартных Git-репо? | Да, для миграции существующих проектов |
-| Хранение бинарных файлов | Как хранить .so, .exe, .jpg в jdb? | ObjectStore (content-addressed blob) |
-| Индексирование jdb | Нужны ли B-tree индексы по JSON-полям? | Да, для queries (Фаза 5.4) |
-| Сетевой протокол jgit | HTTP (как Git over HTTP) или собственный? | HTTP/2 + REST для совместимости |
+Ниже приведены ответы на вопросы, которые ранее оставались открытыми.
+
+| Вопрос | Решение | Обоснование |
+|--------|---------|-------------|
+| Язык API Server | **Go, Rust или WebAssembly** (требуется дальнейший анализ) | Go оптимален для API и Cloud Native стека; Rust — для критичных по производительности компонентов; WASM — для браузерного GUI. Полный анализ: [migration-analysis.md](https://github.com/netkeep80/jsonRVM/blob/master/migration-analysis.md) |
+| jsonRVM зрелость | **Требует доработки** для подготовки к jhub | Текущая C++ реализация имеет критические проблемы (Windows-only DLL, кодировка CP1251, отсутствие CI). Рекомендуется: краткосрочно — исправить C++ версию, среднесрочно — реализовать на Go. Детали: [migration-analysis.md](https://github.com/netkeep80/jsonRVM/blob/master/migration-analysis.md) |
+| Совместимость с Git | **Нет** | jgit использует собственную модель версионирования JSON-документов и не совместим с форматом Git-репозитория. Импорт стандартных Git-репо не предусмотрен. |
+| Хранение бинарных файлов | **Расширение `binary` в персистном хранилище** | В `persistent_json` добавляется тип `binary` по аналогии с `nlohmann::json`. Ссылки через `$ref` или `$bin`. При экспорте: ссылка на jgit-объект либо конвертирование в base64. Блобы хранятся в ObjectStore (content-addressed). |
+| Индексирование jdb | **Да, для queries** | B-tree индексы по JSON-полям реализуются в Фазе 5.4 для поддержки JSON Pointer / JSON Path запросов. |
+| Сетевой протокол jgit | **HTTP/2 + REST** | Выбран для совместимости и работы в браузерах (в том числе для Web GUI на jsonRVM/WASM). |
 
 ---
 
@@ -626,4 +665,5 @@ jhub-runner: reads JSON pipeline from jdb
 
 ---
 
-*Документ создан: 2026-02-26. Авторы: AI Issue Solver (konard/BinDiffSynchronizer#37), на основе требований netkeep80/BinDiffSynchronizer#36.*
+*Документ создан: 2026-02-26. Авторы: AI Issue Solver (konard/BinDiffSynchronizer#37, #39), на основе требований netkeep80/BinDiffSynchronizer#36, #38.*
+*Версия 1.1: уточнены язык API Server (Go/Rust/WASM), зрелость jsonRVM, совместимость с Git (отсутствует), хранение бинарных файлов ($bin/$ref + ObjectStore), индексирование jdb (B-tree, Фаза 5.4), сетевой протокол jgit (HTTP/2 + REST).*
