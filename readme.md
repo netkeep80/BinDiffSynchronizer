@@ -212,6 +212,8 @@ ctest --test-dir build --output-on-failure
 - [План Фазы 1](phase1-plan.md) — детальный план реализации Phase 1 (выполнен)
 - [План Фазы 2](phase2-plan.md) — план Фазы 2: персистентное дерево объектов JSON с использованием `persist<T>` и `fptr<T>` (выполнен)
 - [План Фазы 3](phase3-plan.md) — план Фазы 3: завершение персистной обвязки и интеграция с nlohmann::json (Задачи 3.1–3.6 завершены)
+- [ТЗ jhub](jhub-tz.md) — Техническое задание на разработку jhub — унифицированной JSON-инфраструктуры для разработки ПО, объединяющей jgit, jdb, Docker Swarm, CI/CD и реестр образов
+- [Анализ persistent_json для jgit/jdb](persistent_json_analysis.md) — анализ применимости persistent_json и PersistentJsonStore для jgit и jdb
 
 ---
 

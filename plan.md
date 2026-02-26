@@ -290,25 +290,51 @@ jgit-репозиторий/
 
 ## Долгосрочный план (6-12 месяцев)
 
-1. **Реализовать merge** с разрешением конфликтов
+1. **Реализовать merge** с разрешением конфликтов (JSON Merge Patch RFC 7396)
 2. **Добавить репликацию** через сетевой транспорт (Protocol + BinDiffSynchronizer)
 3. **Реализовать WAL** и шифрование хранилища
 4. **Создать Python/Rust биндинги** для jgit
 5. **Провести сравнительный benchmark** jgit vs CouchDB vs TerminusDB
 6. **Опубликовать jgit как отдельный open-source проект**
+7. **Реализовать jdb** (Фаза 5) — мультидокументную JSON базу данных на основе jgit
+8. **Реализовать jhub** (Фаза 6) — унифицированную платформу разработки на JSON-инфраструктуре
+
+## Направление 6: jhub — JSON-платформа разработки ПО
+
+### Обоснование
+
+Концепция **jhub** формулируется в [issue #36](https://github.com/netkeep80/BinDiffSynchronizer/issues/36): создать платформу разработки следующего поколения, которая унифицирует Git, Docker, CI/CD и Docker Hub в единой JSON-инфраструктуре (jgit + jdb + jsonRVM).
+
+Подробная архитектура и требования описаны в [jhub-tz.md](jhub-tz.md).
+
+### Ключевые компоненты jhub
+
+| Компонент | Описание | Аналог |
+|-----------|----------|--------|
+| jgit | Темпоральная JSON БД с историей версий | Git |
+| jdb | Мультидокументная JSON БД на основе jgit | GitLab database |
+| jhub API | REST API сервер для управления всеми компонентами | GitHub/GitLab API |
+| jhub Runner | Агент выполнения JSON-пайплайнов (jsonRVM) | GitLab Runner |
+| jhub Registry | Реестр Docker образов с метаданными в jdb | Docker Hub |
+| jhub Swarm | Управление развёртыванием через Docker Swarm | Docker Swarm/K8s |
+| jhub GUI | Web-интерфейс как JSON-приложение на jsonRVM | GitHub/GitLab UI |
 
 ---
 
 ## Ресурсы и ссылки
 
 - [nlohmann/json](https://github.com/nlohmann/json) — JSON for Modern C++: JSON Pointer, JSON Patch, бинарные форматы
+- [jsonRVM](https://github.com/netkeep80/jsonRVM) — движок исполнения JSON-программ (используется в jhub)
 - [RFC 6902: JSON Patch](https://datatracker.ietf.org/doc/html/rfc6902) — стандарт описания изменений JSON
 - [RFC 6901: JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901) — стандарт адресации узлов JSON
 - [RFC 7396: JSON Merge Patch](https://datatracker.ietf.org/doc/html/rfc7396) — стандарт слияния JSON
 - [Git Internals](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain) — архитектура Git как референс для jgit
 - [CBOR (RFC 7049)](https://cbor.io/) — бинарный формат для хранения JSON в jgit
+- [Docker Registry API v2](https://distribution.github.io/distribution/spec/api/) — API реестра Docker для jhub
+- [Docker Swarm](https://docs.docker.com/engine/swarm/) — оркестрация контейнеров для jhub
 - [Анализ проекта](analysis.md) — детальный анализ текущего состояния
+- [ТЗ jhub](jhub-tz.md) — Техническое задание на разработку jhub
 
 ---
 
-*Документ создан: 2026-01-28. Обновлён: 2026-02-25 (среднесрочный план переработан согласно issue #27)*
+*Документ создан: 2026-01-28. Обновлён: 2026-02-26 (добавлено направление 6: jhub, согласно issue #36)*
