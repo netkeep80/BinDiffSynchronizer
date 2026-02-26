@@ -1,6 +1,6 @@
 # Phase 3 Plan: Завершение персистной обвязки и интеграция с nlohmann::json
 
-**Status:** Tasks 3.1, 3.2, 3.3, 3.4, and 3.5 Done ✓ — Task 3.6 Planned
+**Status:** Tasks 3.1, 3.2, 3.3, 3.4, 3.5, and 3.6 Done ✓
 
 ---
 
@@ -488,7 +488,7 @@ Task 3.1  →  Task 3.2  →  Task 3.3  →  Task 3.4  →  Task 3.5
 - [x] 3.3.5: Тесты `persistent_json` — dump/parse, merge_patch, diff, alias pattern, PersistentJsonStore round-trip (8 тестов, CI зелёный).
 - [x] 3.4: `fptr<T>` array support (`NewArray`/`DeleteArray`/`operator[]`); `persistent_string` uses `fptr<char>`; `persistent_array` uses `fptr<T>` for slab chain — 7 тестов (3.4.1–3.4.7), CI зелёный.
 - [x] 3.5: Интеграционные тесты проходят; CI зелёный на GCC/Clang/MSVC (212 тестов, CI зелёный).
-- [ ] 3.6: Бенчмарк зафиксирован в репозитории.
+- [x] 3.6: Бенчмарк зафиксирован в репозитории (`experiments/benchmark_persist_vs_std.cpp`, результаты в `experiments/benchmark_persist_vs_std_results.md`).
 
 ---
 

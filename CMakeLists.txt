@@ -22,3 +22,6 @@ endif()
 # Tests
 enable_testing()
 add_subdirectory(tests)
+
+# Experiments / benchmarks (optional, built by default)
+add_subdirectory(experiments)
