@@ -223,6 +223,6 @@ private:
     ~pmap() = default;
 
     // Разрешаем доступ к приватному конструктору только для фабричных методов ПАМ.
-    template<class U, unsigned A> friend class AddressManager;
+    template<class U> friend class AddressManager;
     friend class PersistentAddressSpace;
 };

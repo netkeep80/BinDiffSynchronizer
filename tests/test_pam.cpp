@@ -35,9 +35,9 @@ TEST_CASE("slot_descriptor: is trivially copyable", "[pam][layout]")
     REQUIRE(std::is_trivially_copyable<slot_descriptor>::value);
 }
 
-TEST_CASE("pap_header: is trivially copyable", "[pam][layout]")
+TEST_CASE("pam_header: is trivially copyable", "[pam][layout]")
 {
-    REQUIRE(std::is_trivially_copyable<pap_header>::value);
+    REQUIRE(std::is_trivially_copyable<pam_header>::value);
 }
 
 // ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ TEST_CASE("pap_header: is trivially copyable", "[pam][layout]")
 TEST_CASE("PersistentAddressSpace: Init() with nonexistent file creates empty image",
           "[pam][init]")
 {
-    const char* fname = "./test_pam_init_empty.pap";
+    const char* fname = "./test_pam_init_empty.pam";
     rm_file(fname);
 
     // Init создаёт пустой образ без ошибок.
@@ -259,7 +259,7 @@ TEST_CASE("PersistentAddressSpace: FindByPtr returns offset by pointer",
 TEST_CASE("PersistentAddressSpace: Save and Init -- objects are restored",
           "[pam][save_reload]")
 {
-    const char* fname = "./test_pam_save_reload.pap";
+    const char* fname = "./test_pam_save_reload.pam";
     rm_file(fname);
 
     uintptr_t saved_offset = 0;
