@@ -12,6 +12,8 @@ set(TEST_SOURCES
     test_pstring.cpp
     test_pvector.cpp
     test_pmap.cpp
+    test_pallocator.cpp
+    test_pjson.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})

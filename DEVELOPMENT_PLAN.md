@@ -135,6 +135,8 @@ struct pmap_entry {
 
 #### 2.4 `pallocator<T>` — Persistent STL Allocator
 
+- **Status**: Implemented, bug fixed, and tested.
+
 An STL-compatible allocator backed by `AddressManager<T>`. Allows passing persistent containers to standard library algorithms.
 
 **Design**:
@@ -147,6 +149,10 @@ public:
     void deallocate(T* p, std::size_t n);
 };
 ```
+
+**Bug fixed**: `deallocate()` was accessing `AddressManager<T>::__itable` directly, which is a private member. Fixed by adding a public static `FindByPtr(_T* p)` method to `AddressManager` that encapsulates the reverse-lookup from raw pointer to slot index.
+
+**Tests**: `tests/test_pallocator.cpp` — type aliases, rebind, construct/destroy, allocate/deallocate, `std::vector` integration, no-alias, nullptr safety.
 
 **Limitation**: Standard STL containers (`std::basic_string`, `std::vector`, `std::map`) require allocators that return raw pointers into a flat, uniform address space. Since `AddressManager` uses slot indices (not raw pointers), direct use of `pallocator` with `std::basic_json` is not possible without translating slot indices to pointers. This is handled at the `pjson` level (see Phase 2).
 
@@ -166,7 +172,21 @@ After implementing `pstring`, `pvector`, and `pmap`, we have two options:
 - **Advantage**: Full control; no dependency on `nlohmann`'s internal pointer model.
 - **Recommended** for Phase 1 → Phase 2 transition.
 
-**Decision**: Attempt Option A first with a compatibility shim. If `nlohmann::basic_json` cannot be instantiated cleanly (e.g., it internally dereferences raw pointers that differ from slot-based pointers), fall back to Option B.
+**Decision**: Option B chosen. `nlohmann::basic_json` internally dereferences raw C++ pointers and assumes heap allocation, which is incompatible with the slot-index-based `AddressManager`. A custom `pjson` was implemented directly on top of `fptr<T>`, `pstring`, `pvector`, and `pmap` primitives.
+
+#### pjson implementation summary
+
+`pjson_data` is a trivially-copyable 16-byte struct containing:
+- a `pjson_type` discriminant (4 bytes),
+- a payload union holding either a primitive value (bool, int64, uint64, double) or two unsigned integers (length/size + slot index) for string/array/object types.
+
+Objects are stored as sorted arrays of `pjson_kv_pair` (pstring_data key + pjson_data value) in `AddressManager<pjson_kv_pair>`. Sorted order enables O(log n) lookup via binary search.
+
+Arrays are stored as `pjson_data[]` in `AddressManager<pjson_data>` with doubling growth.
+
+`pjson` is a thin non-owning wrapper around a `pjson_data&` reference, providing `set_*`/`get_*` accessors, `push_back`, `operator[]`, `obj_insert`, `obj_find`, `obj_erase`, and a recursive `free()`.
+
+**Bug found and fixed during implementation**: In `obj_insert`, the shift-right loop performs a shallow copy of `pjson_kv_pair`. After the shift, the source and destination entries both hold the same `chars_slot` index for the key string. When `_assign_key` was then called to write the new key, it freed the shared slot — invalidating the shifted neighbor's key. Fixed by zeroing `new_pair.key.chars` before calling `_assign_key` to mark the slot as unowned at that position before the new allocation.
 
 ---
 
@@ -203,16 +223,16 @@ CMakeLists.txt will:
 
 ## Milestones
 
-| Milestone | Deliverable |
-|-----------|-------------|
-| M1 | `CMakeLists.txt`, CI passing for `main.cpp` |
-| M2 | Unit tests for core infrastructure (`persist`, `AddressManager`, `fptr`, `Cache`, `MemoryDevice`) passing |
-| M3 | `pstring` implemented and tested |
-| M4 | `pvector<T>` implemented and tested |
-| M5 | `pmap<K, V>` implemented and tested |
-| M6 | `pallocator<T>` implemented and tested |
-| M7 | `pjson` design decision and prototype |
-| M8 | Updated `readme.md` and merged PR |
+| Milestone | Deliverable | Status |
+|-----------|-------------|--------|
+| M1 | `CMakeLists.txt`, CI passing for `main.cpp` | ✅ Done |
+| M2 | Unit tests for core infrastructure (`persist`, `AddressManager`, `fptr`, `Cache`, `MemoryDevice`) passing | ✅ Done |
+| M3 | `pstring` implemented and tested | ✅ Done |
+| M4 | `pvector<T>` implemented and tested | ✅ Done |
+| M5 | `pmap<K, V>` implemented and tested | ✅ Done |
+| M6 | `pallocator<T>` implemented and tested | ✅ Done |
+| M7 | `pjson` design decision and prototype | ✅ Done |
+| M8 | Updated `readme.md` and merged PR | ⬜ Pending |
 
 ---
 
@@ -222,21 +242,22 @@ CMakeLists.txt will:
 BinDiffSynchronizer.h     — unchanged
 PageDevice.h              — unchanged (previously fixed bugs documented)
 StaticPageDevice.h        — unchanged
-persist.h                 — unchanged (previously fixed bugs documented)
-pstring.h                 — NEW: persistent string
-pvector.h                 — NEW: persistent vector
-pmap.h                    — NEW: persistent map
-pallocator.h              — NEW: persistent STL allocator
-CMakeLists.txt            — NEW: build system
+persist.h                 — UPDATED: added FindByPtr() to AddressManager
+pstring.h                 — persistent string
+pvector.h                 — persistent vector
+pmap.h                    — persistent map
+pallocator.h              — UPDATED: fixed deallocate() to use FindByPtr()
+pjson.h                   — NEW: persistent JSON discriminated union (M7)
+CMakeLists.txt            — build system
 tests/
-  test_persist.cpp        — NEW
-  test_address_manager.cpp — NEW
-  test_fptr.cpp           — NEW
-  test_pstring.cpp        — NEW
-  test_pvector.cpp        — NEW
-  test_pmap.cpp           — NEW
-readme.md                 — UPDATED: persistent infrastructure description
-DEVELOPMENT_PLAN.md       — NEW: this document
+  test_persist.cpp        — tests for persist<T>, AddressManager<T>, fptr<T>
+  test_pstring.cpp        — tests for pstring
+  test_pvector.cpp        — tests for pvector<T>
+  test_pmap.cpp           — tests for pmap<K,V>
+  test_pallocator.cpp     — tests for pallocator<T>
+  test_pjson.cpp          — NEW: tests for pjson (M7)
+readme.md                 — UPDATED: persistent infrastructure description + pjson
+DEVELOPMENT_PLAN.md       — UPDATED: milestones and status
 ```
 
 ---

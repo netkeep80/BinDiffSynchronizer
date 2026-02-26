@@ -57,23 +57,21 @@ public:
     }
 
     // deallocate: free the array at the given pointer.
-    // Finds the slot by scanning the AddressManager for a matching pointer.
+    // Uses AddressManager<T>::FindByPtr() to reverse-lookup the slot from a raw pointer.
     void deallocate(pointer p, size_type /*n*/) noexcept
     {
         if( p == nullptr ) return;
-        // Scan AddressManager to find the slot whose pointer matches p.
-        auto& mgr = AddressManager<T>::GetManager();
-        for( unsigned i = 1; i < ADDRESS_SPACE; i++ )
+        unsigned slot = AddressManager<T>::FindByPtr(p);
+        if( slot != 0 )
         {
-            if( mgr.__itable[i].__used && mgr.__itable[i].__ptr == p )
-            {
-                AddressManager<T>::DeleteArray(i);
-                return;
-            }
+            AddressManager<T>::DeleteArray(slot);
         }
-        // If not found in persistent space, fall back to raw delete[].
-        // This handles the case where the pointer came from a non-persistent source.
-        delete[] reinterpret_cast<char*>(p);
+        else
+        {
+            // If not found in persistent space, fall back to raw delete[].
+            // This handles the case where the pointer came from a non-persistent source.
+            delete[] reinterpret_cast<char*>(p);
+        }
     }
 
     size_type max_size() const noexcept
