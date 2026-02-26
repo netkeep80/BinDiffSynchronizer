@@ -48,6 +48,18 @@
 | `pjson_data.payload` | `array_val.size`, `array_val.data_slot` | `unsigned` | `uintptr_t` |
 | `pjson_data.payload` | `object_val.size`, `object_val.pairs_slot` | `unsigned` | `uintptr_t` |
 
+### Исправление: realloc-безопасность `pstring::assign()` (issue #56)
+
+Метод `pstring::assign()` вызывает `chars.NewArray()`, который внутренне аллоцирует
+память в буфере данных ПАМ через `realloc`. При создании большого числа объектов
+`realloc` перемещает буфер, делая указатель `this` недействительным до окончания
+работы метода.
+
+Исправление: перед вызовом `NewArray()` сохраняем смещение `this` в ПАМ через
+`PtrToOffset(this)`, а после возможного перемещения буфера — переприводим
+указатель через `Resolve<pstring>(self_offset)`. Запись символов выполняется
+через `Resolve<char>()` (offset-based, безопасен после realloc).
+
 Это устраняет потенциальное переполнение на 64-битных платформах при размере ПАП > 4 ГБ.
 
 ---
@@ -241,6 +253,7 @@ ctest --test-dir build --output-on-failure
 ```
 tests/
   test_pam.cpp          — тесты PersistentAddressSpace (ПАМ)
+  test_pam_dynamic.cpp  — тесты динамичности ПАМ: массовое создание именованных объектов
   test_persist.cpp      — тесты persist<T>, fptr<T>, AddressManager<T>
   test_pstring.cpp      — тесты pstring
   test_pvector.cpp      — тесты pvector<T>
@@ -250,6 +263,32 @@ tests/
 ```
 
 Тестовый фреймворк: [Catch2 v3](https://github.com/catchorg/Catch2).
+
+### Тест динамичности ПАМ (`test_pam_dynamic.cpp`)
+
+Проверяет динамическое расширение таблицы слотов и области данных ПАМ при
+создании большого числа именованных объектов:
+
+| Тест | Описание | Тег |
+|------|----------|-----|
+| `PAM dynamic: create and verify 10000 named pstrings` | 10 000 `pstring` с уникальными именами и содержимым | `[pam][dynamic]` |
+| `PAM dynamic: pstring content is unique for each named entry` | Уникальность содержимого для 1 000 записей | `[pam][dynamic][unique]` |
+| `PAM dynamic: slot table grows beyond initial capacity` | Расширение таблицы слотов за пределы начальной ёмкости (16) | `[pam][dynamic][slots]` |
+| `PAM dynamic stress: create and verify 1 million named pstrings` | Нагрузочный тест: 1 000 000 `pstring` | `[pam][dynamic][stress]` |
+
+Нагрузочный тест (тег `[stress]`) не запускается при обычном `ctest`.
+Для ручного запуска:
+
+```bash
+./build/tests/tests "[stress]"
+```
+
+Стратегия верификации:
+1. Создать N `pstring` с уникальными именами-слотами ПАМ (формат `sNNNNNN`).
+2. В каждую `pstring` записать её же имя в качестве содержимого.
+3. Найти каждую `pstring` по имени через `PAM.Find()` и проверить содержимое.
+4. Для нагрузочного теста (1 млн) верификация использует сохранённые смещения
+   (offset-based) вместо линейного `Find()` на каждой итерации.
 
 ---
 

@@ -32,23 +32,47 @@ struct pstring
 
     // assign: сохранить C-строку в ПАП.
     // Освобождает предыдущий массив символов (если есть), затем выделяет новый.
+    //
+    // Внимание: chars.NewArray() может вызвать realloc буфера данных ПАМ,
+    // после чего указатель this становится недействительным. Чтобы этого избежать,
+    // сохраняем смещение this в ПАМ до вызова NewArray() и переприводим указатель
+    // к валидному после возможного перемещения буфера.
     void assign(const char* s)
     {
+        auto& pam = PersistentAddressSpace::Get();
+
         if( chars.addr() != 0 )
-        {
             chars.DeleteArray();
-        }
+
         if( s == nullptr || s[0] == '\0' )
         {
             length = 0;
             return;
         }
+
         uintptr_t len = static_cast<uintptr_t>(std::strlen(s));
         length = len;
+
+        // Запоминаем собственное смещение в ПАМ перед выделением памяти.
+        // После возможного realloc в NewArray() this может стать недействительным,
+        // поэтому переприводим указатель через смещение.
+        uintptr_t self_offset = pam.PtrToOffset(this);
+
         // Выделяем len+1 символов (включая нулевой терминатор).
-        chars.NewArray(static_cast<unsigned>(len + 1));
-        for( uintptr_t i = 0; i <= len; i++ )
-            chars[static_cast<unsigned>(i)] = s[i];
+        fptr<char> new_chars;
+        new_chars.NewArray(static_cast<unsigned>(len + 1));
+
+        // После NewArray() буфер ПАМ мог переместиться — переприводим this.
+        pstring* self = (self_offset != 0)
+            ? pam.Resolve<pstring>(self_offset)
+            : this;
+
+        self->chars = new_chars;
+        self->length = len;
+
+        // Записываем символы через offset-based доступ (безопасно после realloc).
+        char* dst = pam.Resolve<char>(self->chars.addr());
+        std::memcpy(dst, s, static_cast<std::size_t>(len + 1));
     }
 
     // c_str: вернуть raw-указатель на символьные данные.
