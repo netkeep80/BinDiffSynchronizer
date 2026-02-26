@@ -13,7 +13,7 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 
 Проект является фундаментом для разработки системы **jgit** — темпоральной базы данных для JSON-документов, аналогичной Git по модели версионирования, но специализированной для иерархических JSON-структур.
 
-### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 завершена ✓ · Фаза 3 в процессе 🚀 (Задачи 3.1–3.4 выполнены)
+### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 завершена ✓ · Фаза 3 в процессе 🚀 (Задачи 3.1–3.5 выполнены)
 
 Фаза 1 реализует минимальный жизнеспособный фундамент — компилируемую, кросс-платформенную, покрытую тестами кодовую базу с рабочим объектным хранилищем JSON-данных в бинарном формате.
 
@@ -48,8 +48,8 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | 3.2: Переписать `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` на `persist<T>` и `fptr<T>` | ✓ Готово (185 тестов, CI зелёный) |
 | 3.3: Инстанцировать `nlohmann::basic_json<>` с персистными классами | ✓ Готово (200 тестов, CI зелёный) |
 | 3.4: Поддержка массивов в `fptr<T>`, `AddressManager<T>`, `persistent_string` на `fptr<char>`, `persistent_array` на `fptr<T>` | ✓ Готово (207 тестов, CI зелёный) |
-| 3.5: Интеграционные тесты и CI | 🔜 Запланировано |
-| 3.5: Производительность и бенчмарки | 🔜 Запланировано |
+| 3.5: Интеграционные тесты и CI | ✓ Готово (212 тестов, CI зелёный) |
+| 3.6: Производительность и бенчмарки | 🔜 Запланировано |
 
 ### Основные возможности
 
@@ -211,7 +211,7 @@ ctest --test-dir build --output-on-failure
 - [План развития](plan.md) — перспективные направления и задачи, детальный план реализации jgit
 - [План Фазы 1](phase1-plan.md) — детальный план реализации Phase 1 (выполнен)
 - [План Фазы 2](phase2-plan.md) — план Фазы 2: персистентное дерево объектов JSON с использованием `persist<T>` и `fptr<T>` (выполнен)
-- [План Фазы 3](phase3-plan.md) — план Фазы 3: завершение персистной обвязки и интеграция с nlohmann::json (Задачи 3.1–3.3 завершены)
+- [План Фазы 3](phase3-plan.md) — план Фазы 3: завершение персистной обвязки и интеграция с nlohmann::json (Задачи 3.1–3.5 завершены)
 
 ---
 
@@ -224,7 +224,7 @@ BinDiffSynchronizer is a C++ library for binary differential object synchronizat
 
 The project serves as the foundation for developing **jgit** — a temporal database for JSON documents, similar to Git in its versioning model, but specialized for hierarchical JSON structures.
 
-### Current Status: Phase 1 Complete ✓ · Phase 2 Complete ✓ · Phase 3 In Progress 🚀 (Tasks 3.1–3.4 done)
+### Current Status: Phase 1 Complete ✓ · Phase 2 Complete ✓ · Phase 3 In Progress 🚀 (Tasks 3.1–3.5 done)
 
 Phase 1 establishes the minimum viable foundation — a compilable, cross-platform, tested codebase with a working content-addressed object store for JSON data in binary format.
 
@@ -259,8 +259,8 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | 3.2: Rewrite `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` using `persist<T>` and `fptr<T>` | ✓ Done (185 tests, CI green) |
 | 3.3: Instantiate `nlohmann::basic_json<>` with persistent classes | ✓ Done (200 tests, CI green) |
 | 3.4: Array support in `fptr<T>`, `AddressManager<T>`; `persistent_string` uses `fptr<char>`; `persistent_array` uses `fptr<T>` for slab chain | ✓ Done (207 tests, CI green) |
-| 3.5: Integration tests and CI | 🔜 Planned |
-| 3.5: Performance benchmarks | 🔜 Planned |
+| 3.5: Integration tests and CI | ✓ Done (212 tests, CI green) |
+| 3.6: Performance benchmarks | 🔜 Planned |
 
 ### Key Features
 
@@ -422,7 +422,7 @@ ctest --test-dir build --output-on-failure
 - [Development Plan](plan.md) — promising directions and tasks, detailed jgit implementation plan
 - [Phase 1 Plan](phase1-plan.md) — detailed Phase 1 implementation plan (completed)
 - [Phase 2 Plan](phase2-plan.md) — Phase 2 plan: persistent JSON object tree using `persist<T>` and `fptr<T>` (completed)
-- [Phase 3 Plan](phase3-plan.md) — Phase 3 plan: completing persistence layer and nlohmann::json integration (Tasks 3.1–3.4 done)
+- [Phase 3 Plan](phase3-plan.md) — Phase 3 plan: completing persistence layer and nlohmann::json integration (Tasks 3.1–3.5 done)
 
 ---
 
