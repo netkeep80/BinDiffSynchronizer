@@ -10,40 +10,33 @@
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// pstring_data — trivially copyable layout
+// pstring — layout checks
 // ---------------------------------------------------------------------------
-TEST_CASE("pstring_data: is trivially copyable",
-          "[pstring][layout]")
-{
-    REQUIRE(std::is_trivially_copyable<pstring_data>::value);
-    // Phase 3: pstring_data должен занимать 2 * sizeof(void*) байт.
-    REQUIRE(sizeof(pstring_data) == 2 * sizeof(void*));
-}
-
-// ---------------------------------------------------------------------------
-// pstring_data — Phase 3: поля имеют тип uintptr_t
-// ---------------------------------------------------------------------------
-TEST_CASE("pstring_data: length is uintptr_t (Phase 3)",
+TEST_CASE("pstring: length field is uintptr_t (Phase 3)",
           "[pstring][layout][phase3]")
 {
     // sizeof(uintptr_t) == sizeof(void*) на любой платформе.
-    REQUIRE(sizeof(pstring_data::length) == sizeof(void*));
+    REQUIRE(sizeof(pstring::length) == sizeof(void*));
     // Поле chars (fptr<char>) также хранит uintptr_t.
-    REQUIRE(sizeof(pstring_data::chars) == sizeof(void*));
+    REQUIRE(sizeof(pstring::chars) == sizeof(void*));
+    // Phase 3: pstring должен занимать 2 * sizeof(void*) байт.
+    REQUIRE(sizeof(pstring) == 2 * sizeof(void*));
 }
 
 // ---------------------------------------------------------------------------
-// pstring — default data (null/empty)
+// pstring — default PAP allocation (null/empty)
 // ---------------------------------------------------------------------------
-TEST_CASE("pstring: zero-initialised pstring_data gives empty string",
+TEST_CASE("pstring: zero-initialised pstring (via fptr) gives empty string",
           "[pstring][construct]")
 {
-    pstring_data sd{};
-    pstring ps(sd);
+    fptr<pstring> fps;
+    fps.New();
 
-    REQUIRE(ps.empty());
-    REQUIRE(ps.size() == 0u);
-    REQUIRE(std::strcmp(ps.c_str(), "") == 0);
+    REQUIRE(fps->empty());
+    REQUIRE(fps->size() == 0u);
+    REQUIRE(std::strcmp(fps->c_str(), "") == 0);
+
+    fps.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -52,13 +45,16 @@ TEST_CASE("pstring: zero-initialised pstring_data gives empty string",
 TEST_CASE("pstring: assign short string stores correct content",
           "[pstring][assign]")
 {
-    pstring_data sd{};
-    pstring ps(sd);
+    fptr<pstring> fps;
+    fps.New();
 
-    ps.assign("hello");
-    REQUIRE(!ps.empty());
-    REQUIRE(ps.size() == 5u);
-    REQUIRE(std::strcmp(ps.c_str(), "hello") == 0);
+    fps->assign("hello");
+    REQUIRE(!fps->empty());
+    REQUIRE(fps->size() == 5u);
+    REQUIRE(std::strcmp(fps->c_str(), "hello") == 0);
+
+    fps->clear();
+    fps.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -67,13 +63,16 @@ TEST_CASE("pstring: assign short string stores correct content",
 TEST_CASE("pstring: assign longer string stores correct content",
           "[pstring][assign]")
 {
-    pstring_data sd{};
-    pstring ps(sd);
+    fptr<pstring> fps;
+    fps.New();
 
     const char* long_str = "The quick brown fox jumps over the lazy dog";
-    ps.assign(long_str);
-    REQUIRE(ps.size() == std::strlen(long_str));
-    REQUIRE(std::strcmp(ps.c_str(), long_str) == 0);
+    fps->assign(long_str);
+    REQUIRE(fps->size() == std::strlen(long_str));
+    REQUIRE(std::strcmp(fps->c_str(), long_str) == 0);
+
+    fps->clear();
+    fps.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -82,15 +81,18 @@ TEST_CASE("pstring: assign longer string stores correct content",
 TEST_CASE("pstring: reassigning frees old allocation and stores new content",
           "[pstring][reassign]")
 {
-    pstring_data sd{};
-    pstring ps(sd);
+    fptr<pstring> fps;
+    fps.New();
 
-    ps.assign("first");
-    REQUIRE(ps.size() == 5u);
+    fps->assign("first");
+    REQUIRE(fps->size() == 5u);
 
-    ps.assign("second value");
-    REQUIRE(ps.size() == 12u);
-    REQUIRE(std::strcmp(ps.c_str(), "second value") == 0);
+    fps->assign("second value");
+    REQUIRE(fps->size() == 12u);
+    REQUIRE(std::strcmp(fps->c_str(), "second value") == 0);
+
+    fps->clear();
+    fps.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -99,15 +101,17 @@ TEST_CASE("pstring: reassigning frees old allocation and stores new content",
 TEST_CASE("pstring: assign empty string clears content",
           "[pstring][assign]")
 {
-    pstring_data sd{};
-    pstring ps(sd);
+    fptr<pstring> fps;
+    fps.New();
 
-    ps.assign("nonempty");
-    REQUIRE(!ps.empty());
+    fps->assign("nonempty");
+    REQUIRE(!fps->empty());
 
-    ps.assign("");
-    REQUIRE(ps.empty());
-    REQUIRE(ps.size() == 0u);
+    fps->assign("");
+    REQUIRE(fps->empty());
+    REQUIRE(fps->size() == 0u);
+
+    fps.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -116,13 +120,15 @@ TEST_CASE("pstring: assign empty string clears content",
 TEST_CASE("pstring: assign nullptr gives empty string",
           "[pstring][assign]")
 {
-    pstring_data sd{};
-    pstring ps(sd);
+    fptr<pstring> fps;
+    fps.New();
 
-    ps.assign(nullptr);
-    REQUIRE(ps.empty());
-    REQUIRE(ps.size() == 0u);
-    REQUIRE(std::strcmp(ps.c_str(), "") == 0);
+    fps->assign(nullptr);
+    REQUIRE(fps->empty());
+    REQUIRE(fps->size() == 0u);
+    REQUIRE(std::strcmp(fps->c_str(), "") == 0);
+
+    fps.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -131,16 +137,18 @@ TEST_CASE("pstring: assign nullptr gives empty string",
 TEST_CASE("pstring: clear resets to empty",
           "[pstring][clear]")
 {
-    pstring_data sd{};
-    pstring ps(sd);
+    fptr<pstring> fps;
+    fps.New();
 
-    ps.assign("hello world");
-    REQUIRE(!ps.empty());
+    fps->assign("hello world");
+    REQUIRE(!fps->empty());
 
-    ps.clear();
-    REQUIRE(ps.empty());
-    REQUIRE(ps.size() == 0u);
-    REQUIRE(sd.chars.addr() == 0u);
+    fps->clear();
+    REQUIRE(fps->empty());
+    REQUIRE(fps->size() == 0u);
+    REQUIRE(fps->chars.addr() == 0u);
+
+    fps.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -149,22 +157,29 @@ TEST_CASE("pstring: clear resets to empty",
 TEST_CASE("pstring: operator== compares correctly",
           "[pstring][compare]")
 {
-    pstring_data sd1{};
-    pstring ps1(sd1);
-    ps1.assign("hello");
+    fptr<pstring> fps1;
+    fps1.New();
+    fps1->assign("hello");
 
-    pstring_data sd2{};
-    pstring ps2(sd2);
-    ps2.assign("hello");
+    fptr<pstring> fps2;
+    fps2.New();
+    fps2->assign("hello");
 
-    pstring_data sd3{};
-    pstring ps3(sd3);
-    ps3.assign("world");
+    fptr<pstring> fps3;
+    fps3.New();
+    fps3->assign("world");
 
-    REQUIRE(ps1 == ps2);
-    REQUIRE(!(ps1 == ps3));
-    REQUIRE(ps1 == "hello");
-    REQUIRE(!(ps1 == "world"));
+    REQUIRE(*fps1 == *fps2);
+    REQUIRE(!(*fps1 == *fps3));
+    REQUIRE(*fps1 == "hello");
+    REQUIRE(!(*fps1 == "world"));
+
+    fps1->clear();
+    fps2->clear();
+    fps3->clear();
+    fps1.Delete();
+    fps2.Delete();
+    fps3.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -173,13 +188,16 @@ TEST_CASE("pstring: operator== compares correctly",
 TEST_CASE("pstring: operator[] accesses individual characters",
           "[pstring][index]")
 {
-    pstring_data sd{};
-    pstring ps(sd);
-    ps.assign("abc");
+    fptr<pstring> fps;
+    fps.New();
+    fps->assign("abc");
 
-    REQUIRE(ps[0] == 'a');
-    REQUIRE(ps[1] == 'b');
-    REQUIRE(ps[2] == 'c');
+    REQUIRE((*fps)[0] == 'a');
+    REQUIRE((*fps)[1] == 'b');
+    REQUIRE((*fps)[2] == 'c');
+
+    fps->clear();
+    fps.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -188,33 +206,41 @@ TEST_CASE("pstring: operator[] accesses individual characters",
 TEST_CASE("pstring: operator< gives lexicographic order",
           "[pstring][compare]")
 {
-    pstring_data sd1{};
-    pstring pa(sd1);
-    pa.assign("apple");
+    fptr<pstring> fps_a;
+    fps_a.New();
+    fps_a->assign("apple");
 
-    pstring_data sd2{};
-    pstring pb(sd2);
-    pb.assign("banana");
+    fptr<pstring> fps_b;
+    fps_b.New();
+    fps_b->assign("banana");
 
-    REQUIRE(pa < pb);
-    REQUIRE(!(pb < pa));
+    REQUIRE(*fps_a < *fps_b);
+    REQUIRE(!(*fps_b < *fps_a));
+
+    fps_a->clear();
+    fps_b->clear();
+    fps_a.Delete();
+    fps_b.Delete();
 }
 
 // ---------------------------------------------------------------------------
-// pstring — slot index recorded in pstring_data
+// pstring — chars.addr() reflects allocation state
 // ---------------------------------------------------------------------------
-TEST_CASE("pstring: pstring_data records non-zero slot index after assign",
+TEST_CASE("pstring: chars.addr() is non-zero after assign, zero after clear",
           "[pstring][data]")
 {
-    pstring_data sd{};
-    REQUIRE(sd.chars.addr() == 0u);
+    fptr<pstring> fps;
+    fps.New();
 
-    pstring ps(sd);
-    ps.assign("test");
-    REQUIRE(sd.chars.addr() != 0u);
-    REQUIRE(sd.length == 4u);
+    REQUIRE(fps->chars.addr() == 0u);
 
-    ps.clear();
-    REQUIRE(sd.chars.addr() == 0u);
-    REQUIRE(sd.length == 0u);
+    fps->assign("test");
+    REQUIRE(fps->chars.addr() != 0u);
+    REQUIRE(fps->length == 4u);
+
+    fps->clear();
+    REQUIRE(fps->chars.addr() == 0u);
+    REQUIRE(fps->length == 0u);
+
+    fps.Delete();
 }

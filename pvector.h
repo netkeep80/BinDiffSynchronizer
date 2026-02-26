@@ -1,129 +1,111 @@
 #pragma once
 #include "persist.h"
 
-// pvector<T> — персистный динамический массив.
+// pvector<T> — персистный динамический массив, аналог std::vector<T>.
 //
-// Заголовок вектора (pvector_data<T>) тривиально копируем и может быть сохранён
-// через persist<pvector_data<T>>. Данные элементов хранятся в ПАП через fptr<T>.
+// Объекты pvector<T> могут находиться ТОЛЬКО внутри ПАП.
+// Для работы с pvector<T> из обычного кода используйте fptr<pvector<T>>.
 //
-// Ограничения:
+// Требования:
+//   - Конструктор и деструктор приватные; создание только через ПАМ (Тр.2, Тр.11).
+//   - При загрузке образа ПАП конструкторы не вызываются (Тр.10).
 //   - T должен быть тривиально копируемым (static_assert ниже).
-//   - pvector_data<T> тривиально копируем.
 //   - Стратегия роста: удвоение ёмкости при заполнении (начальная ёмкость: 4).
 //   - Пустой pvector имеет data.addr() == 0, size == 0, capacity == 0.
 //
-// Phase 3: поля size и capacity изменены с unsigned на uintptr_t для полной
-//   совместимости с Phase 2 PAM API (PersistentAddressSpace использует uintptr_t).
+// Phase 3: поля size и capacity имеют тип uintptr_t для полной совместимости
+//   с Phase 2 PAM API (PersistentAddressSpace использует uintptr_t).
 //
 // Использование:
-//   pvector_data<int> vd{};
-//   pvector<int> v(vd);
-//   v.push_back(1);
-//   v.push_back(2);
-//   // vd.data.addr() содержит смещение в ПАП; vd.size == 2, vd.capacity >= 2
-//   // Сохраните vd через persist<pvector_data<int>> для восстановления после перезапуска.
-
-/// Заголовок персистного вектора (тривиально копируем).
-template<typename T>
-struct pvector_data
-{
-    uintptr_t size;      ///< Текущее число элементов; uintptr_t для совместимости с Phase 2
-    uintptr_t capacity;  ///< Выделенная ёмкость; uintptr_t для совместимости с Phase 2
-    fptr<T>   data;      ///< Смещение в ПАП для массива элементов; 0 = не выделено
-};
+//   fptr<pvector<int>> fv;
+//   fv.New();          // выделяем pvector<int> в ПАП (нулевая инициализация)
+//   fv->push_back(1);
+//   fv->push_back(2);
+//   // fv->size() == 2, (*fv)[0] == 1
+//   fv->free();
+//   fv.Delete();
 
 template<typename T>
-struct pvector_trivial_check
+class pvector
 {
     static_assert(std::is_trivially_copyable<T>::value,
                   "pvector<T> требует, чтобы T был тривиально копируемым");
-    static_assert(std::is_trivially_copyable<pvector_data<T>>::value,
-                  "pvector_data<T> должен быть тривиально копируемым для использования с persist<T>");
-    // Phase 3: проверяем, что size и capacity имеют размер void*.
-    static_assert(sizeof(pvector_data<T>::size) == sizeof(void*),
-                  "pvector_data::size должен иметь размер void* (Phase 3)");
-};
 
-// pvector — тонкая не-владеющая обёртка над ссылкой pvector_data<T>.
-// Владелец pvector_data<T> — вызывающий код (как правило, persist<pvector_data<T>>).
-template<typename T>
-class pvector : pvector_trivial_check<T>
-{
-    pvector_data<T>& _d;
+    uintptr_t size_;      ///< Текущее число элементов; uintptr_t для совместимости с Phase 2
+    uintptr_t capacity_;  ///< Выделенная ёмкость; uintptr_t для совместимости с Phase 2
+    fptr<T>   data_;      ///< Смещение в ПАП для массива элементов; 0 = не выделено
 
     // grow: обеспечить ёмкость >= needed, при необходимости перевыделить память.
     void grow(uintptr_t needed)
     {
-        if( needed <= _d.capacity ) return;
+        if( needed <= capacity_ ) return;
 
-        uintptr_t new_cap = (_d.capacity == 0) ? 4 : _d.capacity * 2;
+        uintptr_t new_cap = (capacity_ == 0) ? 4 : capacity_ * 2;
         while( new_cap < needed ) new_cap *= 2;
 
         fptr<T> new_data;
         new_data.NewArray(static_cast<unsigned>(new_cap));
 
         // Копируем существующие элементы в новый буфер.
-        for( uintptr_t i = 0; i < _d.size; i++ )
-            new_data[static_cast<unsigned>(i)] = _d.data[static_cast<unsigned>(i)];
+        for( uintptr_t i = 0; i < size_; i++ )
+            new_data[static_cast<unsigned>(i)] = data_[static_cast<unsigned>(i)];
 
         // Освобождаем старый буфер.
-        if( _d.data.addr() != 0 )
-            _d.data.DeleteArray();
+        if( data_.addr() != 0 )
+            data_.DeleteArray();
 
-        _d.data     = new_data;
-        _d.capacity = new_cap;
+        data_     = new_data;
+        capacity_ = new_cap;
     }
 
 public:
-    explicit pvector(pvector_data<T>& data) : _d(data) {}
-
-    uintptr_t size()     const { return _d.size; }
-    uintptr_t capacity() const { return _d.capacity; }
-    bool      empty()    const { return _d.size == 0; }
+    uintptr_t size()     const { return size_; }
+    uintptr_t capacity() const { return capacity_; }
+    bool      empty()    const { return size_ == 0; }
 
     void push_back(const T& val)
     {
-        grow(_d.size + 1);
-        _d.data[static_cast<unsigned>(_d.size)] = val;
-        _d.size++;
+        grow(size_ + 1);
+        data_[static_cast<unsigned>(size_)] = val;
+        size_++;
     }
 
     void pop_back()
     {
-        if( _d.size > 0 ) _d.size--;
+        if( size_ > 0 ) size_--;
     }
 
-    T& operator[](uintptr_t idx)       { return _d.data[static_cast<unsigned>(idx)]; }
-    const T& operator[](uintptr_t idx) const { return _d.data[static_cast<unsigned>(idx)]; }
+    T& operator[](uintptr_t idx)       { return data_[static_cast<unsigned>(idx)]; }
+    const T& operator[](uintptr_t idx) const { return data_[static_cast<unsigned>(idx)]; }
 
-    T& front()       { return _d.data[0]; }
-    const T& front() const { return _d.data[0]; }
+    T& front()       { return data_[0]; }
+    const T& front() const { return data_[0]; }
 
-    T& back()       { return _d.data[static_cast<unsigned>(_d.size - 1)]; }
-    const T& back() const { return _d.data[static_cast<unsigned>(_d.size - 1)]; }
+    T& back()       { return data_[static_cast<unsigned>(size_ - 1)]; }
+    const T& back() const { return data_[static_cast<unsigned>(size_ - 1)]; }
 
     // clear: обнулить размер. НЕ освобождает выделенный буфер.
-    void clear() { _d.size = 0; }
+    void clear() { size_ = 0; }
 
     // free: полностью освободить выделенный буфер.
     void free()
     {
-        if( _d.data.addr() != 0 )
-            _d.data.DeleteArray();
-        _d.size     = 0;
-        _d.capacity = 0;
+        if( data_.addr() != 0 )
+            data_.DeleteArray();
+        size_     = 0;
+        capacity_ = 0;
     }
 
     // Простой итератор в стиле указателя.
-    // Действителен, пока AddressManager<T> жив и слот не освобождён.
+    // Действителен, пока ПАМ жив и слот не освобождён.
     class iterator
     {
-        pvector_data<T>* _pd;
-        uintptr_t        _idx;
+        pvector<T>* _pv;
+        uintptr_t   _idx;
     public:
-        iterator(pvector_data<T>* pd, uintptr_t idx) : _pd(pd), _idx(idx) {}
-        T& operator*()  { return _pd->data[static_cast<unsigned>(_idx)]; }
-        T* operator->() { return &_pd->data[static_cast<unsigned>(_idx)]; }
+        iterator(pvector<T>* pv, uintptr_t idx) : _pv(pv), _idx(idx) {}
+        T& operator*()  { return (*_pv)[_idx]; }
+        T* operator->() { return &(*_pv)[_idx]; }
         iterator& operator++() { ++_idx; return *this; }
         iterator  operator++(int) { iterator tmp = *this; ++_idx; return tmp; }
         bool operator==(const iterator& o) const { return _idx == o._idx; }
@@ -132,22 +114,50 @@ public:
 
     class const_iterator
     {
-        const pvector_data<T>* _pd;
-        uintptr_t              _idx;
+        const pvector<T>* _pv;
+        uintptr_t         _idx;
     public:
-        const_iterator(const pvector_data<T>* pd, uintptr_t idx) : _pd(pd), _idx(idx) {}
-        const T& operator*()  const { return _pd->data[static_cast<unsigned>(_idx)]; }
-        const T* operator->() const { return &_pd->data[static_cast<unsigned>(_idx)]; }
+        const_iterator(const pvector<T>* pv, uintptr_t idx) : _pv(pv), _idx(idx) {}
+        const T& operator*()  const { return (*_pv)[_idx]; }
+        const T* operator->() const { return &(*_pv)[_idx]; }
         const_iterator& operator++() { ++_idx; return *this; }
         const_iterator  operator++(int) { const_iterator tmp = *this; ++_idx; return tmp; }
         bool operator==(const const_iterator& o) const { return _idx == o._idx; }
         bool operator!=(const const_iterator& o) const { return _idx != o._idx; }
     };
 
-    iterator begin() { return iterator(&_d, 0); }
-    iterator end()   { return iterator(&_d, _d.size); }
-    const_iterator begin() const { return const_iterator(&_d, 0); }
-    const_iterator end()   const { return const_iterator(&_d, _d.size); }
-    const_iterator cbegin() const { return const_iterator(&_d, 0); }
-    const_iterator cend()   const { return const_iterator(&_d, _d.size); }
+    iterator begin() { return iterator(this, 0); }
+    iterator end()   { return iterator(this, size_); }
+    const_iterator begin() const { return const_iterator(this, 0); }
+    const_iterator end()   const { return const_iterator(this, size_); }
+    const_iterator cbegin() const { return const_iterator(this, 0); }
+    const_iterator cend()   const { return const_iterator(this, size_); }
+
+private:
+    // Создание pvector<T> на стеке или как статической переменной запрещено.
+    // Используйте fptr<pvector<T>>::New() для создания в ПАП (Тр.11).
+    pvector() = default;
+    ~pvector() = default;
+
+    // Разрешаем доступ к приватному конструктору только для фабричных методов ПАМ.
+    template<class U, unsigned A> friend class AddressManager;
+    friend class PersistentAddressSpace;
 };
+
+// Phase 3: проверяем, что поля size_ и capacity_ имеют размер void*.
+template<typename T>
+struct pvector_size_check
+{
+    static_assert(sizeof(pvector<T>) == 3 * sizeof(void*),
+                  "pvector<T> должен занимать 3 * sizeof(void*) байт (Phase 3)");
+};
+
+// Проверяем для конкретных типов.
+static_assert(sizeof(pvector<int>) == 3 * sizeof(void*),
+              "pvector<int> должен занимать 3 * sizeof(void*) байт (Phase 3)");
+static_assert(sizeof(pvector<double>) == 3 * sizeof(void*),
+              "pvector<double> должен занимать 3 * sizeof(void*) байт (Phase 3)");
+
+// Примечание: pvector<T> НЕ является тривиально копируемым (private конструктор/деструктор),
+// но это допустимо, поскольку ПАМ выделяет сырую память без вызова конструкторов (Тр.10).
+// pvector<T> хранится в ПАП как сырые байты, без вызова конструктора/деструктора.

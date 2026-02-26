@@ -21,6 +21,10 @@ else()
     target_compile_options(bindiff INTERFACE -Wall -Wextra -Wpedantic)
 endif()
 
+# Demo executable
+add_executable(demo main.cpp)
+target_link_libraries(demo PRIVATE bindiff)
+
 # Tests
 enable_testing()
 add_subdirectory(tests)
