@@ -9,27 +9,38 @@
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// pmap_data<K,V> — trivially copyable layout
+// pmap_entry<K,V> — trivially copyable
 // ---------------------------------------------------------------------------
-TEST_CASE("pmap_data<int,int>: is trivially copyable",
+TEST_CASE("pmap_entry<int,int>: is trivially copyable",
           "[pmap][layout]")
 {
-    REQUIRE(std::is_trivially_copyable<pmap_data<int, int>>::value);
-    REQUIRE(std::is_trivially_copyable<pmap_data<int, double>>::value);
+    REQUIRE(std::is_trivially_copyable<pmap_entry<int, int>>::value);
     REQUIRE(std::is_trivially_copyable<pmap_entry<int, double>>::value);
 }
 
 // ---------------------------------------------------------------------------
-// pmap — default data (empty)
+// pmap<T> — layout check
 // ---------------------------------------------------------------------------
-TEST_CASE("pmap<int,int>: zero-initialised pmap_data gives empty map",
+TEST_CASE("pmap<int,int>: size is 3 * sizeof(void*) (size, capacity, data_)",
+          "[pmap][layout]")
+{
+    // pmap<K,V> = size_ (uintptr_t) + capacity_ (uintptr_t) + data_ (fptr<Entry>) = 3 * sizeof(void*)
+    REQUIRE(sizeof(pmap<int, int>) == 3 * sizeof(void*));
+}
+
+// ---------------------------------------------------------------------------
+// pmap — default PAP allocation (empty)
+// ---------------------------------------------------------------------------
+TEST_CASE("pmap<int,int>: zero-initialised pmap (via fptr) gives empty map",
           "[pmap][construct]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    REQUIRE(m.empty());
-    REQUIRE(m.size() == 0u);
+    REQUIRE(fm->empty());
+    REQUIRE(fm->size() == 0u);
+
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -38,16 +49,19 @@ TEST_CASE("pmap<int,int>: zero-initialised pmap_data gives empty map",
 TEST_CASE("pmap<int,int>: insert single entry and find it",
           "[pmap][insert][find]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(42, 100);
-    REQUIRE(m.size() == 1u);
-    REQUIRE(!m.empty());
+    fm->insert(42, 100);
+    REQUIRE(fm->size() == 1u);
+    REQUIRE(!fm->empty());
 
-    int* val = m.find(42);
+    int* val = fm->find(42);
     REQUIRE(val != nullptr);
     REQUIRE(*val == 100);
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -56,11 +70,14 @@ TEST_CASE("pmap<int,int>: insert single entry and find it",
 TEST_CASE("pmap<int,int>: find missing key returns nullptr",
           "[pmap][find]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(1, 10);
-    REQUIRE(m.find(999) == nullptr);
+    fm->insert(1, 10);
+    REQUIRE(fm->find(999) == nullptr);
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -69,21 +86,24 @@ TEST_CASE("pmap<int,int>: find missing key returns nullptr",
 TEST_CASE("pmap<int,int>: insert multiple entries in sorted order",
           "[pmap][insert][sorted]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(30, 300);
-    m.insert(10, 100);
-    m.insert(20, 200);
+    fm->insert(30, 300);
+    fm->insert(10, 100);
+    fm->insert(20, 200);
 
-    REQUIRE(m.size() == 3u);
+    REQUIRE(fm->size() == 3u);
 
     // Entries must be in ascending key order: 10, 20, 30.
-    auto it = m.begin();
+    auto it = fm->begin();
     REQUIRE(it->key == 10);   REQUIRE(it->value == 100); ++it;
     REQUIRE(it->key == 20);   REQUIRE(it->value == 200); ++it;
     REQUIRE(it->key == 30);   REQUIRE(it->value == 300); ++it;
-    REQUIRE(it == m.end());
+    REQUIRE(it == fm->end());
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -92,18 +112,21 @@ TEST_CASE("pmap<int,int>: insert multiple entries in sorted order",
 TEST_CASE("pmap<int,int>: inserting existing key updates value",
           "[pmap][insert][update]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(5, 50);
-    REQUIRE(m.size() == 1u);
+    fm->insert(5, 50);
+    REQUIRE(fm->size() == 1u);
 
-    m.insert(5, 99);
-    REQUIRE(m.size() == 1u);
+    fm->insert(5, 99);
+    REQUIRE(fm->size() == 1u);
 
-    int* val = m.find(5);
+    int* val = fm->find(5);
     REQUIRE(val != nullptr);
     REQUIRE(*val == 99);
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -112,20 +135,23 @@ TEST_CASE("pmap<int,int>: inserting existing key updates value",
 TEST_CASE("pmap<int,int>: erase removes the correct entry",
           "[pmap][erase]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(1, 10);
-    m.insert(2, 20);
-    m.insert(3, 30);
-    REQUIRE(m.size() == 3u);
+    fm->insert(1, 10);
+    fm->insert(2, 20);
+    fm->insert(3, 30);
+    REQUIRE(fm->size() == 3u);
 
-    bool ok = m.erase(2);
+    bool ok = fm->erase(2);
     REQUIRE(ok);
-    REQUIRE(m.size() == 2u);
-    REQUIRE(m.find(2) == nullptr);
-    REQUIRE(m.find(1) != nullptr);
-    REQUIRE(m.find(3) != nullptr);
+    REQUIRE(fm->size() == 2u);
+    REQUIRE(fm->find(2) == nullptr);
+    REQUIRE(fm->find(1) != nullptr);
+    REQUIRE(fm->find(3) != nullptr);
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -134,13 +160,16 @@ TEST_CASE("pmap<int,int>: erase removes the correct entry",
 TEST_CASE("pmap<int,int>: erase missing key returns false",
           "[pmap][erase]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(1, 10);
-    bool ok = m.erase(999);
+    fm->insert(1, 10);
+    bool ok = fm->erase(999);
     REQUIRE(!ok);
-    REQUIRE(m.size() == 1u);
+    REQUIRE(fm->size() == 1u);
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -149,14 +178,17 @@ TEST_CASE("pmap<int,int>: erase missing key returns false",
 TEST_CASE("pmap<int,int>: operator[] inserts default value for missing key",
           "[pmap][operator_index]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
     // Key 7 does not exist; operator[] should insert it with default value 0.
-    m[7] = 77;
-    REQUIRE(m.size() == 1u);
-    REQUIRE(m.find(7) != nullptr);
-    REQUIRE(*m.find(7) == 77);
+    (*fm)[7] = 77;
+    REQUIRE(fm->size() == 1u);
+    REQUIRE(fm->find(7) != nullptr);
+    REQUIRE(*fm->find(7) == 77);
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -165,16 +197,19 @@ TEST_CASE("pmap<int,int>: operator[] inserts default value for missing key",
 TEST_CASE("pmap<int,int>: clear resets size to 0",
           "[pmap][clear]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(1, 1);
-    m.insert(2, 2);
-    REQUIRE(m.size() == 2u);
+    fm->insert(1, 1);
+    fm->insert(2, 2);
+    REQUIRE(fm->size() == 2u);
 
-    m.clear();
-    REQUIRE(m.empty());
-    REQUIRE(m.size() == 0u);
+    fm->clear();
+    REQUIRE(fm->empty());
+    REQUIRE(fm->size() == 0u);
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -183,15 +218,16 @@ TEST_CASE("pmap<int,int>: clear resets size to 0",
 TEST_CASE("pmap<int,int>: free releases underlying allocation",
           "[pmap][free]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(10, 100);
-    REQUIRE(md.data.addr() != 0u);
+    fm->insert(10, 100);
+    REQUIRE(fm->size() == 1u);
 
-    m.free();
-    REQUIRE(m.size() == 0u);
-    REQUIRE(md.data.addr() == 0u);
+    fm->free();
+    REQUIRE(fm->size() == 0u);
+
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -200,17 +236,20 @@ TEST_CASE("pmap<int,int>: free releases underlying allocation",
 TEST_CASE("pmap<int,double>: insert and find double values",
           "[pmap][double]")
 {
-    pmap_data<int, double> md{};
-    pmap<int, double> m(md);
+    fptr<pmap<int, double>> fm;
+    fm.New();
 
-    m.insert(1, 1.1);
-    m.insert(2, 2.2);
-    m.insert(3, 3.3);
+    fm->insert(1, 1.1);
+    fm->insert(2, 2.2);
+    fm->insert(3, 3.3);
 
-    REQUIRE(m.size() == 3u);
-    REQUIRE(*m.find(1) == 1.1);
-    REQUIRE(*m.find(2) == 2.2);
-    REQUIRE(*m.find(3) == 3.3);
+    REQUIRE(fm->size() == 3u);
+    REQUIRE(*fm->find(1) == 1.1);
+    REQUIRE(*fm->find(2) == 2.2);
+    REQUIRE(*fm->find(3) == 3.3);
+
+    fm->free();
+    fm.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -219,20 +258,23 @@ TEST_CASE("pmap<int,double>: insert and find double values",
 TEST_CASE("pmap<int,int>: range-based iteration visits all entries",
           "[pmap][iterator]")
 {
-    pmap_data<int, int> md{};
-    pmap<int, int> m(md);
+    fptr<pmap<int, int>> fm;
+    fm.New();
 
-    m.insert(1, 10);
-    m.insert(2, 20);
-    m.insert(3, 30);
+    fm->insert(1, 10);
+    fm->insert(2, 20);
+    fm->insert(3, 30);
 
     int key_sum = 0;
     int val_sum = 0;
-    for( auto& entry : m )
+    for( auto& entry : *fm )
     {
         key_sum += entry.key;
         val_sum += entry.value;
     }
     REQUIRE(key_sum == 6);
     REQUIRE(val_sum == 60);
+
+    fm->free();
+    fm.Delete();
 }

@@ -9,42 +9,31 @@
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// pvector_data<T> — trivially copyable layout
+// pvector<T> — layout checks
 // ---------------------------------------------------------------------------
-TEST_CASE("pvector_data<int>: is trivially copyable",
-          "[pvector][layout]")
-{
-    REQUIRE(std::is_trivially_copyable<pvector_data<int>>::value);
-    REQUIRE(std::is_trivially_copyable<pvector_data<double>>::value);
-    // Phase 3: size (sizeof(void*)) + capacity (sizeof(void*)) + fptr<T> (sizeof(void*)) = 3 * sizeof(void*).
-    REQUIRE(sizeof(pvector_data<int>) == 3 * sizeof(void*));
-}
-
-// ---------------------------------------------------------------------------
-// pvector_data<T> — Phase 3: поля size и capacity имеют тип uintptr_t
-// ---------------------------------------------------------------------------
-TEST_CASE("pvector_data<int>: size and capacity are uintptr_t (Phase 3)",
+TEST_CASE("pvector<int>: size and capacity are uintptr_t (Phase 3)",
           "[pvector][layout][phase3]")
 {
     // sizeof(uintptr_t) == sizeof(void*) на любой платформе.
-    REQUIRE(sizeof(pvector_data<int>::size) == sizeof(void*));
-    REQUIRE(sizeof(pvector_data<int>::capacity) == sizeof(void*));
-    // Поле data (fptr<T>) также хранит uintptr_t.
-    REQUIRE(sizeof(pvector_data<int>::data) == sizeof(void*));
+    // pvector<T> = size_ (uintptr_t) + capacity_ (uintptr_t) + data_ (fptr<T>) = 3 * sizeof(void*)
+    REQUIRE(sizeof(pvector<int>) == 3 * sizeof(void*));
+    REQUIRE(sizeof(pvector<double>) == 3 * sizeof(void*));
 }
 
 // ---------------------------------------------------------------------------
-// pvector — default data (empty)
+// pvector — default PAP allocation (empty)
 // ---------------------------------------------------------------------------
-TEST_CASE("pvector<int>: zero-initialised pvector_data gives empty vector",
+TEST_CASE("pvector<int>: zero-initialised pvector (via fptr) gives empty vector",
           "[pvector][construct]")
 {
-    pvector_data<int> vd{};
-    pvector<int> v(vd);
+    fptr<pvector<int>> fv;
+    fv.New();
 
-    REQUIRE(v.empty());
-    REQUIRE(v.size() == 0u);
-    REQUIRE(v.capacity() == 0u);
+    REQUIRE(fv->empty());
+    REQUIRE(fv->size() == 0u);
+    REQUIRE(fv->capacity() == 0u);
+
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -53,17 +42,20 @@ TEST_CASE("pvector<int>: zero-initialised pvector_data gives empty vector",
 TEST_CASE("pvector<int>: push_back increases size and stores correct values",
           "[pvector][push_back]")
 {
-    pvector_data<int> vd{};
-    pvector<int> v(vd);
+    fptr<pvector<int>> fv;
+    fv.New();
 
-    v.push_back(10);
-    v.push_back(20);
-    v.push_back(30);
+    fv->push_back(10);
+    fv->push_back(20);
+    fv->push_back(30);
 
-    REQUIRE(v.size() == 3u);
-    REQUIRE(v[0] == 10);
-    REQUIRE(v[1] == 20);
-    REQUIRE(v[2] == 30);
+    REQUIRE(fv->size() == 3u);
+    REQUIRE((*fv)[0] == 10);
+    REQUIRE((*fv)[1] == 20);
+    REQUIRE((*fv)[2] == 30);
+
+    fv->free();
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -72,17 +64,20 @@ TEST_CASE("pvector<int>: push_back increases size and stores correct values",
 TEST_CASE("pvector<int>: capacity grows to accommodate elements",
           "[pvector][capacity]")
 {
-    pvector_data<int> vd{};
-    pvector<int> v(vd);
+    fptr<pvector<int>> fv;
+    fv.New();
 
     for( int i = 0; i < 20; i++ )
-        v.push_back(i);
+        fv->push_back(i);
 
-    REQUIRE(v.size() == 20u);
-    REQUIRE(v.capacity() >= 20u);
+    REQUIRE(fv->size() == 20u);
+    REQUIRE(fv->capacity() >= 20u);
 
     for( int i = 0; i < 20; i++ )
-        REQUIRE(v[static_cast<unsigned>(i)] == i);
+        REQUIRE((*fv)[static_cast<unsigned>(i)] == i);
+
+    fv->free();
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -91,27 +86,29 @@ TEST_CASE("pvector<int>: capacity grows to accommodate elements",
 TEST_CASE("pvector<int>: pop_back decreases size",
           "[pvector][pop_back]")
 {
-    pvector_data<int> vd{};
-    pvector<int> v(vd);
+    fptr<pvector<int>> fv;
+    fv.New();
 
-    v.push_back(1);
-    v.push_back(2);
-    v.push_back(3);
-    REQUIRE(v.size() == 3u);
+    fv->push_back(1);
+    fv->push_back(2);
+    fv->push_back(3);
+    REQUIRE(fv->size() == 3u);
 
-    v.pop_back();
-    REQUIRE(v.size() == 2u);
-    REQUIRE(v[0] == 1);
-    REQUIRE(v[1] == 2);
+    fv->pop_back();
+    REQUIRE(fv->size() == 2u);
+    REQUIRE((*fv)[0] == 1);
+    REQUIRE((*fv)[1] == 2);
 
-    v.pop_back();
-    v.pop_back();
-    REQUIRE(v.size() == 0u);
-    REQUIRE(v.empty());
+    fv->pop_back();
+    fv->pop_back();
+    REQUIRE(fv->size() == 0u);
+    REQUIRE(fv->empty());
 
     // pop_back on empty should be safe (no-op).
-    v.pop_back();
-    REQUIRE(v.size() == 0u);
+    fv->pop_back();
+    REQUIRE(fv->size() == 0u);
+
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -120,18 +117,21 @@ TEST_CASE("pvector<int>: pop_back decreases size",
 TEST_CASE("pvector<int>: clear resets size to 0",
           "[pvector][clear]")
 {
-    pvector_data<int> vd{};
-    pvector<int> v(vd);
+    fptr<pvector<int>> fv;
+    fv.New();
 
-    v.push_back(1);
-    v.push_back(2);
-    unsigned cap_before = v.capacity();
+    fv->push_back(1);
+    fv->push_back(2);
+    uintptr_t cap_before = fv->capacity();
 
-    v.clear();
-    REQUIRE(v.size() == 0u);
-    REQUIRE(v.empty());
+    fv->clear();
+    REQUIRE(fv->size() == 0u);
+    REQUIRE(fv->empty());
     // Capacity should be unchanged by clear().
-    REQUIRE(v.capacity() == cap_before);
+    REQUIRE(fv->capacity() == cap_before);
+
+    fv->free();
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -140,16 +140,16 @@ TEST_CASE("pvector<int>: clear resets size to 0",
 TEST_CASE("pvector<int>: free releases allocation and resets capacity",
           "[pvector][free]")
 {
-    pvector_data<int> vd{};
-    pvector<int> v(vd);
+    fptr<pvector<int>> fv;
+    fv.New();
 
-    v.push_back(42);
-    REQUIRE(vd.data.addr() != 0u);
+    fv->push_back(42);
 
-    v.free();
-    REQUIRE(v.size() == 0u);
-    REQUIRE(v.capacity() == 0u);
-    REQUIRE(vd.data.addr() == 0u);
+    fv->free();
+    REQUIRE(fv->size() == 0u);
+    REQUIRE(fv->capacity() == 0u);
+
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -158,15 +158,18 @@ TEST_CASE("pvector<int>: free releases allocation and resets capacity",
 TEST_CASE("pvector<int>: front() and back() return correct elements",
           "[pvector][access]")
 {
-    pvector_data<int> vd{};
-    pvector<int> v(vd);
+    fptr<pvector<int>> fv;
+    fv.New();
 
-    v.push_back(10);
-    v.push_back(20);
-    v.push_back(30);
+    fv->push_back(10);
+    fv->push_back(20);
+    fv->push_back(30);
 
-    REQUIRE(v.front() == 10);
-    REQUIRE(v.back() == 30);
+    REQUIRE(fv->front() == 10);
+    REQUIRE(fv->back() == 30);
+
+    fv->free();
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -175,18 +178,21 @@ TEST_CASE("pvector<int>: front() and back() return correct elements",
 TEST_CASE("pvector<int>: range-based iteration produces correct values",
           "[pvector][iterator]")
 {
-    pvector_data<int> vd{};
-    pvector<int> v(vd);
+    fptr<pvector<int>> fv;
+    fv.New();
 
-    v.push_back(1);
-    v.push_back(2);
-    v.push_back(3);
+    fv->push_back(1);
+    fv->push_back(2);
+    fv->push_back(3);
 
     int sum = 0;
-    for( auto& elem : v )
+    for( auto& elem : *fv )
         sum += elem;
 
     REQUIRE(sum == 6);
+
+    fv->free();
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -195,15 +201,18 @@ TEST_CASE("pvector<int>: range-based iteration produces correct values",
 TEST_CASE("pvector<double>: push_back and read back doubles",
           "[pvector][double]")
 {
-    pvector_data<double> vd{};
-    pvector<double> v(vd);
+    fptr<pvector<double>> fv;
+    fv.New();
 
-    v.push_back(1.1);
-    v.push_back(2.2);
-    v.push_back(3.3);
+    fv->push_back(1.1);
+    fv->push_back(2.2);
+    fv->push_back(3.3);
 
-    REQUIRE(v.size() == 3u);
-    REQUIRE(v[0] == 1.1);
-    REQUIRE(v[1] == 2.2);
-    REQUIRE(v[2] == 3.3);
+    REQUIRE(fv->size() == 3u);
+    REQUIRE((*fv)[0] == 1.1);
+    REQUIRE((*fv)[1] == 2.2);
+    REQUIRE((*fv)[2] == 3.3);
+
+    fv->free();
+    fv.Delete();
 }

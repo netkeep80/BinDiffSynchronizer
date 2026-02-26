@@ -10,53 +10,42 @@
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// Layout: pjson_data must be trivially copyable
+// Layout: pjson payload fields are uintptr_t (Phase 3)
 // ---------------------------------------------------------------------------
-TEST_CASE("pjson_data: is trivially copyable", "[pjson][layout]")
-{
-    REQUIRE(std::is_trivially_copyable<pjson_data>::value);
-}
-
-TEST_CASE("pjson_kv_pair: is trivially copyable", "[pjson][layout]")
-{
-    REQUIRE(std::is_trivially_copyable<pjson_kv_pair>::value);
-}
-
-// ---------------------------------------------------------------------------
-// Phase 3: поля payload.string_val, array_val, object_val используют uintptr_t
-// ---------------------------------------------------------------------------
-TEST_CASE("pjson_data: payload slot fields are uintptr_t (Phase 3)",
+TEST_CASE("pjson: payload slot fields are uintptr_t (Phase 3)",
           "[pjson][layout][phase3]")
 {
     // Все поля slot/size в payload должны иметь размер sizeof(void*)
     // для согласованности с Phase 2 PAM API.
-    REQUIRE(sizeof(pjson_data::payload_t::string_val.chars_slot) == sizeof(void*));
-    REQUIRE(sizeof(pjson_data::payload_t::string_val.length) == sizeof(void*));
-    REQUIRE(sizeof(pjson_data::payload_t::array_val.data_slot) == sizeof(void*));
-    REQUIRE(sizeof(pjson_data::payload_t::array_val.size) == sizeof(void*));
-    REQUIRE(sizeof(pjson_data::payload_t::object_val.pairs_slot) == sizeof(void*));
-    REQUIRE(sizeof(pjson_data::payload_t::object_val.size) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::string_val.chars_slot) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::string_val.length) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::array_val.data_slot) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::array_val.size) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::object_val.pairs_slot) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::object_val.size) == sizeof(void*));
 }
 
 // ---------------------------------------------------------------------------
 // null value
 // ---------------------------------------------------------------------------
-TEST_CASE("pjson: zero-initialised pjson_data is null", "[pjson][null]")
+TEST_CASE("pjson: zero-initialised pjson (via fptr) is null", "[pjson][null]")
 {
-    pjson_data d{};
-    pjson v(d);
-    REQUIRE(v.is_null());
-    REQUIRE(v.type() == pjson_type::null);
+    fptr<pjson> fv;
+    fv.New();
+    REQUIRE(fv->is_null());
+    REQUIRE(fv->type_tag() == pjson_type::null);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: set_null resets any value to null", "[pjson][null]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_bool(true);
-    REQUIRE(v.is_boolean());
-    v.set_null();
-    REQUIRE(v.is_null());
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_bool(true);
+    REQUIRE(fv->is_boolean());
+    fv->set_null();
+    REQUIRE(fv->is_null());
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -64,20 +53,22 @@ TEST_CASE("pjson: set_null resets any value to null", "[pjson][null]")
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: set_bool(true) and get_bool()", "[pjson][boolean]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_bool(true);
-    REQUIRE(v.is_boolean());
-    REQUIRE(v.get_bool() == true);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_bool(true);
+    REQUIRE(fv->is_boolean());
+    REQUIRE(fv->get_bool() == true);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: set_bool(false) and get_bool()", "[pjson][boolean]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_bool(false);
-    REQUIRE(v.is_boolean());
-    REQUIRE(v.get_bool() == false);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_bool(false);
+    REQUIRE(fv->is_boolean());
+    REQUIRE(fv->get_bool() == false);
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -85,20 +76,22 @@ TEST_CASE("pjson: set_bool(false) and get_bool()", "[pjson][boolean]")
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: set_int and get_int", "[pjson][integer]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_int(-42);
-    REQUIRE(v.is_integer());
-    REQUIRE(v.get_int() == -42);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_int(-42);
+    REQUIRE(fv->is_integer());
+    REQUIRE(fv->get_int() == -42);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: set_int with INT64_MAX", "[pjson][integer]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_int(INT64_MAX);
-    REQUIRE(v.is_integer());
-    REQUIRE(v.get_int() == INT64_MAX);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_int(INT64_MAX);
+    REQUIRE(fv->is_integer());
+    REQUIRE(fv->get_int() == INT64_MAX);
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -106,20 +99,22 @@ TEST_CASE("pjson: set_int with INT64_MAX", "[pjson][integer]")
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: set_uint and get_uint", "[pjson][uinteger]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_uint(99u);
-    REQUIRE(v.is_uinteger());
-    REQUIRE(v.get_uint() == 99u);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_uint(99u);
+    REQUIRE(fv->is_uinteger());
+    REQUIRE(fv->get_uint() == 99u);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: set_uint with UINT64_MAX", "[pjson][uinteger]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_uint(UINT64_MAX);
-    REQUIRE(v.is_uinteger());
-    REQUIRE(v.get_uint() == UINT64_MAX);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_uint(UINT64_MAX);
+    REQUIRE(fv->is_uinteger());
+    REQUIRE(fv->get_uint() == UINT64_MAX);
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -127,23 +122,25 @@ TEST_CASE("pjson: set_uint with UINT64_MAX", "[pjson][uinteger]")
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: set_real and get_real", "[pjson][real]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_real(3.14);
-    REQUIRE(v.is_real());
-    REQUIRE(v.get_real() == 3.14);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_real(3.14);
+    REQUIRE(fv->is_real());
+    REQUIRE(fv->get_real() == 3.14);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: is_number() true for integer, uinteger, real", "[pjson][real]")
 {
-    pjson_data d1{}, d2{}, d3{};
-    pjson vi(d1), vu(d2), vr(d3);
-    vi.set_int(1);
-    vu.set_uint(2u);
-    vr.set_real(3.0);
-    REQUIRE(vi.is_number());
-    REQUIRE(vu.is_number());
-    REQUIRE(vr.is_number());
+    fptr<pjson> fvi; fvi.New(); fvi->set_int(1);
+    fptr<pjson> fvu; fvu.New(); fvu->set_uint(2u);
+    fptr<pjson> fvr; fvr.New(); fvr->set_real(3.0);
+    REQUIRE(fvi->is_number());
+    REQUIRE(fvu->is_number());
+    REQUIRE(fvr->is_number());
+    fvi.Delete();
+    fvu.Delete();
+    fvr.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -151,50 +148,55 @@ TEST_CASE("pjson: is_number() true for integer, uinteger, real", "[pjson][real]"
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: set_string and get_string", "[pjson][string]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_string("hello");
-    REQUIRE(v.is_string());
-    REQUIRE(std::strcmp(v.get_string(), "hello") == 0);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_string("hello");
+    REQUIRE(fv->is_string());
+    REQUIRE(std::strcmp(fv->get_string(), "hello") == 0);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: set_string empty string", "[pjson][string]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_string("");
-    REQUIRE(v.is_string());
-    REQUIRE(std::strcmp(v.get_string(), "") == 0);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_string("");
+    REQUIRE(fv->is_string());
+    REQUIRE(std::strcmp(fv->get_string(), "") == 0);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: set_string nullptr behaves like empty", "[pjson][string]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_string(nullptr);
-    REQUIRE(v.is_string());
-    REQUIRE(std::strcmp(v.get_string(), "") == 0);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_string(nullptr);
+    REQUIRE(fv->is_string());
+    REQUIRE(std::strcmp(fv->get_string(), "") == 0);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: reassign string frees previous allocation", "[pjson][string]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_string("first");
-    v.set_string("second");
-    REQUIRE(std::strcmp(v.get_string(), "second") == 0);
-    v.free();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_string("first");
+    fv->set_string("second");
+    REQUIRE(std::strcmp(fv->get_string(), "second") == 0);
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: set_string size() returns string length", "[pjson][string]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_string("abc");
-    REQUIRE(v.size() == 3u);
-    v.free();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_string("abc");
+    REQUIRE(fv->size() == 3u);
+    fv->free();
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -202,83 +204,86 @@ TEST_CASE("pjson: set_string size() returns string length", "[pjson][string]")
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: set_array creates empty array", "[pjson][array]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_array();
-    REQUIRE(v.is_array());
-    REQUIRE(v.empty());
-    REQUIRE(v.size() == 0u);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_array();
+    REQUIRE(fv->is_array());
+    REQUIRE(fv->empty());
+    REQUIRE(fv->size() == 0u);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: push_back appends null elements", "[pjson][array]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_array();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_array();
 
-    pjson_data& e0 = v.push_back();
-    pjson elem0(e0);
-    REQUIRE(elem0.is_null());
+    pjson& e0 = fv->push_back();
+    REQUIRE(e0.is_null());
 
-    REQUIRE(v.size() == 1u);
+    REQUIRE(fv->size() == 1u);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: push_back multiple elements and read back", "[pjson][array]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_array();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_array();
 
-    pjson(v.push_back()).set_int(10);
-    pjson(v.push_back()).set_int(20);
-    pjson(v.push_back()).set_int(30);
+    fv->push_back().set_int(10);
+    fv->push_back().set_int(20);
+    fv->push_back().set_int(30);
 
-    REQUIRE(v.size() == 3u);
-    REQUIRE(pjson(v[0u]).get_int() == 10);
-    REQUIRE(pjson(v[1u]).get_int() == 20);
-    REQUIRE(pjson(v[2u]).get_int() == 30);
+    REQUIRE(fv->size() == 3u);
+    REQUIRE((*fv)[0u].get_int() == 10);
+    REQUIRE((*fv)[1u].get_int() == 20);
+    REQUIRE((*fv)[2u].get_int() == 30);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: push_back more than initial capacity triggers realloc", "[pjson][array]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_array();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_array();
 
     // Push 10 elements — initial capacity is 4, so multiple reallocations happen.
     for( int i = 0; i < 10; i++ )
-        pjson(v.push_back()).set_int(i);
+        fv->push_back().set_int(i);
 
-    REQUIRE(v.size() == 10u);
+    REQUIRE(fv->size() == 10u);
     for( int i = 0; i < 10; i++ )
-        REQUIRE(pjson(v[static_cast<unsigned>(i)]).get_int() == i);
+        REQUIRE((*fv)[static_cast<unsigned>(i)].get_int() == i);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: nested arrays", "[pjson][array]")
 {
-    pjson_data d{};
-    pjson outer(d);
-    outer.set_array();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_array();
 
     // Inner array at index 0.
-    pjson_data& inner_d = outer.push_back();
-    pjson inner(inner_d);
-    inner.set_array();
-    pjson(inner.push_back()).set_int(99);
+    pjson& inner_d = fv->push_back();
+    inner_d.set_array();
+    inner_d.push_back().set_int(99);
 
-    REQUIRE(outer.size() == 1u);
-    pjson inner2(outer[0u]);
+    REQUIRE(fv->size() == 1u);
+    pjson& inner2 = (*fv)[0u];
     REQUIRE(inner2.is_array());
     REQUIRE(inner2.size() == 1u);
-    REQUIRE(pjson(inner2[0u]).get_int() == 99);
+    REQUIRE(inner2[0u].get_int() == 99);
 
-    outer.free();
+    fv->free();
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -286,151 +291,160 @@ TEST_CASE("pjson: nested arrays", "[pjson][array]")
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: set_object creates empty object", "[pjson][object]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
-    REQUIRE(v.is_object());
-    REQUIRE(v.empty());
-    REQUIRE(v.size() == 0u);
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
+    REQUIRE(fv->is_object());
+    REQUIRE(fv->empty());
+    REQUIRE(fv->size() == 0u);
+    fv.Delete();
 }
 
 TEST_CASE("pjson: obj_insert and obj_find single key", "[pjson][object]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
 
-    pjson(v.obj_insert("x")).set_int(42);
-    REQUIRE(v.size() == 1u);
+    fv->obj_insert("x").set_int(42);
+    REQUIRE(fv->size() == 1u);
 
-    pjson_data* found = v.obj_find("x");
+    pjson* found = fv->obj_find("x");
     REQUIRE(found != nullptr);
-    REQUIRE(pjson(*found).get_int() == 42);
+    REQUIRE(found->get_int() == 42);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: obj_find missing key returns nullptr", "[pjson][object]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
-    v.obj_insert("a");
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
+    fv->obj_insert("a");
 
-    REQUIRE(v.obj_find("b") == nullptr);
+    REQUIRE(fv->obj_find("b") == nullptr);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: obj_insert maintains sorted key order", "[pjson][object]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
 
-    pjson(v.obj_insert("c")).set_int(3);
-    pjson(v.obj_insert("a")).set_int(1);
-    pjson(v.obj_insert("b")).set_int(2);
+    fv->obj_insert("c").set_int(3);
+    fv->obj_insert("a").set_int(1);
+    fv->obj_insert("b").set_int(2);
 
-    REQUIRE(v.size() == 3u);
+    REQUIRE(fv->size() == 3u);
 
     // Keys should be sorted: a, b, c.
-    pjson_data* fa = v.obj_find("a");
-    pjson_data* fb = v.obj_find("b");
-    pjson_data* fc = v.obj_find("c");
+    pjson* fa = fv->obj_find("a");
+    pjson* fb = fv->obj_find("b");
+    pjson* fc = fv->obj_find("c");
     REQUIRE(fa != nullptr);
     REQUIRE(fb != nullptr);
     REQUIRE(fc != nullptr);
-    REQUIRE(pjson(*fa).get_int() == 1);
-    REQUIRE(pjson(*fb).get_int() == 2);
-    REQUIRE(pjson(*fc).get_int() == 3);
+    REQUIRE(fa->get_int() == 1);
+    REQUIRE(fb->get_int() == 2);
+    REQUIRE(fc->get_int() == 3);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: obj_insert replaces existing key value", "[pjson][object]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
 
-    pjson(v.obj_insert("k")).set_int(1);
-    REQUIRE(pjson(*v.obj_find("k")).get_int() == 1);
+    fv->obj_insert("k").set_int(1);
+    REQUIRE(fv->obj_find("k")->get_int() == 1);
 
-    pjson(v.obj_insert("k")).set_int(2);
-    REQUIRE(v.size() == 1u);
-    REQUIRE(pjson(*v.obj_find("k")).get_int() == 2);
+    fv->obj_insert("k").set_int(2);
+    REQUIRE(fv->size() == 1u);
+    REQUIRE(fv->obj_find("k")->get_int() == 2);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: obj_erase removes key", "[pjson][object]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
 
-    pjson(v.obj_insert("a")).set_int(1);
-    pjson(v.obj_insert("b")).set_int(2);
-    pjson(v.obj_insert("c")).set_int(3);
-    REQUIRE(v.size() == 3u);
+    fv->obj_insert("a").set_int(1);
+    fv->obj_insert("b").set_int(2);
+    fv->obj_insert("c").set_int(3);
+    REQUIRE(fv->size() == 3u);
 
-    bool ok = v.obj_erase("b");
+    bool ok = fv->obj_erase("b");
     REQUIRE(ok);
-    REQUIRE(v.size() == 2u);
-    REQUIRE(v.obj_find("b") == nullptr);
-    REQUIRE(v.obj_find("a") != nullptr);
-    REQUIRE(v.obj_find("c") != nullptr);
+    REQUIRE(fv->size() == 2u);
+    REQUIRE(fv->obj_find("b") == nullptr);
+    REQUIRE(fv->obj_find("a") != nullptr);
+    REQUIRE(fv->obj_find("c") != nullptr);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: obj_erase missing key returns false", "[pjson][object]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
 
-    pjson(v.obj_insert("a")).set_int(1);
-    bool ok = v.obj_erase("z");
+    fv->obj_insert("a").set_int(1);
+    bool ok = fv->obj_erase("z");
     REQUIRE(!ok);
-    REQUIRE(v.size() == 1u);
+    REQUIRE(fv->size() == 1u);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: object with string values", "[pjson][object][string]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
 
-    pjson(v.obj_insert("name")).set_string("Alice");
-    pjson(v.obj_insert("role")).set_string("engineer");
+    fv->obj_insert("name").set_string("Alice");
+    fv->obj_insert("role").set_string("engineer");
 
-    pjson_data* name_d = v.obj_find("name");
+    pjson* name_d = fv->obj_find("name");
     REQUIRE(name_d != nullptr);
-    REQUIRE(std::strcmp(pjson(*name_d).get_string(), "Alice") == 0);
+    REQUIRE(std::strcmp(name_d->get_string(), "Alice") == 0);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: obj_insert triggers realloc beyond initial capacity", "[pjson][object]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
 
     // Insert 10 keys — initial capacity is 4, so reallocation must happen.
     const char* keys[] = {"j", "a", "h", "c", "e", "g", "b", "f", "d", "i"};
     for( int i = 0; i < 10; i++ )
-        pjson(v.obj_insert(keys[i])).set_int(i);
+        fv->obj_insert(keys[i]).set_int(i);
 
-    REQUIRE(v.size() == 10u);
+    REQUIRE(fv->size() == 10u);
     for( int i = 0; i < 10; i++ )
-        REQUIRE(v.obj_find(keys[i]) != nullptr);
+        REQUIRE(fv->obj_find(keys[i]) != nullptr);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
@@ -438,58 +452,61 @@ TEST_CASE("pjson: obj_insert triggers realloc beyond initial capacity", "[pjson]
 // ---------------------------------------------------------------------------
 TEST_CASE("pjson: heterogeneous array (null, bool, int, real, string)", "[pjson][mixed]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_array();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_array();
 
-    pjson(v.push_back()).set_null();
-    pjson(v.push_back()).set_bool(true);
-    pjson(v.push_back()).set_int(-7);
-    pjson(v.push_back()).set_real(2.718);
-    pjson(v.push_back()).set_string("world");
+    fv->push_back().set_null();
+    fv->push_back().set_bool(true);
+    fv->push_back().set_int(-7);
+    fv->push_back().set_real(2.718);
+    fv->push_back().set_string("world");
 
-    REQUIRE(v.size() == 5u);
-    REQUIRE(pjson(v[0u]).is_null());
-    REQUIRE(pjson(v[1u]).get_bool() == true);
-    REQUIRE(pjson(v[2u]).get_int() == -7);
-    REQUIRE(pjson(v[3u]).get_real() == 2.718);
-    REQUIRE(std::strcmp(pjson(v[4u]).get_string(), "world") == 0);
+    REQUIRE(fv->size() == 5u);
+    REQUIRE((*fv)[0u].is_null());
+    REQUIRE((*fv)[1u].get_bool() == true);
+    REQUIRE((*fv)[2u].get_int() == -7);
+    REQUIRE((*fv)[3u].get_real() == 2.718);
+    REQUIRE(std::strcmp((*fv)[4u].get_string(), "world") == 0);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: object containing array value", "[pjson][mixed]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
 
-    pjson arr(v.obj_insert("items"));
+    pjson& arr = fv->obj_insert("items");
     arr.set_array();
-    pjson(arr.push_back()).set_int(1);
-    pjson(arr.push_back()).set_int(2);
+    arr.push_back().set_int(1);
+    arr.push_back().set_int(2);
 
-    pjson_data* items = v.obj_find("items");
+    pjson* items = fv->obj_find("items");
     REQUIRE(items != nullptr);
-    pjson arr2(*items);
-    REQUIRE(arr2.is_array());
-    REQUIRE(arr2.size() == 2u);
-    REQUIRE(pjson(arr2[0u]).get_int() == 1);
-    REQUIRE(pjson(arr2[1u]).get_int() == 2);
+    REQUIRE(items->is_array());
+    REQUIRE(items->size() == 2u);
+    REQUIRE((*items)[0u].get_int() == 1);
+    REQUIRE((*items)[1u].get_int() == 2);
 
-    v.free();
+    fv->free();
+    fv.Delete();
 }
 
 TEST_CASE("pjson: free releases all nested allocations", "[pjson][free]")
 {
-    pjson_data d{};
-    pjson v(d);
-    v.set_object();
-    pjson(v.obj_insert("key")).set_string("value");
-    pjson arr(v.obj_insert("arr"));
+    fptr<pjson> fv;
+    fv.New();
+    fv->set_object();
+    fv->obj_insert("key").set_string("value");
+    pjson& arr = fv->obj_insert("arr");
     arr.set_array();
-    pjson(arr.push_back()).set_int(42);
+    arr.push_back().set_int(42);
 
-    v.free();
-    REQUIRE(v.is_null());
+    fv->free();
+    REQUIRE(fv->is_null());
+
+    fv.Delete();
 }

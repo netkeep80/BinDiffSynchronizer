@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <type_traits>
+#include <typeinfo>
 #include <new>
 #include <stdexcept>
 

@@ -1,12 +1,15 @@
 main.exe
 *.extend
 *.persist
+*.pap
 ci-logs/
 err.json
 .vscode/
 .DS_Store
 build/
 build_test/
+build_clean/
+build_test2/
 docs
 Testing
 build
