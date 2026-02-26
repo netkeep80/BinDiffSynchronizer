@@ -40,7 +40,7 @@ static fs::path make_test_dir(const char* tag) {
 // ---------------------------------------------------------------------------
 // 3.5.1 — Full cycle: PersistentJsonStore → snapshot → destroy → restore
 // ---------------------------------------------------------------------------
-TEST_CASE("Task 3.5.1: full cycle — import, snapshot, destroy store, restore from snapshot",
+TEST_CASE("Task 3.5.1: full cycle - import, snapshot, destroy store, restore from snapshot",
           "[task3.5][integration]")
 {
     auto tmp = make_test_dir("full_cycle");
@@ -85,7 +85,7 @@ TEST_CASE("Task 3.5.1: full cycle — import, snapshot, destroy store, restore f
 // 3.5.2 — Persistence restart: PersistentJsonStore saves to disk, then is
 //          re-opened and previously imported data is accessible
 // ---------------------------------------------------------------------------
-TEST_CASE("Task 3.5.2: persistence restart — store saves on destruction and reloads on open",
+TEST_CASE("Task 3.5.2: persistence restart - store saves on destruction and reloads on open",
           "[task3.5][integration]")
 {
     auto store_dir = make_test_dir("restart") / "pjs";
