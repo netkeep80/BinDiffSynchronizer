@@ -35,6 +35,8 @@ set(TEST_SOURCES
     # Task 3.3 — Instantiate nlohmann::basic_json<> with persistent classes
     test_persistent_string_extended.cpp
     test_persist_json.cpp
+    # Task 3.5 — Integration tests
+    test_phase3_integration.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
