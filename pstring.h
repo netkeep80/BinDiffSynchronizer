@@ -15,6 +15,9 @@
 //   - Нулевой терминатор всегда записывается последним символом.
 //   - Пустая/нулевая pstring имеет chars.addr() == 0 и length == 0.
 //
+// Phase 3: поле length изменено с unsigned на uintptr_t для полной совместимости
+//   с Phase 2 PAM API (PersistentAddressSpace использует uintptr_t для всех смещений).
+//
 // Использование:
 //   pstring_data sd{};
 //   pstring ps(sd);
@@ -25,12 +28,18 @@
 /// Заголовок персистной строки (тривиально копируем).
 struct pstring_data
 {
-    unsigned   length;   ///< Число символов (без учёта нулевого терминатора)
+    uintptr_t  length;   ///< Число символов (без учёта нулевого терминатора); uintptr_t для совместимости с Phase 2
     fptr<char> chars;    ///< Смещение в ПАП для массива символов; 0 = пусто
 };
 
 static_assert(std::is_trivially_copyable<pstring_data>::value,
               "pstring_data должна быть тривиально копируемой для использования с persist<T>");
+
+// Phase 3: проверяем, что оба поля имеют размер void* (uintptr_t) для согласованности с Phase 2.
+static_assert(sizeof(pstring_data::length) == sizeof(void*),
+              "pstring_data::length должен иметь размер void* (Phase 3)");
+static_assert(sizeof(pstring_data) == 2 * sizeof(void*),
+              "pstring_data должна занимать 2 * sizeof(void*) байт (Phase 3)");
 
 // pstring — тонкая не-владеющая обёртка над ссылкой pstring_data.
 // Владелец pstring_data — вызывающий код (как правило, persist<pstring_data>).
@@ -54,12 +63,12 @@ public:
             _d.length = 0;
             return;
         }
-        unsigned len = static_cast<unsigned>(std::strlen(s));
+        uintptr_t len = static_cast<uintptr_t>(std::strlen(s));
         _d.length = len;
         // Выделяем len+1 символов (включая нулевой терминатор).
-        _d.chars.NewArray(len + 1);
-        for( unsigned i = 0; i <= len; i++ )
-            _d.chars[i] = s[i];
+        _d.chars.NewArray(static_cast<unsigned>(len + 1));
+        for( uintptr_t i = 0; i <= len; i++ )
+            _d.chars[static_cast<unsigned>(i)] = s[i];
     }
 
     // c_str: вернуть raw-указатель на символьные данные.
@@ -70,8 +79,8 @@ public:
         return &(_d.chars[0]);
     }
 
-    unsigned size() const { return _d.length; }
-    bool     empty() const { return _d.length == 0; }
+    uintptr_t size() const { return _d.length; }
+    bool      empty() const { return _d.length == 0; }
 
     // clear: освободить символьные данные и обнулить длину.
     void clear()
@@ -84,8 +93,8 @@ public:
     }
 
     // operator[]: доступ к символу по индексу (без проверки границ).
-    char& operator[](unsigned idx)       { return _d.chars[idx]; }
-    const char& operator[](unsigned idx) const { return _d.chars[idx]; }
+    char& operator[](uintptr_t idx)       { return _d.chars[static_cast<unsigned>(idx)]; }
+    const char& operator[](uintptr_t idx) const { return _d.chars[static_cast<unsigned>(idx)]; }
 
     bool operator==(const char* s) const
     {

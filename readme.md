@@ -12,7 +12,7 @@
 
 ---
 
-## Архитектура (фаза 2)
+## Архитектура (фаза 3)
 
 ### Требования
 
@@ -34,6 +34,21 @@
 | Тр.14 | ПАМ — персистный объект, хранит имена объектов |
 | Тр.15 | `fptr<T>` инициализируется строковым именем объекта через ПАМ |
 | Тр.16 | ПАМ хранит карту объектов и их имена |
+
+### Изменения Phase 3
+
+Поля размера и смещений в контейнерах приведены к типу `uintptr_t` для полной совместимости
+с Phase 2 PAM API (`PersistentAddressSpace` использует `uintptr_t` для всех смещений):
+
+| Тип | Поле | До (Phase 2) | После (Phase 3) |
+|-----|------|-------------|----------------|
+| `pstring_data` | `length` | `unsigned` | `uintptr_t` |
+| `pvector_data<T>` | `size`, `capacity` | `unsigned` | `uintptr_t` |
+| `pjson_data.payload` | `string_val.length`, `string_val.chars_slot` | `unsigned` | `uintptr_t` |
+| `pjson_data.payload` | `array_val.size`, `array_val.data_slot` | `unsigned` | `uintptr_t` |
+| `pjson_data.payload` | `object_val.size`, `object_val.pairs_slot` | `unsigned` | `uintptr_t` |
+
+Это устраняет потенциальное переполнение на 64-битных платформах при размере ПАП > 4 ГБ.
 
 ---
 

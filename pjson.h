@@ -34,10 +34,14 @@
 //   string  — fptr<char> (указывает на массив символов в AddressManager<char>).
 //   array   — fptr<pjson_data> (указывает на массив элементов pjson_data).
 //   object  — отсортированный массив пар (pstring_data ключ, pjson_data значение).
-//             Для фазы 1: объекты хранятся как отсортированные массивы записей
+//             Объекты хранятся как отсортированные массивы записей
 //             (pstring_data key, pjson_data value) — см. pjson_kv_pair.
 //
-// Смещения fptr хранятся как uintptr_t (sizeof(void*)). pjson_data — 16 байт.
+// Phase 3: поля chars_slot, data_slot, pairs_slot изменены с unsigned на uintptr_t
+//   для согласованности с Phase 2 PAM API (PersistentAddressSpace использует uintptr_t
+//   для всех смещений). На 64-бит платформах unsigned (32 бит) усекал адреса > 4 ГБ.
+//
+// Размер pjson_data: 4 (type) + 4 (padding) + 16 (payload) = 24 байта на 64-бит.
 
 // ---------------------------------------------------------------------------
 // pjson_type — тег-дискриминант типа значения
@@ -95,27 +99,37 @@ struct pjson_data
         uint64_t    uint_val;
         double      real_val;
 
-        // Для строки: смещение в ПАП для массива символов.
-        // (Хранится как raw unsigned вместо fptr<char>, чтобы избежать
-        //  ограничения C++ на нетривиальные типы в union.
-        //  fptr<char> хранит только uintptr_t — представление идентично.)
-        struct { unsigned length; unsigned chars_slot; } string_val;
+        // Для строки: длина строки и смещение в ПАП для массива символов.
+        // Phase 3: оба поля изменены с unsigned (32 бит) на uintptr_t (64 бит на 64-бит платформах),
+        // чтобы корректно хранить смещения PersistentAddressSpace, которые имеют тип uintptr_t.
+        // fptr<char> хранит только uintptr_t — представление идентично.
+        struct { uintptr_t length; uintptr_t chars_slot; } string_val;
 
         // Для массива: размер и смещение в ПАП для массива pjson_data.
-        struct { unsigned size; unsigned data_slot; } array_val;
+        // Phase 3: оба поля изменены с unsigned на uintptr_t.
+        struct { uintptr_t size; uintptr_t data_slot; } array_val;
 
         // Для объекта: размер и смещение в ПАП для массива pjson_kv_pair.
-        struct { unsigned size; unsigned pairs_slot; } object_val;
+        // Phase 3: оба поля изменены с unsigned на uintptr_t.
+        struct { uintptr_t size; uintptr_t pairs_slot; } object_val;
     } payload;
 
-    // Выравнивание до 16 байт (4 + 4 + 8 = 16).
-    // Наибольший элемент payload_t — int64_t/uint64_t/double (8 байт);
-    // варианты string/array/object — 2×unsigned = 8 байт.
-    // Итого: 4 (type) + 4 (выравнивание в union) + 8 (значение) = 16 байт.
+    // Размер pjson_data:
+    //   4 (type) + 4 (выравнивание) + 16 (payload: 2×uintptr_t на 64-бит) = 24 байта на 64-бит.
+    //   4 (type) + 4 (выравнивание) + 8 (payload: 2×uint32_t на 32-бит) = 16 байт на 32-бит.
+    // Инвариант фиксируется static_assert ниже.
 };
 
 static_assert(std::is_trivially_copyable<pjson_data>::value,
               "pjson_data должна быть тривиально копируемой для использования с persist<T>");
+
+// Phase 3: проверяем, что поля payload имеют тип uintptr_t.
+static_assert(sizeof(pjson_data::payload_t::string_val.chars_slot) == sizeof(void*),
+              "pjson_data::payload.string_val.chars_slot должен иметь размер void* (Phase 3)");
+static_assert(sizeof(pjson_data::payload_t::array_val.data_slot) == sizeof(void*),
+              "pjson_data::payload.array_val.data_slot должен иметь размер void* (Phase 3)");
+static_assert(sizeof(pjson_data::payload_t::object_val.pairs_slot) == sizeof(void*),
+              "pjson_data::payload.object_val.pairs_slot должен иметь размер void* (Phase 3)");
 
 // ---------------------------------------------------------------------------
 // pjson_kv_pair — одна пара (pstring_data ключ, pjson_data значение).
@@ -124,8 +138,8 @@ static_assert(std::is_trivially_copyable<pjson_data>::value,
 // ---------------------------------------------------------------------------
 struct pjson_kv_pair
 {
-    pstring_data key;    // 8 байт
-    pjson_data   value;  // 16 байт
+    pstring_data key;    // 2 * sizeof(void*) байт (Phase 3: uintptr_t length + fptr<char>)
+    pjson_data   value;  // sizeof(pjson_data) байт
 };
 
 static_assert(std::is_trivially_copyable<pjson_kv_pair>::value,
@@ -161,9 +175,9 @@ class pjson
         case pjson_type::array:
             if( _d.payload.array_val.data_slot != 0 )
             {
-                // Recursively free each element.
-                unsigned sz = _d.payload.array_val.size;
-                for( unsigned i = 0; i < sz; i++ )
+                // Рекурсивно освобождаем каждый элемент.
+                uintptr_t sz = _d.payload.array_val.size;
+                for( uintptr_t i = 0; i < sz; i++ )
                 {
                     pjson_data& elem =
                         AddressManager<pjson_data>::GetArrayElement(
@@ -181,16 +195,16 @@ class pjson
         case pjson_type::object:
             if( _d.payload.object_val.pairs_slot != 0 )
             {
-                unsigned sz = _d.payload.object_val.size;
-                for( unsigned i = 0; i < sz; i++ )
+                uintptr_t sz = _d.payload.object_val.size;
+                for( uintptr_t i = 0; i < sz; i++ )
                 {
                     pjson_kv_pair& pair =
                         AddressManager<pjson_kv_pair>::GetArrayElement(
                             _d.payload.object_val.pairs_slot, i );
-                    // Free the key string.
+                    // Освобождаем строку-ключ.
                     if( pair.key.chars.addr() != 0 )
                         pair.key.chars.DeleteArray();
-                    // Free the value recursively.
+                    // Рекурсивно освобождаем значение.
                     pjson(pair.value)._free();
                 }
                 fptr<pjson_kv_pair> tmp;
@@ -218,22 +232,22 @@ class pjson
             sd.length = 0;
             return;
         }
-        unsigned len = static_cast<unsigned>(std::strlen(s));
+        uintptr_t len = static_cast<uintptr_t>(std::strlen(s));
         sd.length = len;
-        sd.chars.NewArray(len + 1);
-        for( unsigned i = 0; i <= len; i++ )
-            sd.chars[i] = s[i];
+        sd.chars.NewArray(static_cast<unsigned>(len + 1));
+        for( uintptr_t i = 0; i <= len; i++ )
+            sd.chars[static_cast<unsigned>(i)] = s[i];
     }
 
     // Binary search for a key in the object's sorted pairs array.
     // Returns the index of the first pair whose key >= s, or size if none.
-    unsigned _obj_lower_bound( const char* s ) const
+    uintptr_t _obj_lower_bound( const char* s ) const
     {
-        unsigned sz = _d.payload.object_val.size;
-        unsigned lo = 0, hi = sz;
+        uintptr_t sz = _d.payload.object_val.size;
+        uintptr_t lo = 0, hi = sz;
         while( lo < hi )
         {
-            unsigned mid = (lo + hi) / 2;
+            uintptr_t mid = (lo + hi) / 2;
             pjson_kv_pair& pair =
                 AddressManager<pjson_kv_pair>::GetArrayElement(
                     _d.payload.object_val.pairs_slot, mid );
@@ -307,12 +321,12 @@ public:
         _d.payload.string_val.length = 0;
         if( s == nullptr || s[0] == '\0' ) return;
 
-        unsigned len = static_cast<unsigned>(std::strlen(s));
+        uintptr_t len = static_cast<uintptr_t>(std::strlen(s));
         _d.payload.string_val.length = len;
         fptr<char> chars;
-        chars.NewArray(len + 1);
-        for( unsigned i = 0; i <= len; i++ )
-            chars[i] = s[i];
+        chars.NewArray(static_cast<unsigned>(len + 1));
+        for( uintptr_t i = 0; i <= len; i++ )
+            chars[static_cast<unsigned>(i)] = s[i];
         _d.payload.string_val.chars_slot = chars.addr();
     }
 
@@ -365,7 +379,7 @@ public:
 
     // ----- Операции с массивами -------------------------------------------
 
-    unsigned size() const
+    uintptr_t size() const
     {
         if( _d.type == pjson_type::array )
             return _d.payload.array_val.size;
@@ -381,8 +395,8 @@ public:
     // push_back: добавить нулевой элемент в массив и вернуть ссылку на него.
     pjson_data& push_back()
     {
-        unsigned old_size = _d.payload.array_val.size;
-        unsigned new_size = old_size + 1;
+        uintptr_t old_size = _d.payload.array_val.size;
+        uintptr_t new_size = old_size + 1;
 
         if( _d.payload.array_val.data_slot == 0 )
         {
@@ -402,24 +416,25 @@ public:
                                 _d.payload.array_val.data_slot ) )
         {
             // Рост: удваиваем ёмкость.
-            unsigned old_cap = AddressManager<pjson_data>::GetCount(
-                                   _d.payload.array_val.data_slot);
-            unsigned new_cap = old_cap * 2;
+            uintptr_t old_cap = AddressManager<pjson_data>::GetCount(
+                                    _d.payload.array_val.data_slot);
+            uintptr_t new_cap = old_cap * 2;
             if( new_cap < new_size ) new_cap = new_size;
 
             fptr<pjson_data> new_arr;
-            new_arr.NewArray(new_cap);
-            for( unsigned i = 0; i < new_cap; i++ )
+            new_arr.NewArray(static_cast<unsigned>(new_cap));
+            for( uintptr_t i = 0; i < new_cap; i++ )
             {
-                pjson_data& e = new_arr[i];
+                pjson_data& e = new_arr[static_cast<unsigned>(i)];
                 e.type = pjson_type::null;
                 e.payload.uint_val = 0;
             }
             // Переносим существующие элементы (поверхностная копия — только примитивы;
             // вложенные объекты сохраняют свои смещения в ПАП).
-            for( unsigned i = 0; i < old_size; i++ )
-                new_arr[i] = AddressManager<pjson_data>::GetArrayElement(
-                                 _d.payload.array_val.data_slot, i);
+            for( uintptr_t i = 0; i < old_size; i++ )
+                new_arr[static_cast<unsigned>(i)] =
+                    AddressManager<pjson_data>::GetArrayElement(
+                        _d.payload.array_val.data_slot, i);
 
             fptr<pjson_data> old_arr;
             old_arr.set_addr(_d.payload.array_val.data_slot);
@@ -433,13 +448,13 @@ public:
     }
 
     // operator[](idx): доступ к элементу массива по индексу.
-    pjson_data& operator[](unsigned idx)
+    pjson_data& operator[](uintptr_t idx)
     {
         return AddressManager<pjson_data>::GetArrayElement(
                    _d.payload.array_val.data_slot, idx);
     }
 
-    const pjson_data& operator[](unsigned idx) const
+    const pjson_data& operator[](uintptr_t idx) const
     {
         return AddressManager<pjson_data>::GetArrayElement(
                    _d.payload.array_val.data_slot, idx);
@@ -452,8 +467,8 @@ public:
     {
         if( _d.type != pjson_type::object ) return nullptr;
         if( _d.payload.object_val.pairs_slot == 0 ) return nullptr;
-        unsigned idx = _obj_lower_bound(key);
-        unsigned sz  = _d.payload.object_val.size;
+        uintptr_t idx = _obj_lower_bound(key);
+        uintptr_t sz  = _d.payload.object_val.size;
         if( idx >= sz ) return nullptr;
         pjson_kv_pair& pair =
             AddressManager<pjson_kv_pair>::GetArrayElement(
@@ -467,8 +482,8 @@ public:
     {
         if( _d.type != pjson_type::object ) return nullptr;
         if( _d.payload.object_val.pairs_slot == 0 ) return nullptr;
-        unsigned idx = _obj_lower_bound(key);
-        unsigned sz  = _d.payload.object_val.size;
+        uintptr_t idx = _obj_lower_bound(key);
+        uintptr_t sz  = _d.payload.object_val.size;
         if( idx >= sz ) return nullptr;
         const pjson_kv_pair& pair =
             AddressManager<pjson_kv_pair>::GetArrayElement(
@@ -482,7 +497,7 @@ public:
     // Возвращает ссылку на слот значения для данного ключа.
     pjson_data& obj_insert(const char* key)
     {
-        unsigned sz = _d.payload.object_val.size;
+        uintptr_t sz = _d.payload.object_val.size;
 
         if( _d.payload.object_val.pairs_slot == 0 )
         {
@@ -500,7 +515,7 @@ public:
             _d.payload.object_val.pairs_slot = arr.addr();
         }
 
-        unsigned idx = _obj_lower_bound(key);
+        uintptr_t idx = _obj_lower_bound(key);
 
         // Проверяем, существует ли ключ.
         if( idx < sz )
@@ -518,26 +533,27 @@ public:
         }
 
         // Вставляем новую запись в позицию idx, сдвигая вправо.
-        unsigned new_size = sz + 1;
-        unsigned cap = AddressManager<pjson_kv_pair>::GetCount(
-                           _d.payload.object_val.pairs_slot);
+        uintptr_t new_size = sz + 1;
+        uintptr_t cap = AddressManager<pjson_kv_pair>::GetCount(
+                            _d.payload.object_val.pairs_slot);
         if( new_size > cap )
         {
-            unsigned new_cap = cap * 2;
+            uintptr_t new_cap = cap * 2;
             if( new_cap < new_size ) new_cap = new_size;
             fptr<pjson_kv_pair> new_arr;
-            new_arr.NewArray(new_cap);
-            for( unsigned i = 0; i < new_cap; i++ )
+            new_arr.NewArray(static_cast<unsigned>(new_cap));
+            for( uintptr_t i = 0; i < new_cap; i++ )
             {
-                pjson_kv_pair& p = new_arr[i];
+                pjson_kv_pair& p = new_arr[static_cast<unsigned>(i)];
                 p.key.length = 0;
                 p.key.chars.set_addr(0);
                 p.value.type = pjson_type::null;
                 p.value.payload.uint_val = 0;
             }
-            for( unsigned i = 0; i < sz; i++ )
-                new_arr[i] = AddressManager<pjson_kv_pair>::GetArrayElement(
-                                 _d.payload.object_val.pairs_slot, i);
+            for( uintptr_t i = 0; i < sz; i++ )
+                new_arr[static_cast<unsigned>(i)] =
+                    AddressManager<pjson_kv_pair>::GetArrayElement(
+                        _d.payload.object_val.pairs_slot, i);
             fptr<pjson_kv_pair> old_arr;
             old_arr.set_addr(_d.payload.object_val.pairs_slot);
             old_arr.DeleteArray();
@@ -545,7 +561,7 @@ public:
         }
 
         // Сдвигаем элементы вправо, освобождая место в позиции idx.
-        for( unsigned i = sz; i > idx; i-- )
+        for( uintptr_t i = sz; i > idx; i-- )
         {
             AddressManager<pjson_kv_pair>::GetArrayElement(
                 _d.payload.object_val.pairs_slot, i) =
@@ -577,8 +593,8 @@ public:
     {
         if( _d.type != pjson_type::object ) return false;
         if( _d.payload.object_val.pairs_slot == 0 ) return false;
-        unsigned sz  = _d.payload.object_val.size;
-        unsigned idx = _obj_lower_bound(key);
+        uintptr_t sz  = _d.payload.object_val.size;
+        uintptr_t idx = _obj_lower_bound(key);
         if( idx >= sz ) return false;
         pjson_kv_pair& pair =
             AddressManager<pjson_kv_pair>::GetArrayElement(
@@ -592,7 +608,7 @@ public:
         pjson(pair.value)._free();
 
         // Сдвигаем оставшиеся элементы влево.
-        for( unsigned i = idx; i + 1 < sz; i++ )
+        for( uintptr_t i = idx; i + 1 < sz; i++ )
         {
             AddressManager<pjson_kv_pair>::GetArrayElement(
                 _d.payload.object_val.pairs_slot, i) =
