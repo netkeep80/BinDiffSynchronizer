@@ -1,641 +1,412 @@
 #ifndef __PERSIST_H__
 #define __PERSIST_H__
 
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <typeinfo>
+#include <cstdint>
 #include <cstring>
-#include <filesystem>
 #include <type_traits>
+#include "pam.h"
 #include "PageDevice.h"
 
 /*
-Словарь:
-АМ - адресный менеджер
-АП - адресное пространство
-ПАП - персистное адресное пространство
-ПАМ - персистный адресный менеджер
+ * persist.h — Персистная инфраструктура фазы 2.
+ *
+ * Словарь:
+ *   АМ  — адресный менеджер
+ *   АП  — адресное пространство
+ *   ПАП — персистное адресное пространство
+ *   ПАМ — персистный адресный менеджер
+ *
+ * Требования (задача #45):
+ *   Тр.1  — персистные объекты используют только персистные указатели
+ *   Тр.2  — создание/удаление объектов — через специальные методы аллокатора
+ *   Тр.3  — при запуске аллокатор инициализируется именем файла хранилища
+ *   Тр.4  — единое ПАП для объектов разных типов
+ *   Тр.5  — sizeof(fptr<T>) == sizeof(void*)
+ *   Тр.6  — все комментарии в файле — на русском языке
+ *   Тр.7  — никакой логики с именами файлов в persist<T>
+ *   Тр.8  — sizeof(persist<T>) == sizeof(T)
+ *   Тр.9  — никакой логики с именами файлов в fptr<T>
+ *   Тр.10 — при загрузке образа ПАП конструкторы/деструкторы не вызываются
+ *   Тр.11 — объекты persist<T> живут ТОЛЬКО в образе ПАП
+ *   Тр.12 — доступ к персистным объектам — только через fptr<T>
+ *   Тр.13 — fptr<T> может находиться как в обычной памяти, так и в ПАП
+ *   Тр.14 — ПАМ — персистный объект, хранит имена объектов
+ *   Тр.15 — fptr<T> инициализируется строковым именем объекта через ПАМ
+ *   Тр.16 — ПАМ хранит карту объектов и их имена
+ */
 
-    Персистные объекты отличаются от обычных тем что обычный конструктор и деструктор у таких объектов
-    не меняет их состояния. Персистные объекты вообще не имеют деструкторы в обычном понимании, так как
-    то что они персистные уже подразумевает что они вечные. Т.е. они либо используются либо нет.
-
-    Вместо обычного конструктора у персистных объектов есть специальные методы для инициализации
-    их состояния при создании объекта в персистном хранилище.
-
-    Важно понимать разницу между персистным указателем на объект и указателем на персистный объект,
-
-
-Создание и удаление:
-    Создание и удаление персистных объектов и персистных указателей ничем не отличается от создания и удаление
-    обычных объектов. Они создаются в одной и той же памяти, могут создаваться статически либо динамически.
-    Другое дело создание и удаление объектов на которые указывают персистные указатели. Этим заведуют менеджеры
-    адресных пространств соотвествующих типов объектов, т.к. для каждого типа объекта на который ссылается персистный
-    указатель используется свой менеждер адресного пространства. Физически адресное пространство может быть диском,
-    сетевым именем компьютера, объектной или обычной БД или ещё чем то ещё. Менеждер АП имеет специальные статические
-    методы для выделения и освобождения памяти для объектов.
-
-
-Конструктор    |
-
-Инициализация  |
-ономить
-Деструктор     |
-
-Удаление       |
-
-
-ПАП будет хранить только объекты предназначенные для хранения в ПАП.
-
-struct BlockInfo
-{
-      unsigned ObjectID; // Если = 0 значит область ПАП свободна и является кандидатом на объединение
-      unsigned PersistAddress; // Адрес в ПАП
-      unsigned ObjectSize; // Размер объекта
-      unsigned NextBlobk; // Указатель на следующее звено состояния менеджера в ПАП
-};
-*/
-
-using namespace std;
+// ---------------------------------------------------------------------------
+// Предварительные объявления
+// ---------------------------------------------------------------------------
 
 template <class _T> class persist;
 template <class _T> class fptr;
-const unsigned faddress_size = 64;
+template<class _T, unsigned AddressSpace> class AddressManager;
 
-
-// persist template class for trivially-copyable c++ types.
+// ---------------------------------------------------------------------------
+// persist<T> — обёртка для тривиально копируемого типа T.
 //
-// IMPORTANT CONSTRAINT: _T must be trivially copyable (the compiler will
-// enforce this via static_assert below). persist<T> saves and loads the raw
-// sizeof(T) bytes to/from a file. This is only valid when the entire object
-// state is contained in its fixed-size in-memory representation — i.e. no
-// heap-allocated members.
+// Требования:
+//   Тр.7  — не содержит логики с именами файлов
+//   Тр.8  — sizeof(persist<T>) == sizeof(T)
+//   Тр.10 — конструкторы/деструкторы объектов при загрузке не вызываются
+//   Тр.11 — объекты persist<T> должны жить только в образе ПАП
 //
-// IMPORTANT CONSTRAINT: A persist<T> object must not be moved in memory after
-// construction. The filename is derived from the address of `this`; moving the
-// object would change `this` and make the object write to a different file on
-// destruction.
+// Ограничение: T должен быть тривиально копируемым (static_assert ниже).
 //
-// Constructors:
-//   persist()                    — load from address-derived filename (ASLR-dependent)
-//   persist(const _T& ref)       — initialise from value, no file I/O on construction
-//   persist(const char* filename) — load from a named file (deterministic across restarts)
-//   persist(const std::string& filename) — same as above
+// Создание объектов persist<T> на стеке или как статических переменных
+// запрещено: конструктор по умолчанию является private (Тр.11).
+// Создание объектов — только через PersistentAddressSpace::Create<T>().
+// ---------------------------------------------------------------------------
 template <class _T>
 class persist
 {
-    // Enforce trivial copyability: persist<T> saves/loads raw bytes, which is
-    // only correct for trivially copyable types.
     static_assert(std::is_trivially_copyable<_T>::value,
-                  "persist<T> requires T to be trivially copyable");
+                  "persist<T> требует, чтобы T был тривиально копируемым");
 
-    friend class fptr<_T>;
-    typedef _T& _Tref;
-    typedef _T* _Tptr;
-    //union{
-	//	_T val;
-		unsigned char _data[sizeof(_T)];
-    //};
-
-    // Address-derived filename (ASLR-dependent — different on every run).
-    // Used only by the default constructor/destructor pair.
-    void get_name( char* faddress )
-    {
-		union convert
-        {
-			persist<_T>* a;
-			std::uintptr_t b;
-		} c;
-		c.a = this;
-
-		std::ostringstream oss;
-		oss << std::hex << c.b;
-		std::string hexStr = oss.str();
-
-		std::string result = std::string("./Obj_") + hexStr + ".persist";
-		std::strncpy( faddress, result.c_str(), faddress_size - 1 );
-		faddress[faddress_size - 1] = '\0';
-    }
-
-    // The explicit filename used by named constructors (empty == use get_name).
-    char _fname[faddress_size];
+    // Размер persist<T> == sizeof(T) (Тр.8)
+    unsigned char _data[sizeof(_T)];
 
 public:
-    // Default constructor: derive filename from address of this (ASLR-dependent).
-    // Loads existing data if the file exists.
-    persist()
+    // Получение ссылки на хранимое значение.
+    typedef _T& _Tref;
+    typedef _T* _Tptr;
+
+    operator _Tref()       { return *reinterpret_cast<_T*>(_data); }
+    operator _Tref() const { return *reinterpret_cast<const _T*>(_data); }
+    _T* operator&()        { return reinterpret_cast<_T*>(_data); }
+    _Tref operator=(const _T& ref)
     {
-		_fname[0] = 0;
-		get_name( _fname );
-		// Zero-initialise the storage then load from file.
-		// Since _T is trivially copyable, zero-init is a valid default state.
-		std::memset( _data, 0, sizeof(_T) );
-		// Open in binary mode to preserve raw bytes on all platforms (including
-		// Windows, where text-mode I/O translates 0x0A ↔ 0x0D 0x0A).
-		ifstream( _fname, ios::binary ).read( (char*)(&_data[0]), sizeof(_T) );
+        return (*reinterpret_cast<_T*>(_data)) = ref;
     }
 
-    // Value constructor: initialise from ref, no file I/O on construction.
-    // The object will be saved to an address-derived file on destruction.
-    persist(const _T& ref)
-    {
-		_fname[0] = 0;
-		get_name( _fname );
-        // Copy-initialise the raw bytes from ref.
-        std::memcpy( _data, &ref, sizeof(_T) );
-    }
+private:
+    // Создание persist<T> на стеке или как статической переменной запрещено.
+    // Используйте PersistentAddressSpace::Create<persist<T>>() (Тр.11).
+    persist() = default;
 
-    // Named constructor (C-string): load from / save to the given filename.
-    // Provides deterministic persistence across process restarts.
-    explicit persist(const char* filename)
-    {
-        std::strncpy( _fname, filename, faddress_size - 1 );
-        _fname[faddress_size - 1] = '\0';
-        std::memset( _data, 0, sizeof(_T) );
-        // Open in binary mode to preserve raw bytes on all platforms (including
-        // Windows, where text-mode I/O translates 0x0A ↔ 0x0D 0x0A).
-        ifstream( _fname, ios::binary ).read( (char*)(&_data[0]), sizeof(_T) );
-    }
-
-    // Named constructor (std::string): convenience overload.
-    explicit persist(const std::string& filename) : persist(filename.c_str()) {}
-
-    ~persist()
-    {
-		// Open in binary mode to preserve raw bytes on all platforms (including
-		// Windows, where text-mode I/O translates 0x0A ↔ 0x0D 0x0A).
-		ofstream( _fname, ios::binary ).write( (char*)(&_data[0]), sizeof(_T) );
-		// Since _T is required to be trivially copyable (enforced by
-		// static_assert above), its destructor is trivial — no explicit
-		// destructor call is needed. The compiler will handle cleanup of
-		// _data (a raw byte array) automatically.
-    }
-
-    operator _Tref() { return (*(_T*)_data); }
-    operator _Tref() const { return (*(_T*)_data); }
-    _T* operator&() { return &(*(_T*)_data); }
-    _Tref operator=( const _T& ref ) { return (*(_T*)_data) = ref; }
+    // Разрешаем доступ к приватному конструктору только для фабричных методов.
+    template<class U, unsigned A> friend class AddressManager;
+    friend class PersistentAddressSpace;
 };
 
-/*
+// Проверяем требование Тр.8.
+static_assert(sizeof(persist<int>) == sizeof(int),
+              "sizeof(persist<T>) должен быть равен sizeof(T) (Тр.8)");
+static_assert(sizeof(persist<double>) == sizeof(double),
+              "sizeof(persist<T>) должен быть равен sizeof(T) (Тр.8)");
 
-для того что бы обеспечить наследование и полиморфизм персистных объектов
-необходимо сделать единое адресное пространство для всех используемых объектов.
-Для этого необходимо для каждого персистного указателя в таблице дескрипторов
-хранить идентификатор конструктора объекта и его размер.
-Идентификатором типа объекта может служить например название его класса.
-
-    Адресный менеджер должен обеспечивать загрузку и сохранение
-    объектов из/в персистного хранилища (заархивированный закриптованный файл например)
-
-  Пока сделаем упрощенный вариант, сделаем менеджер вектором персистных объектов
-
-  адресный менеджер должен иметь персистную таблицу имён объектов и признака существования
-*/
-#define ADDRESS_SPACE   1024
-
-// AddressManager<_T, AddressSpace> — manages a persistent address space of up
-// to AddressSpace slots of type _T. Slot 0 is reserved (means "null/invalid").
+// ---------------------------------------------------------------------------
+// fptr<T> — персистный указатель (хранит смещение в образе ПАП).
 //
-// Bugs fixed in Task 3.1.3:
-//   - Create(): result of Find() was discarded; now assigned to addr.
-//   - get_fname(): was returning a static char[] — not thread-safe; now returns std::string.
-//   - __load__obj(): placement-new was called AFTER reading data from file,
-//     overwriting the loaded bytes; order is now: allocate, placement-new (to
-//     initialise the object to a known state), then read from file.
-//   - AddressSpace is now a template parameter (default 1024 for backward compat).
+// Требования:
+//   Тр.5  — sizeof(fptr<T>) == sizeof(void*)
+//   Тр.9  — не содержит логики с именами файлов
+//   Тр.12 — доступ к персистным объектам только через fptr<T>
+//   Тр.13 — может находиться как в обычной, так и в персистной памяти
+//   Тр.15 — метод find(name) для инициализации по имени объекта через ПАМ
+// ---------------------------------------------------------------------------
+template <class _T>
+class fptr
+{
+    typedef _T& _Tref;
+    typedef _T* _Tptr;
+
+    /// Смещение объекта в области данных ПАП (или 0 = null).
+    /// Размер == sizeof(void*) на целевой платформе (Тр.5).
+    uintptr_t __addr;
+
+public:
+    /// Конструктор по умолчанию — нулевой указатель.
+    inline fptr() : __addr(0) {}
+
+    /// Конструктор копирования.
+    inline fptr(const fptr<_T>&) = default;
+
+    /// Деструктор — ничего не делает (не освобождает ресурсы).
+    inline ~fptr() = default;
+
+    // -----------------------------------------------------------------------
+    // Инициализация по имени объекта в ПАМ (Тр.15)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Найти объект по имени в ПАМ и установить указатель.
+     * @param name Строковое имя объекта (не имя файла).
+     */
+    void find(const char* name)
+    {
+        __addr = static_cast<uintptr_t>(
+            PersistentAddressSpace::Get().FindTyped<_T>(name));
+    }
+
+    // -----------------------------------------------------------------------
+    // Операции разыменования
+    // -----------------------------------------------------------------------
+
+    /// Разыменование — возвращает указатель на объект в ПАП.
+    inline operator _Tptr()
+    {
+        return PersistentAddressSpace::Get().Resolve<_T>(__addr);
+    }
+    inline operator _Tptr() const
+    {
+        return PersistentAddressSpace::Get().Resolve<_T>(__addr);
+    }
+
+    inline _T& operator*()
+    {
+        return *PersistentAddressSpace::Get().Resolve<_T>(__addr);
+    }
+    inline const _T& operator*() const
+    {
+        return *PersistentAddressSpace::Get().Resolve<_T>(__addr);
+    }
+
+    inline _T* operator->()
+    {
+        return PersistentAddressSpace::Get().Resolve<_T>(__addr);
+    }
+    inline const _T* operator->() const
+    {
+        return PersistentAddressSpace::Get().Resolve<_T>(__addr);
+    }
+
+    /// Доступ к элементу массива по индексу.
+    inline _T& operator[](unsigned idx)
+    {
+        return PersistentAddressSpace::Get().ResolveElement<_T>(__addr, idx);
+    }
+    inline const _T& operator[](unsigned idx) const
+    {
+        return PersistentAddressSpace::Get().ResolveElement<_T>(__addr, idx);
+    }
+
+    // -----------------------------------------------------------------------
+    // Управление объектами через ПАМ (Тр.2)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Создать новый объект типа T в ПАП.
+     * @param name Необязательное имя объекта.
+     */
+    void New(const char* name = nullptr)
+    {
+        __addr = static_cast<uintptr_t>(
+            PersistentAddressSpace::Get().Create<_T>(name));
+    }
+
+    /**
+     * Создать массив из count объектов типа T в ПАП.
+     * @param count Число элементов.
+     * @param name  Необязательное имя массива.
+     */
+    void NewArray(unsigned count, const char* name = nullptr)
+    {
+        __addr = static_cast<uintptr_t>(
+            PersistentAddressSpace::Get().CreateArray<_T>(count, name));
+    }
+
+    /**
+     * Удалить объект из ПАП. Сбрасывает указатель в 0.
+     * Конструкторы/деструкторы не вызываются (Тр.10).
+     */
+    void Delete()
+    {
+        PersistentAddressSpace::Get().Delete(__addr);
+        __addr = 0;
+    }
+
+    /**
+     * Удалить массив из ПАП. Сбрасывает указатель в 0.
+     */
+    void DeleteArray()
+    {
+        PersistentAddressSpace::Get().Delete(__addr);
+        __addr = 0;
+    }
+
+    // -----------------------------------------------------------------------
+    // Вспомогательные методы
+    // -----------------------------------------------------------------------
+
+    /// Получить смещение объекта в ПАП.
+    uintptr_t addr() const { return __addr; }
+
+    /// Установить смещение объекта в ПАП вручную.
+    void set_addr(uintptr_t a) { __addr = a; }
+
+    /// Получить число элементов массива (через ПАМ).
+    uintptr_t count() const
+    {
+        if( __addr == 0 ) return 0;
+        return PersistentAddressSpace::Get().GetCount(__addr);
+    }
+
+    /// Сравнение с nullptr.
+    bool operator==(std::nullptr_t) const { return __addr == 0; }
+    bool operator!=(std::nullptr_t) const { return __addr != 0; }
+};
+
+// Проверяем требование Тр.5.
+static_assert(sizeof(fptr<int>) == sizeof(void*),
+              "sizeof(fptr<T>) должен быть равен sizeof(void*) (Тр.5)");
+static_assert(sizeof(fptr<double>) == sizeof(void*),
+              "sizeof(fptr<T>) должен быть равен sizeof(void*) (Тр.5)");
+
+// ---------------------------------------------------------------------------
+// Значение по умолчанию для размера адресного пространства (для AddressManager)
+// ---------------------------------------------------------------------------
+
+#define ADDRESS_SPACE 1024
+
+// ---------------------------------------------------------------------------
+// AddressManager<T, AddressSpace> — тонкий адаптер над PersistentAddressSpace.
 //
-// Task 3.4: Array allocation support.
-//   - CreateArray(count, name): allocates a contiguous array of `count` objects
-//     at a single slot.  The slot's __count field records the element count so
-//     that DeleteArray() knows exactly how many elements to release.
-//   - DeleteArray(index): frees the array and clears the slot.
-//   - Element access for arrays: GetElement(index, element) returns element #element
-//     of the array stored at slot `index`.
+// Обеспечивает обратную совместимость с кодом фазы 1 (pstring, pvector, pmap,
+// pjson), который использует AddressManager<T>::CreateArray() и т.д.
+// В фазе 2 вся логика делегируется в PersistentAddressSpace (Тр.4).
 //
-// Design: constructor/destructor of a persistent object must only LOAD/SAVE.
-// Allocation and deallocation of persistent memory are performed by the
-// explicit static methods Create/CreateArray/Delete/DeleteArray.
+// Слот 0 зарезервирован как null/недопустимый (совместимость с фазой 1:
+// fptr<T>::addr() == 0 означает null).
+// ---------------------------------------------------------------------------
 template<class _T, unsigned AddressSpace = ADDRESS_SPACE>
 class AddressManager
 {
     friend class persist<_T>;
     friend class fptr<_T>;
 
-    struct __info
-    {
-        int      __refs;
-        _T*      __ptr;
-        bool     __used;
-        unsigned __count;    // 0 = single object, >0 = array of that many elements
-        char     __name[faddress_size];
-    };
-    persist< __info[AddressSpace] >   __itable;
-
 public:
-    AddressManager()
-    {   //  очищаем старые указатели
-        for( unsigned i = 1; i < AddressSpace; i++ )
-        {
-            __itable[i].__refs  = 0;
-            __itable[i].__ptr   = NULL;
-            __itable[i].__count = 0;
-        }
+    AddressManager() = default;
+    ~AddressManager() = default;
+
+    // -----------------------------------------------------------------------
+    // Создание объектов
+    // -----------------------------------------------------------------------
+
+    /**
+     * Создать один объект типа T в ПАП.
+     * @param name Имя объекта (C-строка, может быть nullptr).
+     * @return Смещение объекта в ПАП (ненулевое), или 0 при ошибке.
+     */
+    static uintptr_t Create(const char* name)
+    {
+        return PersistentAddressSpace::Get().Create<_T>(name);
     }
 
-    ~AddressManager()
-    {   //  сохраняем и освобождаем загруженные объекты
-        for( unsigned i = 1; i < AddressSpace; i++ )
-        {
-            if( __itable[i].__ptr )
-            {
-                __save__obj( i );
-                // _T is trivially copyable (enforce by persist<T>), so its
-                // destructor is trivial — no explicit destructor call needed.
-                delete[] (char*)__itable[i].__ptr;
-            }
-        }
+    /**
+     * Создать массив из count объектов типа T в ПАП.
+     * @param count Число элементов.
+     * @param name  Имя массива (может быть nullptr).
+     * @return Смещение первого элемента, или 0 при ошибке.
+     */
+    static uintptr_t CreateArray(unsigned count, const char* name)
+    {
+        return PersistentAddressSpace::Get().CreateArray<_T>(count, name);
     }
 
-private:
-    // Returns the filename for a single-object slot.
-    // Single objects are stored at offset (index-1)*sizeof(_T) in a flat file.
-    std::string get_fname( unsigned /*index*/ )
+    // -----------------------------------------------------------------------
+    // Удаление объектов
+    // -----------------------------------------------------------------------
+
+    /**
+     * Освободить слот по смещению.
+     */
+    static void Delete(uintptr_t offset)
     {
-        return std::string("./") + typeid(_T).name() + ".extend";
+        PersistentAddressSpace::Get().Delete(offset);
     }
 
-    // Returns the filename for an array slot.
-    // Arrays are stored in a per-slot file to avoid overlap with adjacent slots.
-    // Format: ./<type_name>_arr_<index>.extend
-    std::string get_array_fname( unsigned index )
+    /**
+     * Освободить массив по смещению (синоним Delete).
+     */
+    static void DeleteArray(uintptr_t offset)
     {
-        return std::string("./") + typeid(_T).name() + "_arr_"
-               + std::to_string(index) + ".extend";
+        PersistentAddressSpace::Get().Delete(offset);
     }
 
-    void __load__obj( unsigned index )
+    // -----------------------------------------------------------------------
+    // Поиск
+    // -----------------------------------------------------------------------
+
+    /**
+     * Найти объект по имени.
+     * @return Смещение или 0.
+     */
+    static uintptr_t Find(const char* name)
     {
-        if( index == 0 )    return;
-        if( !__itable[index].__used )    return;    // не существует такого объекта
-        unsigned count = __itable[index].__count;
-        if( count > 0 )
-        {
-            // Array slot: load from per-slot file.
-            size_t bytes = sizeof(_T) * count;
-            ifstream in( get_array_fname( index ), ios::binary );
-            if( in.good() )
-            {
-                char* raw = new char[bytes];
-                std::memset( raw, 0, bytes );
-                in.read( raw, (std::streamsize)bytes );
-                __itable[index].__ptr = reinterpret_cast<_T*>(raw);
-            }
-            else
-            {
-                // File not yet created — allocate zero-initialised memory.
-                char* raw = new char[bytes];
-                std::memset( raw, 0, bytes );
-                __itable[index].__ptr = reinterpret_cast<_T*>(raw);
-            }
-        }
-        else
-        {
-            // Single object: load from the shared flat file at offset.
-            ifstream in( get_fname( index ), ios::binary );
-            in.seekg( (index - 1) * sizeof(_T) );
-            if( in.good() )
-            {
-                // Allocate raw storage, zero-initialise, then load bytes from file.
-                // Fixed: was calling placement-new AFTER reading, which reset the data.
-                // Placement-new on array types is also invalid C++; since _T is
-                // trivially copyable, zero-init + raw read is correct.
-                char* raw = new char[sizeof(_T)];
-                std::memset( raw, 0, sizeof(_T) );
-                in.read( raw, sizeof(_T) );
-                __itable[index].__ptr = reinterpret_cast<_T*>(raw);
-            }
-        }
+        return PersistentAddressSpace::Get().Find(name);
     }
 
-    void __save__obj( unsigned index )
+    /**
+     * Найти слот по raw-указателю (обратный поиск).
+     * @return Смещение или 0.
+     */
+    static uintptr_t FindByPtr(const _T* p)
     {
-        unsigned count = __itable[index].__count;
-        if( count > 0 )
-        {
-            // Array slot: save to per-slot file.
-            size_t bytes = sizeof(_T) * count;
-            ofstream out( get_array_fname( index ), ios::out | ios::binary );
-            if( out.good() ) out.write( (char*)__itable[index].__ptr, (std::streamsize)bytes );
-            else             cout << "AddressManager::__save__obj() can't save array slot " << index << endl;
-        }
-        else
-        {
-            // Single object: save to shared flat file.
-            ofstream out( get_fname( index ), ios::out | ios::binary );
-            out.seekp( (index - 1) * sizeof(_T) );
-            if( out.good() ) out.write( (char*)__itable[index].__ptr, sizeof(_T) );
-            else             cout << "AddressManager::__save__obj() can't save obj" << endl;
-        }
+        return PersistentAddressSpace::Get().FindByPtr(
+            static_cast<const void*>(p));
     }
 
-    inline _T&	operator[]( unsigned index )
-    {
-        if( __itable[index].__ptr == NULL ) __load__obj( index );
-        return *__itable[index].__ptr;
-    };
+    // -----------------------------------------------------------------------
+    // Доступ к элементам
+    // -----------------------------------------------------------------------
 
-    // Returns element #element of an array stored at slot index.
-    // Only valid if __count > 0.
-    inline _T& GetElement( unsigned index, unsigned element )
+    /**
+     * Получить счётчик элементов массива по смещению.
+     */
+    static uintptr_t GetCount(uintptr_t offset)
     {
-        if( __itable[index].__ptr == NULL ) __load__obj( index );
-        return __itable[index].__ptr[element];
-    };
+        return PersistentAddressSpace::Get().GetCount(offset);
+    }
 
-public:
+    /**
+     * Получить ссылку на элемент массива по смещению и индексу.
+     */
+    static _T& GetArrayElement(uintptr_t offset, uintptr_t elem)
+    {
+        return PersistentAddressSpace::Get().ResolveElement<_T>(offset, elem);
+    }
+
+    /**
+     * Получить ссылку на объект (одиночный) по смещению.
+     */
+    static _T& GetObject(uintptr_t offset)
+    {
+        return *PersistentAddressSpace::Get().Resolve<_T>(offset);
+    }
+
+    /**
+     * Получить экземпляр менеджера (для совместимости с фазой 1).
+     */
     static AddressManager<_T, AddressSpace>& GetManager()
     {
-        static AddressManager<_T, AddressSpace> __one;
-        return __one;
+        static AddressManager<_T, AddressSpace> _mgr;
+        return _mgr;
     }
 
-    static unsigned Create( char* __faddress )
+    /**
+     * Оператор [] для доступа к объекту по смещению (совместимость).
+     */
+    _T& operator[](uintptr_t offset)
     {
-        unsigned    addr = 0;
-        // Fixed: result of Find() was discarded; now assigned to addr.
-        if( __faddress != NULL ) addr = Find( __faddress );
-        if( !addr )
-        {
-            for( unsigned i = 1; i < AddressSpace; i++ )
-            {
-                if( !AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used )
-                {
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used  = true;
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__count = 0;  // single object
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__ptr   = new _T();
-                    std::strncpy( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name, __faddress, faddress_size - 1 );
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name[faddress_size - 1] = '\0';
-                    return i;
-                }
-            }
-        }
-        return addr;
-    }
-
-    // CreateArray(): allocate a contiguous array of `count` elements at one slot.
-    //
-    // This is the explicit persistent-memory-allocation method for arrays.
-    // Constructor/destructor of persistent objects must ONLY load/save — allocation
-    // and deallocation must be performed here, by the persistent memory manager.
-    //
-    // Returns the slot index (≥ 1) on success, 0 if the address space is exhausted.
-    static unsigned CreateArray( unsigned count, char* __faddress )
-    {
-        if( count == 0 ) return 0;
-        unsigned addr = 0;
-        if( __faddress != NULL ) addr = Find( __faddress );
-        if( !addr )
-        {
-            for( unsigned i = 1; i < AddressSpace; i++ )
-            {
-                if( !AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used )
-                {
-                    // Allocate raw zero-initialised storage for `count` elements.
-                    // _T is trivially copyable (enforced by persist<T>), so
-                    // zero-init is a valid initial state.
-                    char* raw = new char[sizeof(_T) * count];
-                    std::memset( raw, 0, sizeof(_T) * count );
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used  = true;
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__count = count;
-                    AddressManager<_T, AddressSpace>::GetManager().__itable[i].__ptr   = reinterpret_cast<_T*>(raw);
-                    if( __faddress )
-                    {
-                        std::strncpy( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name, __faddress, faddress_size - 1 );
-                        AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name[faddress_size - 1] = '\0';
-                    }
-                    else
-                    {
-                        AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name[0] = '\0';
-                    }
-                    return i;
-                }
-            }
-        }
-        return addr;
-    }
-
-    // GetCount(): returns the element count for an array slot (0 = single object).
-    static unsigned GetCount( unsigned index )
-    {
-        if( index == 0 ) return 0;
-        return AddressManager<_T, AddressSpace>::GetManager().__itable[index].__count;
-    }
-
-    static void Release( unsigned index )
-    {
-        if( index != 0 )
-            AddressManager<_T, AddressSpace>::GetManager().__itable[index].__refs--;
-    }
-
-    // Delete(): explicitly release a slot and its storage.
-    // Sets the slot __used flag to false and frees the in-memory object.
-    // Since _T is trivially copyable, no explicit destructor call is needed.
-    //
-    // IMPORTANT: This is the correct method for releasing resources allocated
-    // with Create().  For arrays allocated with CreateArray(), use DeleteArray().
-    // Constructor/destructor of persistent objects must ONLY load/save — this
-    // explicit method is the persistent memory deallocation entry point.
-    static void Delete( unsigned index )
-    {
-        if( index == 0 ) return;
-        auto& mgr = AddressManager<_T, AddressSpace>::GetManager();
-        if( mgr.__itable[index].__ptr )
-        {
-            // _T is trivially copyable so its destructor is trivial; skip call.
-            delete[] (char*)mgr.__itable[index].__ptr;
-            mgr.__itable[index].__ptr = NULL;
-        }
-        mgr.__itable[index].__used  = false;
-        mgr.__itable[index].__refs  = 0;
-        mgr.__itable[index].__count = 0;
-        mgr.__itable[index].__name[0] = '\0';
-    }
-
-    // DeleteArray(): explicitly release a slot allocated by CreateArray().
-    //
-    // This is the explicit persistent-memory-deallocation method for arrays.
-    // Constructor/destructor of persistent objects must ONLY load/save — array
-    // deallocation must be performed here, by the persistent memory manager.
-    static void DeleteArray( unsigned index )
-    {
-        // Same implementation as Delete(): the distinction is semantic (array vs
-        // single object).  Both release the raw char[] storage via delete[].
-        Delete( index );
-    }
-
-    // GetArrayElement(): access element `elem` of an array stored at slot `index`.
-    // Only valid when the slot was allocated with CreateArray(count, ...) and
-    // elem < count.  Returns a reference to the element in the loaded array.
-    static _T& GetArrayElement( unsigned index, unsigned elem )
-    {
-        if( index == 0 ) { static _T dummy{}; return dummy; }
-        return AddressManager<_T, AddressSpace>::GetManager().GetElement( index, elem );
-    }
-
-    static unsigned Find( char* __faddress )
-    {
-        for( unsigned i = 1; i < AddressSpace; i++ )
-            if( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__used )
-                if( !strcmp( AddressManager<_T, AddressSpace>::GetManager().__itable[i].__name, __faddress ) )
-                    return i;
-
-        return 0;
-    }
-
-    // FindByPtr(): scan the slot table for a slot whose in-memory pointer equals p.
-    // Returns the slot index (≥ 1) if found, 0 otherwise.
-    // Used by pallocator<T>::deallocate() to reverse-lookup a slot from a raw pointer.
-    static unsigned FindByPtr( const _T* p )
-    {
-        if( p == nullptr ) return 0;
-        auto& mgr = AddressManager<_T, AddressSpace>::GetManager();
-        for( unsigned i = 1; i < AddressSpace; i++ )
-            if( mgr.__itable[i].__used && mgr.__itable[i].__ptr == p )
-                return i;
-        return 0;
+        return *PersistentAddressSpace::Get().Resolve<_T>(offset);
     }
 };
 
-// реестр фабрик классов
+// ---------------------------------------------------------------------------
+// Псевдонимы типов (совместимость с фазой 1)
+// ---------------------------------------------------------------------------
 
+typedef persist<char>           pchar;
+typedef persist<unsigned char>  puchar;
+typedef persist<short>          pshort;
+typedef persist<unsigned short> pushort;
+typedef persist<int>            pint;
+typedef persist<unsigned>       punsigned;
+typedef persist<long>           plong;
+typedef persist<unsigned long>  pulong;
+typedef persist<float>          pfloat;
+typedef persist<double>         pdouble;
 
-/*
-    Тело самого персистного указателя состоит из адреса (порядкового номера)
-    объекта в персистном хранилище экстенда.
-
-1. так как персистный указатель сам по себе есть персистный объект то его конструктор
-  и деструктор не должны менять его состояния.
-*/
-
-template <class _T>
-class fptr
-{
-    //  local types
-    typedef _T& _Tref;
-    typedef _T* _Tptr;
-
-    //  persist address
-    unsigned    __addr;
-
-public:
-    inline fptr() : __addr(0) {};
-    inline fptr( char* __faddress ) : __addr(0) { __addr = AddressManager<_T>::Find( __faddress ); };
-    // Task 3.2.2: copy constructor and destructor are defaulted (trivial) so
-    // that fptr<T> satisfies std::is_trivially_copyable and can be embedded
-    // inside trivially-copyable structs such as persistent_map<V,C> which
-    // must satisfy std::is_trivially_copyable for use with persist<T>.
-    //
-    // The original non-const copy constructor `fptr(fptr<_T>& ptr)` and
-    // the original destructor `~fptr() { Release(__addr); }` have been
-    // replaced with defaulted (trivial) versions.  Callers that need
-    // explicit reference-count management must call Delete() or Release().
-    inline fptr( const fptr<_T>& ) = default;
-    inline ~fptr() = default;
-
-    inline operator _Tptr() { return &AddressManager<_T>::GetManager()[__addr]; }
-    inline operator _Tptr() const { return &AddressManager<_T>::GetManager()[__addr]; }
-
-    inline _T& operator*() { return AddressManager<_T>::GetManager()[__addr]; }
-    inline _T* operator->() { return &AddressManager<_T>::GetManager()[__addr]; }
-
-    inline fptr<_T>& operator=( char* __faddress ) { __addr = AddressManager<_T>::Find( __faddress ); return *this; }
-
-    void    New( char* __faddress )
-    {
-        __addr = AddressManager<_T>::Create( __faddress );
-    }
-
-    // NewArray(): allocate a contiguous array of `count` elements in persistent
-    // memory and make this fptr point to it.
-    //
-    // This is the explicit persistent-memory-allocation method for arrays.
-    // Constructor/destructor of persistent objects must ONLY load/save — all
-    // allocation must go through this method (or New() for single objects).
-    //
-    // The element count is stored in AddressManager<T>'s slot metadata, so
-    // fptr<T> itself stays trivially copyable (stores only __addr).
-    void    NewArray( unsigned count, char* __faddress = nullptr )
-    {
-        __addr = AddressManager<_T>::CreateArray( count, __faddress );
-    }
-
-    // Delete(): explicitly delete the persistent object this fptr refers to.
-    // After Delete(), the slot is freed and __addr is set to 0 (null).
-    //
-    // This is the explicit persistent-memory-deallocation method.
-    // Constructor/destructor of persistent objects must ONLY load/save — all
-    // deallocation must go through this method (or DeleteArray() for arrays).
-    void    Delete()
-    {
-        AddressManager<_T>::Delete( __addr );
-        __addr = 0;
-    }
-
-    // DeleteArray(): explicitly delete the persistent array this fptr refers to.
-    // After DeleteArray(), the slot is freed and __addr is set to 0 (null).
-    //
-    // This is the explicit persistent-memory-deallocation method for arrays.
-    // Constructor/destructor of persistent objects must ONLY load/save — all
-    // deallocation must go through this method (or Delete() for single objects).
-    void    DeleteArray()
-    {
-        AddressManager<_T>::DeleteArray( __addr );
-        __addr = 0;
-    }
-
-    // count(): returns the element count stored in this fptr's AddressManager slot.
-    // Returns 0 if the fptr is null or points to a single object (not an array).
-    unsigned count() const
-    {
-        if( __addr == 0 ) return 0;
-        return AddressManager<_T>::GetCount( __addr );
-    }
-
-    // operator[]: access element `idx` of a persistent array.
-    // Only valid when this fptr was allocated with NewArray(count, ...) and
-    // idx < count.  Returns a reference to the in-memory element.
-    _T& operator[]( unsigned idx )
-    {
-        return AddressManager<_T>::GetArrayElement( __addr, idx );
-    }
-
-    const _T& operator[]( unsigned idx ) const
-    {
-        return AddressManager<_T>::GetArrayElement( __addr, idx );
-    }
-
-    unsigned addr() const { return __addr; }
-
-    // set_addr(): directly assign an address index without going through
-    // AddressManager::Find/Create.  Used when an fptr field stores an
-    // already-known slot index (e.g. when chaining persistent_map slabs
-    // that were allocated externally by a pool manager).
-    void set_addr(unsigned a) { __addr = a; }
-};
-
-typedef persist<char>				pchar;
-typedef persist<unsigned char>		puchar;
-typedef persist<short>				pshort;
-typedef persist<unsigned short>		pushort;
-typedef persist<int>				pint;
-typedef persist<unsigned>			punsigned;
-typedef persist<long>				plong;
-typedef persist<unsigned long>		pulong;
-typedef persist<float>				pfloat;
-typedef persist<double>				pdouble;
-
-//#define Persist(type,filename)
-
-#endif
+#endif // __PERSIST_H__

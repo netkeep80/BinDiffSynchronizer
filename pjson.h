@@ -6,45 +6,41 @@
 #include <cstdint>
 #include <type_traits>
 
-// pjson — a persistent discriminated union (persistent analogue of nlohmann::json).
+// pjson — персистная дискриминантная объединяющая структура (персистный аналог nlohmann::json).
 //
-// Design: Option B from DEVELOPMENT_PLAN.md — a custom persistent discriminated
-// union built directly on fptr<T> / pstring / pvector / pmap primitives.
+// Дизайн: Вариант Б из DEVELOPMENT_PLAN.md — пользовательская персистная
+// дискриминантная структура, построенная напрямую на fptr<T> / pstring / pvector / pmap.
 //
-// Why Option B and not Option A (nlohmann::basic_json instantiation)?
-//   nlohmann::basic_json internally dereferences raw pointers and assumes heap
-//   allocation.  AddressManager uses slot indices, not raw C++ pointers, so
-//   Option A would require non-trivial pointer translation at every access.
-//   Option B gives full control and keeps the design consistent with the rest
-//   of the persistent infrastructure.
+// Почему вариант Б, а не вариант А (инстанцирование nlohmann::basic_json)?
+//   nlohmann::basic_json внутренне разыменовывает raw-указатели и предполагает
+//   выделение памяти из кучи. AddressManager использует смещения в ПАП, а не
+//   raw C++ указатели, поэтому вариант А потребовал бы нетривиального перевода
+//   указателей при каждом обращении. Вариант Б даёт полный контроль и
+//   согласуется с остальной персистной инфраструктурой.
 //
-// Layout:
-//   pjson_data is trivially copyable and can be stored via persist<pjson_data>
-//   or embedded inside pvector<pjson_data> / pmap<K, pjson_data>.
+// Структура:
+//   pjson_data тривиально копируем и может быть сохранён через persist<pjson_data>
+//   или встроен в pvector<pjson_data> / pmap<K, pjson_data>.
 //
-//   The discriminant (pjson_type) occupies 4 bytes.  The payload is a union
-//   of primitive values plus fptr slot indices for heap-allocated types.
+//   Дискриминант (pjson_type) занимает 4 байта. Payload — объединение
+//   примитивных значений и смещений в ПАП для типов с выделенной памятью.
 //
-// Value types:
-//   null    — zero-size payload.
-//   boolean — bool (stored as uint32_t for alignment).
+// Типы значений:
+//   null    — пустой payload.
+//   boolean — bool (хранится как uint32_t для выравнивания).
 //   integer — int64_t.
 //   uinteger— uint64_t.
 //   real    — double.
-//   string  — fptr<char> (points to a char array in AddressManager<char>).
-//   array   — fptr<pjson_data> (points to array of pjson_data elements).
-//   object  — two parallel arrays:
-//               fptr<pjson_data> values array
-//               fptr<char>       keys    flat-packed C-strings (key_offsets array)
-//             Keys are stored as indices into a parallel pvector of flat pjson_data.
-//             For simplicity in Phase 1, objects are stored as sorted arrays of
-//             (pstring_data key, pjson_data value) entries — see pjson_obj_entry.
+//   string  — fptr<char> (указывает на массив символов в AddressManager<char>).
+//   array   — fptr<pjson_data> (указывает на массив элементов pjson_data).
+//   object  — отсортированный массив пар (pstring_data ключ, pjson_data значение).
+//             Для фазы 1: объекты хранятся как отсортированные массивы записей
+//             (pstring_data key, pjson_data value) — см. pjson_kv_pair.
 //
-// All fptr slot indices are unsigned (4 bytes).  pjson_data is 32 bytes on
-// most 64-bit platforms.
+// Смещения fptr хранятся как uintptr_t (sizeof(void*)). pjson_data — 16 байт.
 
 // ---------------------------------------------------------------------------
-// pjson_type — discriminant tag
+// pjson_type — тег-дискриминант типа значения
 // ---------------------------------------------------------------------------
 enum class pjson_type : uint32_t
 {
@@ -59,91 +55,86 @@ enum class pjson_type : uint32_t
 };
 
 // ---------------------------------------------------------------------------
-// pjson_obj_entry — one key-value pair inside a pjson object.
-// Both fields are trivially copyable.
+// pjson_obj_entry — одна пара ключ-значение внутри объекта pjson.
+// Оба поля тривиально копируемы.
 // ---------------------------------------------------------------------------
 struct pjson_obj_entry
 {
-    pstring_data key;    // persistent string header (length + fptr<char> slot)
-    // The value is stored separately in a parallel pvector_data<pjson_data>.
-    // We need a forward declaration, so we use a uint32_t slot index here and
-    // resolve it at the pjson level.  To keep things simple in Phase 1 the
-    // object stores (key, pjson_data) as a flat pair defined below.
+    pstring_data key;    // Заголовок персистной строки (length + fptr<char>)
+    // Значение хранится отдельно в параллельном pvector_data<pjson_data>.
+    // Для простоты в фазе 1 объект хранит (key, pjson_data) как единую пару
+    // (см. pjson_kv_pair ниже).
 };
 
-// Forward declaration so pjson_data can self-referentially hold slot indices.
+// Предварительное объявление, чтобы pjson_data мог хранить смещения на самого себя.
 struct pjson_data;
 
-// pjson_kv_entry — one (pstring_data key, pjson_data value) pair.
-// Used as the element type of the sorted array backing pjson objects.
-// Both pstring_data and pjson_data are trivially copyable so this struct is
-// trivially copyable too (checked by static_assert below).
+// pjson_kv_entry — одна пара (pstring_data ключ, pjson_data значение).
+// Используется как тип элемента отсортированного массива, лежащего в основе объектов pjson.
+// Оба компонента тривиально копируемы, значит и вся структура тривиально копируема
+// (проверяется static_assert ниже).
 struct pjson_kv_entry
 {
-    pstring_data key;    // 8 bytes: unsigned length + unsigned fptr<char> slot
-    pjson_data*  _pad;   // placeholder to be replaced with actual pjson_data below
+    pstring_data key;    // 8 байт: unsigned length + fptr<char>
+    pjson_data*  _pad;   // Заглушка, заменяемая на pjson_data ниже
 };
-// (We cannot embed pjson_data inside pjson_kv_entry before defining it, so we
-//  use the two-level trick: define pjson_data first, then define pjson_kv_entry
-//  as a concrete struct after.  See pjson_kv_pair further below.)
+// (Нельзя встроить pjson_data в pjson_kv_entry до его определения, поэтому используем
+//  двухуровневый трюк: сначала определяем pjson_data, затем финальную структуру pjson_kv_pair.)
 
 // ---------------------------------------------------------------------------
-// pjson_data — trivially-copyable persistent JSON value header.
+// pjson_data — тривиально копируемый заголовок персистного JSON-значения.
 // ---------------------------------------------------------------------------
 struct pjson_data
 {
-    pjson_type type;    // 4 bytes discriminant
+    pjson_type type;    // 4 байта — дискриминант
 
     union payload_t
     {
-        uint32_t    boolean_val;  // 0 = false, non-zero = true
+        uint32_t    boolean_val;  // 0 = false, ненулевое = true
         int64_t     int_val;
         uint64_t    uint_val;
         double      real_val;
 
-        // For string: slot index of a char array in AddressManager<char>.
-        // (We store the raw unsigned rather than fptr<char> to avoid a
-        //  C++ union restriction on non-trivially-copyable members.
-        //  fptr<char> stores only a uint so the representation is identical.)
+        // Для строки: смещение в ПАП для массива символов.
+        // (Хранится как raw unsigned вместо fptr<char>, чтобы избежать
+        //  ограничения C++ на нетривиальные типы в union.
+        //  fptr<char> хранит только uintptr_t — представление идентично.)
         struct { unsigned length; unsigned chars_slot; } string_val;
 
-        // For array: slot + size stored in persistent AddressManager<pjson_data>.
+        // Для массива: размер и смещение в ПАП для массива pjson_data.
         struct { unsigned size; unsigned data_slot; } array_val;
 
-        // For object: parallel pvector_data-equivalent fields.
-        // We store (size, data_slot) where data_slot points to a
-        // pjson_kv_pair[] array (defined below, but sizeof is known at
-        // link time — we use a forward-declared helper struct).
+        // Для объекта: размер и смещение в ПАП для массива pjson_kv_pair.
         struct { unsigned size; unsigned pairs_slot; } object_val;
     } payload;
 
-    // Padding to align total size to 16 bytes (4 + 4 + 8 = 16).
-    // payload_t largest member is int64_t/uint64_t/double (8 bytes);
-    // the string/array/object variants are 2×uint = 8 bytes.
-    // Total: 4 (type) + 4 (pad inside union for alignment) + 8 (value) = 16 bytes.
+    // Выравнивание до 16 байт (4 + 4 + 8 = 16).
+    // Наибольший элемент payload_t — int64_t/uint64_t/double (8 байт);
+    // варианты string/array/object — 2×unsigned = 8 байт.
+    // Итого: 4 (type) + 4 (выравнивание в union) + 8 (значение) = 16 байт.
 };
 
 static_assert(std::is_trivially_copyable<pjson_data>::value,
-              "pjson_data must be trivially copyable for use with persist<T>");
+              "pjson_data должна быть тривиально копируемой для использования с persist<T>");
 
 // ---------------------------------------------------------------------------
-// pjson_kv_pair — one (pstring_data key, pjson_data value) pair.
-// Both components are trivially copyable so the pair is trivially copyable.
-// Objects are backed by a pvector<pjson_kv_pair> (sorted by key for O(log n) lookup).
+// pjson_kv_pair — одна пара (pstring_data ключ, pjson_data значение).
+// Оба компонента тривиально копируемы, значит и пара тривиально копируема.
+// Объекты pjson хранятся в pvector<pjson_kv_pair> (отсортированном по ключу, O(log n) поиск).
 // ---------------------------------------------------------------------------
 struct pjson_kv_pair
 {
-    pstring_data key;    // 8 bytes
-    pjson_data   value;  // 16 bytes
+    pstring_data key;    // 8 байт
+    pjson_data   value;  // 16 байт
 };
 
 static_assert(std::is_trivially_copyable<pjson_kv_pair>::value,
-              "pjson_kv_pair must be trivially copyable");
+              "pjson_kv_pair должна быть тривиально копируемой");
 static_assert(std::is_trivially_copyable<pvector_data<pjson_kv_pair>>::value,
-              "pvector_data<pjson_kv_pair> must be trivially copyable");
+              "pvector_data<pjson_kv_pair> должна быть тривиально копируемой");
 
 // ---------------------------------------------------------------------------
-// pjson — thin non-owning wrapper around a pjson_data reference.
+// pjson — тонкая не-владеющая обёртка над ссылкой pjson_data.
 // ---------------------------------------------------------------------------
 class pjson
 {
@@ -258,10 +249,10 @@ class pjson
     }
 
 public:
-    // Wrap an existing pjson_data reference.  Does NOT take ownership.
+    // Оборачивает существующую ссылку pjson_data. НЕ принимает владение.
     explicit pjson(pjson_data& data) : _d(data) {}
 
-    // ----- type queries ---------------------------------------------------
+    // ----- Запросы типа ---------------------------------------------------
     pjson_type type() const { return _d.type; }
     bool is_null()     const { return _d.type == pjson_type::null; }
     bool is_boolean()  const { return _d.type == pjson_type::boolean; }
@@ -273,7 +264,7 @@ public:
     bool is_array()    const { return _d.type == pjson_type::array; }
     bool is_object()   const { return _d.type == pjson_type::object; }
 
-    // ----- setters --------------------------------------------------------
+    // ----- Установка значений ---------------------------------------------
 
     void set_null()
     {
@@ -325,7 +316,7 @@ public:
         _d.payload.string_val.chars_slot = chars.addr();
     }
 
-    // set_array: reset to an empty persistent array.
+    // set_array: сбросить до пустого персистного массива.
     void set_array()
     {
         _free();
@@ -334,7 +325,7 @@ public:
         _d.payload.array_val.data_slot = 0;
     }
 
-    // set_object: reset to an empty persistent object.
+    // set_object: сбросить до пустого персистного объекта.
     void set_object()
     {
         _free();
@@ -343,7 +334,7 @@ public:
         _d.payload.object_val.pairs_slot = 0;
     }
 
-    // ----- getters --------------------------------------------------------
+    // ----- Получение значений ---------------------------------------------
 
     bool get_bool() const
     {
@@ -372,7 +363,7 @@ public:
                     _d.payload.string_val.chars_slot, 0);
     }
 
-    // ----- array operations -----------------------------------------------
+    // ----- Операции с массивами -------------------------------------------
 
     unsigned size() const
     {
@@ -387,7 +378,7 @@ public:
 
     bool empty() const { return size() == 0; }
 
-    // push_back: append a null element to an array, return reference to it.
+    // push_back: добавить нулевой элемент в массив и вернуть ссылку на него.
     pjson_data& push_back()
     {
         unsigned old_size = _d.payload.array_val.size;
@@ -395,10 +386,10 @@ public:
 
         if( _d.payload.array_val.data_slot == 0 )
         {
-            // First element: allocate a small initial capacity.
+            // Первый элемент: выделяем начальную ёмкость.
             fptr<pjson_data> arr;
             arr.NewArray(4);
-            // Zero-initialise all slots.
+            // Инициализируем все слоты нулями.
             for( unsigned i = 0; i < 4; i++ )
             {
                 pjson_data& e = arr[i];
@@ -410,7 +401,7 @@ public:
         else if( new_size > AddressManager<pjson_data>::GetCount(
                                 _d.payload.array_val.data_slot ) )
         {
-            // Grow: double the capacity.
+            // Рост: удваиваем ёмкость.
             unsigned old_cap = AddressManager<pjson_data>::GetCount(
                                    _d.payload.array_val.data_slot);
             unsigned new_cap = old_cap * 2;
@@ -424,8 +415,8 @@ public:
                 e.type = pjson_type::null;
                 e.payload.uint_val = 0;
             }
-            // Move existing elements (shallow copy — primitives only;
-            // complex children keep their slot indices intact).
+            // Переносим существующие элементы (поверхностная копия — только примитивы;
+            // вложенные объекты сохраняют свои смещения в ПАП).
             for( unsigned i = 0; i < old_size; i++ )
                 new_arr[i] = AddressManager<pjson_data>::GetArrayElement(
                                  _d.payload.array_val.data_slot, i);
@@ -441,7 +432,7 @@ public:
                    _d.payload.array_val.data_slot, old_size);
     }
 
-    // operator[](idx): access element of an array by index.
+    // operator[](idx): доступ к элементу массива по индексу.
     pjson_data& operator[](unsigned idx)
     {
         return AddressManager<pjson_data>::GetArrayElement(
@@ -454,9 +445,9 @@ public:
                    _d.payload.array_val.data_slot, idx);
     }
 
-    // ----- object operations ----------------------------------------------
+    // ----- Операции с объектами -------------------------------------------
 
-    // obj_find: look up a key in the object; returns pointer to value or nullptr.
+    // obj_find: найти ключ в объекте; возвращает указатель на значение или nullptr.
     pjson_data* obj_find(const char* key)
     {
         if( _d.type != pjson_type::object ) return nullptr;
@@ -487,15 +478,15 @@ public:
         return &pair.value;
     }
 
-    // obj_insert: insert or replace a key in the object.
-    // Returns a reference to the value slot for that key.
+    // obj_insert: вставить или заменить ключ в объекте.
+    // Возвращает ссылку на слот значения для данного ключа.
     pjson_data& obj_insert(const char* key)
     {
         unsigned sz = _d.payload.object_val.size;
 
         if( _d.payload.object_val.pairs_slot == 0 )
         {
-            // First entry: allocate initial capacity of 4 pairs.
+            // Первая запись: выделяем начальную ёмкость — 4 пары.
             fptr<pjson_kv_pair> arr;
             arr.NewArray(4);
             for( unsigned i = 0; i < 4; i++ )
@@ -511,7 +502,7 @@ public:
 
         unsigned idx = _obj_lower_bound(key);
 
-        // Check if key already exists.
+        // Проверяем, существует ли ключ.
         if( idx < sz )
         {
             pjson_kv_pair& pair =
@@ -520,13 +511,13 @@ public:
             const char* k = (pair.key.chars.addr() != 0) ? &pair.key.chars[0] : "";
             if( std::strcmp(k, key) == 0 )
             {
-                // Key found — free old value and return its slot.
+                // Ключ найден — освобождаем старое значение и возвращаем слот.
                 pjson(pair.value)._free();
                 return pair.value;
             }
         }
 
-        // Insert new entry at idx, shifting right.
+        // Вставляем новую запись в позицию idx, сдвигая вправо.
         unsigned new_size = sz + 1;
         unsigned cap = AddressManager<pjson_kv_pair>::GetCount(
                            _d.payload.object_val.pairs_slot);
@@ -553,7 +544,7 @@ public:
             _d.payload.object_val.pairs_slot = new_arr.addr();
         }
 
-        // Shift elements right to make room at idx.
+        // Сдвигаем элементы вправо, освобождая место в позиции idx.
         for( unsigned i = sz; i > idx; i-- )
         {
             AddressManager<pjson_kv_pair>::GetArrayElement(
@@ -562,17 +553,17 @@ public:
                 _d.payload.object_val.pairs_slot, i - 1);
         }
 
-        // Write new pair at idx.
+        // Записываем новую пару в позицию idx.
         pjson_kv_pair& new_pair =
             AddressManager<pjson_kv_pair>::GetArrayElement(
                 _d.payload.object_val.pairs_slot, idx);
         new_pair.value.type = pjson_type::null;
         new_pair.value.payload.uint_val = 0;
-        // Zero out the key slot BEFORE calling _assign_key so that it does
-        // not free the chars_slot that now belongs to the shifted neighbor
-        // at [idx+1].  After the shift loop, both [idx] and [idx+1] hold
-        // the same chars_slot pointer (shallow copy); resetting [idx].key
-        // marks it as unowned and prevents a double-free / use-after-free.
+        // Обнуляем слот ключа ДО вызова _assign_key, чтобы не освободить
+        // chars_slot, который теперь принадлежит сдвинутому соседу [idx+1].
+        // После цикла сдвига и [idx], и [idx+1] содержат одно и то же смещение
+        // (поверхностная копия); сброс [idx].key помечает его как «не владелец»
+        // и предотвращает двойное освобождение / использование после освобождения.
         new_pair.key.chars.set_addr(0);
         new_pair.key.length = 0;
         _assign_key(new_pair.key, key);
@@ -581,7 +572,7 @@ public:
         return new_pair.value;
     }
 
-    // obj_erase: remove a key from the object. Returns true if found.
+    // obj_erase: удалить ключ из объекта. Возвращает true, если найден.
     bool obj_erase(const char* key)
     {
         if( _d.type != pjson_type::object ) return false;
@@ -595,12 +586,12 @@ public:
         const char* k = (pair.key.chars.addr() != 0) ? &pair.key.chars[0] : "";
         if( std::strcmp(k, key) != 0 ) return false;
 
-        // Free key string and value.
+        // Освобождаем ключ-строку и значение.
         if( pair.key.chars.addr() != 0 )
             pair.key.chars.DeleteArray();
         pjson(pair.value)._free();
 
-        // Shift remaining elements left.
+        // Сдвигаем оставшиеся элементы влево.
         for( unsigned i = idx; i + 1 < sz; i++ )
         {
             AddressManager<pjson_kv_pair>::GetArrayElement(
@@ -612,8 +603,8 @@ public:
         return true;
     }
 
-    // ----- free -----------------------------------------------------------
+    // ----- Освобождение ресурсов ------------------------------------------
 
-    // free: release all heap allocations and reset to null.
+    // free: освободить все выделенные ресурсы и сбросить в null.
     void free() { _free(); }
 };

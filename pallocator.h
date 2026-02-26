@@ -3,21 +3,21 @@
 #include <cstddef>
 #include <limits>
 
-// pallocator<T> — a persistent STL-compatible allocator.
+// pallocator<T> — персистный STL-совместимый аллокатор.
 //
-// Backed by AddressManager<T>. Allocates/deallocates contiguous arrays of T
-// in the persistent address space via CreateArray/DeleteArray.
+// Реализован на основе AddressManager<T>. Выделяет/освобождает непрерывные массивы T
+// в персистном адресном пространстве через CreateArray/DeleteArray.
 //
-// Limitations:
-//   - T must be trivially copyable (enforced by AddressManager<T>).
-//   - Returns raw C++ pointers (via AddressManager slot → pointer resolution).
-//     The pointer is valid while the AddressManager<T> singleton is alive.
-//   - Standard STL containers that use this allocator (e.g. std::vector<T, pallocator<T>>)
-//     will live only as long as the AddressManager<T> singleton is alive.
-//   - The allocator does NOT provide cross-process persistence by itself —
-//     persistence requires the caller to persist the slot indices (fptr<T>) separately.
+// Ограничения:
+//   - T должен быть тривиально копируемым (проверяется AddressManager<T>).
+//   - Возвращает raw-указатели C++ (через разрешение смещения ПАП → указатель).
+//     Указатель действителен, пока AddressManager<T> жив.
+//   - Стандартные STL-контейнеры, использующие этот аллокатор
+//     (например, std::vector<T, pallocator<T>>), живут только пока AddressManager<T> жив.
+//   - Аллокатор сам по себе НЕ обеспечивает межпроцессную персистность —
+//     для этого вызывающий код должен отдельно сохранять смещения (fptr<T>).
 //
-// Typical use:
+// Типичное использование:
 //   std::vector<int, pallocator<int>> v;
 //   v.push_back(42);
 
@@ -44,32 +44,32 @@ public:
 
     ~pallocator() noexcept = default;
 
-    // allocate: create n objects in the persistent address space.
-    // Returns a raw pointer valid for the lifetime of AddressManager<T>.
+    // allocate: создать n объектов в персистном адресном пространстве.
+    // Возвращает raw-указатель, действительный на время жизни AddressManager<T>.
     pointer allocate(size_type n)
     {
         if( n == 0 ) return nullptr;
-        unsigned slot = AddressManager<T>::CreateArray(
+        uintptr_t offset = AddressManager<T>::CreateArray(
             static_cast<unsigned>(n), nullptr);
-        if( slot == 0 )
+        if( offset == 0 )
             throw std::bad_alloc{};
-        return &AddressManager<T>::GetArrayElement(slot, 0);
+        return &AddressManager<T>::GetArrayElement(offset, 0);
     }
 
-    // deallocate: free the array at the given pointer.
-    // Uses AddressManager<T>::FindByPtr() to reverse-lookup the slot from a raw pointer.
+    // deallocate: освободить массив по указателю.
+    // Использует AddressManager<T>::FindByPtr() для обратного поиска смещения по указателю.
     void deallocate(pointer p, size_type /*n*/) noexcept
     {
         if( p == nullptr ) return;
-        unsigned slot = AddressManager<T>::FindByPtr(p);
-        if( slot != 0 )
+        uintptr_t offset = AddressManager<T>::FindByPtr(p);
+        if( offset != 0 )
         {
-            AddressManager<T>::DeleteArray(slot);
+            AddressManager<T>::DeleteArray(offset);
         }
         else
         {
-            // If not found in persistent space, fall back to raw delete[].
-            // This handles the case where the pointer came from a non-persistent source.
+            // Если указатель не найден в ПАП — удаляем через raw delete[].
+            // Это обрабатывает случай, когда указатель не из персистного источника.
             delete[] reinterpret_cast<char*>(p);
         }
     }
