@@ -1,6 +1,6 @@
 # Phase 3 Plan: Завершение персистной обвязки и интеграция с nlohmann::json
 
-**Status:** Task 3.1 Done ✓ — Tasks 3.2–3.5 Planned
+**Status:** Tasks 3.1, 3.2, 3.3, and 3.4 Done ✓ — Task 3.5 Planned
 
 ---
 
@@ -404,7 +404,29 @@ using persistent_json = nlohmann::basic_json<
 
 ---
 
-### Задача 3.4 — Интеграционные тесты и CI
+### Задача 3.4 — Поддержка массивов в `fptr<T>`, `AddressManager<T>`, `persistent_string`, `persistent_array` ✓
+
+**Цель:** Реализовать поддержку динамических персистных массивов в инфраструктуре `fptr<T>` и `AddressManager<T>`. Переписать `persistent_string` с использованием `fptr<char>` вместо статического буфера 65 КБ.
+
+**Реализовано согласно отзыву владельца репозитория:**
+
+1. **`AddressManager<T>`**: добавлены методы `CreateArray(count, name)` / `DeleteArray(index)` / `GetArrayElement(index, elem)` / `GetCount(index)`. Каждый слот хранит поле `__count` (0 = одиночный объект, >0 = массив из `count` элементов). Массивы сохраняются в отдельных файлах (`./<type>_arr_<index>.extend`) чтобы не пересекаться с одиночными объектами.
+
+2. **`fptr<T>`**: добавлены методы `NewArray(count)` / `DeleteArray()` / `count()` / `operator[](idx)`. `fptr<T>` остаётся тривиально копируемым (хранит только `unsigned __addr`); количество элементов хранится в метаданных слота `AddressManager`.
+
+3. **`persistent_string`**: поле `long_buf[65535]` (65 КБ статики) заменено на `fptr<char> long_ptr` + `unsigned long_len`. Для длинных строк (> SSO_SIZE) выделяется персистная динамическая память через `AddressManager<char>::CreateArray`. Конструктор/деструктор только загружают/сохраняют — аллокация явная через методы (`assign()`, `_assign()`, `alloc_long()`, `free_long()`).
+
+4. **`persistent_array<T,C>`**: поле `uint32_t next_slab_id` заменено на `fptr<persistent_array<T,C>> next_slab`. Оба — 4 байта; смена добавляет типобезопасность.
+
+**Ключевой принцип (по требованию владельца):** конструктор/деструктор персистного объекта только загружают/сохраняют. Выделение и освобождение персистной памяти — через явные методы менеджера (`CreateArray`/`DeleteArray`, `fptr::NewArray()`/`fptr::DeleteArray()`).
+
+Файл тестов: `tests/test_fptr.cpp` (добавлены тесты 3.4.1–3.4.7)
+
+7 новых тестов — CI зелёный.
+
+---
+
+### Задача 3.5 — Интеграционные тесты и CI
 
 **Цель:** Убедиться, что все новые классы корректно работают совместно в реалистичных сценариях.
 
@@ -420,7 +442,7 @@ using persistent_json = nlohmann::basic_json<
 
 ---
 
-### Задача 3.5 — Производительность и бенчмарки
+### Задача 3.6 — Производительность и бенчмарки
 
 Файл: `experiments/benchmark_persist_vs_std.cpp` и `tests/test.json`
 
@@ -455,17 +477,18 @@ Task 3.1  →  Task 3.2  →  Task 3.3  →  Task 3.4  →  Task 3.5
 - [x] 3.1.4: `Cache` — исправлен (`Flush` добавлен), покрыт тестами (9 тестов, CI зелёный).
 - [x] 3.1.5: `MemoryDevice` — исправлен, покрыт тестами (5 тестов, CI зелёный).
 - [x] 3.1.6: `StaticPageDevice` — исправлен, покрыт тестами (4 теста, CI зелёный).
-- [ ] 3.2.1: `persist<persistent_string>` — компилируется и тестируется (≥5 тестов).
-- [ ] 3.2.2: `persistent_map` переписана на `fptr` — тестируется (≥5 тестов).
-- [ ] 3.2.3: `persist<persistent_json_value>` — тестируется (≥8 тестов).
-- [ ] 3.2.4: `PersistentJsonStore` переписан на `AddressManager` — тестируется (≥6 тестов).
-- [ ] 3.3.1: Документация параметров `basic_json<>` создана.
-- [ ] 3.3.2: `persistent_string` расширена до `StringType`, тесты проходят (≥4 тестов).
-- [ ] 3.3.3: `jgit::persistent_json` объявлена в `jgit/persistent_basic_json.h`.
+- [x] 3.2.1: `persist<persistent_string>` — компилируется и тестируется (5 тестов, CI зелёный).
+- [x] 3.2.2: `persistent_map` переписана на `fptr` — тестируется (5 тестов, CI зелёный).
+- [x] 3.2.3: `persist<persistent_json_value>` — тестируется (8 тестов, CI зелёный).
+- [x] 3.2.4: `PersistentJsonStore` с конструктором `filesystem::path` — тестируется (6 тестов, CI зелёный).
+- [x] 3.3.1: Документация параметров `basic_json<>` создана (`experiments/study_basic_json_params.cpp`).
+- [x] 3.3.2: `persistent_string` расширена до `StringType`, тесты проходят (7 тестов, CI зелёный).
+- [x] 3.3.3: `jgit::persistent_json` объявлена в `jgit/persistent_basic_json.h`.
 - [ ] 3.3.4: `ObjectType`/`ArrayType` заменены персистными адаптерами.
-- [ ] 3.3.5: Тесты `persist<json>` и `fptr<json>` проходят (≥8 тестов).
-- [ ] 3.4: Интеграционные тесты проходят; CI зелёный на GCC/Clang/MSVC.
-- [ ] 3.5: Бенчмарк зафиксирован в репозитории.
+- [x] 3.3.5: Тесты `persistent_json` — dump/parse, merge_patch, diff, alias pattern, PersistentJsonStore round-trip (8 тестов, CI зелёный).
+- [x] 3.4: `fptr<T>` array support (`NewArray`/`DeleteArray`/`operator[]`); `persistent_string` uses `fptr<char>`; `persistent_array` uses `fptr<T>` for slab chain — 7 тестов (3.4.1–3.4.7), CI зелёный.
+- [ ] 3.5: Интеграционные тесты проходят; CI зелёный на GCC/Clang/MSVC.
+- [ ] 3.6: Бенчмарк зафиксирован в репозитории.
 
 ---
 

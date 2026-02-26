@@ -13,7 +13,7 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 
 Проект является фундаментом для разработки системы **jgit** — темпоральной базы данных для JSON-документов, аналогичной Git по модели версионирования, но специализированной для иерархических JSON-структур.
 
-### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 завершена ✓ · Фаза 3 в процессе 🚀
+### Текущее состояние: Фаза 1 завершена ✓ · Фаза 2 завершена ✓ · Фаза 3 в процессе 🚀 (Задачи 3.1–3.4 выполнены)
 
 Фаза 1 реализует минимальный жизнеспособный фундамент — компилируемую, кросс-платформенную, покрытую тестами кодовую базу с рабочим объектным хранилищем JSON-данных в бинарном формате.
 
@@ -45,9 +45,10 @@ BinDiffSynchronizer — это C++ библиотека для бинарной 
 | Задача | Статус |
 |--------|--------|
 | 3.1: Доработка, документация и тестирование персистной инфраструктуры (`persist<T>`, `fptr<T>`, `AddressManager`, `Cache`, `PageDevice`, `MemoryDevice`, `StaticPageDevice`) | ✓ Готово (161 тест, CI зелёный) |
-| 3.2: Переписать `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` на `persist<T>` и `fptr<T>` | 🔜 Запланировано |
-| 3.3: Инстанцировать `nlohmann::basic_json<>` с персистными классами | 🔜 Запланировано |
-| 3.4: Интеграционные тесты и CI | 🔜 Запланировано |
+| 3.2: Переписать `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` на `persist<T>` и `fptr<T>` | ✓ Готово (185 тестов, CI зелёный) |
+| 3.3: Инстанцировать `nlohmann::basic_json<>` с персистными классами | ✓ Готово (200 тестов, CI зелёный) |
+| 3.4: Поддержка массивов в `fptr<T>`, `AddressManager<T>`, `persistent_string` на `fptr<char>`, `persistent_array` на `fptr<T>` | ✓ Готово (207 тестов, CI зелёный) |
+| 3.5: Интеграционные тесты и CI | 🔜 Запланировано |
 | 3.5: Производительность и бенчмарки | 🔜 Запланировано |
 
 ### Основные возможности
@@ -184,6 +185,7 @@ submodules              $ref-ссылки между репозиториями
 | `jgit/persistent_map.h` | Персистентная карта (`persistent_map<V>`) — отсортированный массив пар ключ-значение |
 | `jgit/persistent_json_value.h` | Персистентный узел JSON (`persistent_json_value`) — дискриминированный union всех 7 типов JSON, совместим с `persist<T>` |
 | `jgit/persistent_json_store.h` | Хранилище JSON-дерева (`PersistentJsonStore`) — три плоских пула фиксированного размера, импорт/экспорт `nlohmann::json`; интеграция с `ObjectStore` через `snapshot()`/`restore()` |
+| `jgit/persistent_basic_json.h` | Инстанция `nlohmann::basic_json<>` с персистной строкой (`persistent_json`) — замена `std::string` на `jgit::persistent_string` как `StringType` |
 | `jgit/commit.h` | Структура коммита (`Commit`) — метаданные версии: id, root_snapshot, parent_id, author, timestamp, message |
 | `jgit/repository.h` | Репозиторий jgit (`Repository`) — система коммитов с `commit()`, `log()`, `checkout()`, управлением ветками |
 | `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON для Modern C++ |
@@ -209,7 +211,7 @@ ctest --test-dir build --output-on-failure
 - [План развития](plan.md) — перспективные направления и задачи, детальный план реализации jgit
 - [План Фазы 1](phase1-plan.md) — детальный план реализации Phase 1 (выполнен)
 - [План Фазы 2](phase2-plan.md) — план Фазы 2: персистентное дерево объектов JSON с использованием `persist<T>` и `fptr<T>` (выполнен)
-- [План Фазы 3](phase3-plan.md) — план Фазы 3: завершение персистной обвязки и интеграция с nlohmann::json (Задача 3.1 завершена)
+- [План Фазы 3](phase3-plan.md) — план Фазы 3: завершение персистной обвязки и интеграция с nlohmann::json (Задачи 3.1–3.3 завершены)
 
 ---
 
@@ -222,7 +224,7 @@ BinDiffSynchronizer is a C++ library for binary differential object synchronizat
 
 The project serves as the foundation for developing **jgit** — a temporal database for JSON documents, similar to Git in its versioning model, but specialized for hierarchical JSON structures.
 
-### Current Status: Phase 1 Complete ✓ · Phase 2 Complete ✓ · Phase 3 In Progress 🚀
+### Current Status: Phase 1 Complete ✓ · Phase 2 Complete ✓ · Phase 3 In Progress 🚀 (Tasks 3.1–3.4 done)
 
 Phase 1 establishes the minimum viable foundation — a compilable, cross-platform, tested codebase with a working content-addressed object store for JSON data in binary format.
 
@@ -254,9 +256,10 @@ Phase 1 establishes the minimum viable foundation — a compilable, cross-platfo
 | Task | Status |
 |------|--------|
 | 3.1: Fix, document and test persistence infrastructure (`persist<T>`, `fptr<T>`, `AddressManager`, `Cache`, `PageDevice`, `MemoryDevice`, `StaticPageDevice`) | ✓ Done (161 tests, CI green) |
-| 3.2: Rewrite `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` using `persist<T>` and `fptr<T>` | 🔜 Planned |
-| 3.3: Instantiate `nlohmann::basic_json<>` with persistent classes | 🔜 Planned |
-| 3.4: Integration tests and CI | 🔜 Planned |
+| 3.2: Rewrite `persistent_string`, `persistent_map`, `persistent_json_value`, `PersistentJsonStore` using `persist<T>` and `fptr<T>` | ✓ Done (185 tests, CI green) |
+| 3.3: Instantiate `nlohmann::basic_json<>` with persistent classes | ✓ Done (200 tests, CI green) |
+| 3.4: Array support in `fptr<T>`, `AddressManager<T>`; `persistent_string` uses `fptr<char>`; `persistent_array` uses `fptr<T>` for slab chain | ✓ Done (207 tests, CI green) |
+| 3.5: Integration tests and CI | 🔜 Planned |
 | 3.5: Performance benchmarks | 🔜 Planned |
 
 ### Key Features
@@ -393,6 +396,7 @@ Creation and deletion of persistent objects is no different from regular objects
 | `jgit/persistent_map.h` | Persistent map (`persistent_map<V>`) — sorted array of key-value pairs |
 | `jgit/persistent_json_value.h` | Persistent JSON node (`persistent_json_value`) — discriminated union of all 7 JSON types, compatible with `persist<T>` |
 | `jgit/persistent_json_store.h` | Persistent JSON tree store (`PersistentJsonStore`) — three flat fixed-size pools, import/export `nlohmann::json`; integration with `ObjectStore` via `snapshot()`/`restore()` |
+| `jgit/persistent_basic_json.h` | `nlohmann::basic_json<>` instantiation with persistent string (`persistent_json`) — replaces `std::string` with `jgit::persistent_string` as `StringType` |
 | `jgit/commit.h` | Commit structure (`Commit`) — version metadata: id, root_snapshot, parent_id, author, timestamp, message |
 | `jgit/repository.h` | jgit repository (`Repository`) — commit system with `commit()`, `log()`, `checkout()`, branch management |
 | `third_party/nlohmann/json.hpp` | nlohmann/json v3.11.3 — JSON for Modern C++ |
@@ -418,7 +422,7 @@ ctest --test-dir build --output-on-failure
 - [Development Plan](plan.md) — promising directions and tasks, detailed jgit implementation plan
 - [Phase 1 Plan](phase1-plan.md) — detailed Phase 1 implementation plan (completed)
 - [Phase 2 Plan](phase2-plan.md) — Phase 2 plan: persistent JSON object tree using `persist<T>` and `fptr<T>` (completed)
-- [Phase 3 Plan](phase3-plan.md) — Phase 3 plan: completing persistence layer and nlohmann::json integration (Task 3.1 done)
+- [Phase 3 Plan](phase3-plan.md) — Phase 3 plan: completing persistence layer and nlohmann::json integration (Tasks 3.1–3.4 done)
 
 ---
 

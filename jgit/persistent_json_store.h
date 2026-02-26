@@ -4,6 +4,8 @@
 #include <string>
 #include <stdexcept>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 
 #include <nlohmann/json.hpp>
 
@@ -36,6 +38,12 @@
 // fixed-size structs, so mmap is straightforward.
 //
 // API mirrors the plan in phase2-plan.md, Tasks 2.4 and 2.5.
+//
+// Task 3.2.4 — Added path-based constructor:
+//   explicit PersistentJsonStore(const std::filesystem::path& base_dir)
+//   Loads pool state from base_dir/{values,arrays,objects}.bin on construction.
+//   Saves pool state on destruction.
+//   The no-arg constructor retains in-memory-only behavior for backward compat.
 // =============================================================================
 
 namespace jgit {
@@ -58,6 +66,29 @@ public:
         value_pool_.emplace_back();  // persistent_json_value default = null
         array_pool_.emplace_back();  // json_array_slab default = empty slab
         object_pool_.emplace_back(); // json_object_slab default = empty slab (~1 MB)
+    }
+
+    // Task 3.2.4 — Path-based constructor: open or create a persistent store
+    // rooted at base_dir.  If pool files already exist, they are loaded;
+    // otherwise the store is initialised empty (slot 0 reserved as sentinel).
+    // On destruction the pools are automatically saved back to disk.
+    explicit PersistentJsonStore(const std::filesystem::path& base_dir)
+        : base_dir_(base_dir)
+    {
+        std::filesystem::create_directories(base_dir_);
+        if (!load_pools()) {
+            // No existing pool files — initialise empty with sentinel slot 0.
+            value_pool_.emplace_back();
+            array_pool_.emplace_back();
+            object_pool_.emplace_back();
+        }
+    }
+
+    // Destructor: if a base_dir was provided, save pools to disk automatically.
+    ~PersistentJsonStore() {
+        if (!base_dir_.empty()) {
+            save_pools();
+        }
     }
 
     // ---- import from nlohmann::json (one-time conversion) ----
@@ -130,7 +161,7 @@ public:
             const json_object_slab& slab = object_pool_[slab_id];
             const uint32_t* val_id = slab.find(key);
             if (val_id) return *val_id;
-            slab_id = slab.next_node_id;
+            slab_id = slab.next_node.addr();  // Task 3.2.2: was next_node_id
         }
         return 0;
     }
@@ -152,7 +183,7 @@ public:
                 return slab[static_cast<uint32_t>(pos)];
             }
             pos     -= slab.size;
-            slab_id  = slab.next_slab_id;
+            slab_id  = slab.next_slab.addr();
         }
         return 0;
     }
@@ -205,6 +236,63 @@ private:
     std::vector<json_array_slab>       array_pool_;
     std::vector<json_object_slab>      object_pool_;
 
+    // Task 3.2.4: base directory for pool persistence (empty = in-memory only)
+    std::filesystem::path base_dir_;
+
+    // ---- pool persistence helpers ----
+
+    // Write a vector of trivially-copyable T to a binary file.
+    template<typename T>
+    static void write_pool(const std::filesystem::path& path, const std::vector<T>& pool) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        uint64_t count = static_cast<uint64_t>(pool.size());
+        out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+        if (count > 0) {
+            out.write(reinterpret_cast<const char*>(pool.data()),
+                      static_cast<std::streamsize>(count * sizeof(T)));
+        }
+    }
+
+    // Read a vector of trivially-copyable T from a binary file.
+    // Returns true if the file existed and was read successfully.
+    template<typename T>
+    static bool read_pool(const std::filesystem::path& path, std::vector<T>& pool) {
+        std::ifstream in(path, std::ios::binary);
+        if (!in.is_open()) return false;
+        uint64_t count = 0;
+        in.read(reinterpret_cast<char*>(&count), sizeof(count));
+        if (!in) return false;
+        pool.resize(static_cast<size_t>(count));
+        if (count > 0) {
+            in.read(reinterpret_cast<char*>(pool.data()),
+                    static_cast<std::streamsize>(count * sizeof(T)));
+        }
+        return in.good() || in.eof();
+    }
+
+    // Load all three pools from base_dir_.  Returns true if all three files
+    // were found and loaded; returns false if any file is missing (caller
+    // should re-initialise with sentinel slot 0 in that case).
+    bool load_pools() {
+        std::vector<persistent_json_value> vp;
+        std::vector<json_array_slab>       ap;
+        std::vector<json_object_slab>      op;
+        if (!read_pool(base_dir_ / "values.bin",  vp)) return false;
+        if (!read_pool(base_dir_ / "arrays.bin",  ap)) return false;
+        if (!read_pool(base_dir_ / "objects.bin", op)) return false;
+        value_pool_  = std::move(vp);
+        array_pool_  = std::move(ap);
+        object_pool_ = std::move(op);
+        return true;
+    }
+
+    // Save all three pools to base_dir_.
+    void save_pools() const {
+        write_pool(base_dir_ / "values.bin",  value_pool_);
+        write_pool(base_dir_ / "arrays.bin",  array_pool_);
+        write_pool(base_dir_ / "objects.bin", object_pool_);
+    }
+
     // ---- internal allocation helpers ----
 
     uint32_t alloc_node(const persistent_json_value& val) {
@@ -255,7 +343,7 @@ private:
                     if (!array_pool_[cur_slab].push_back(elem_id)) {
                         // Current slab is full — allocate a new one and chain it.
                         uint32_t next_slab = alloc_array_slab();
-                        array_pool_[cur_slab].next_slab_id = next_slab;
+                        array_pool_[cur_slab].next_slab.set_addr(next_slab);
                         cur_slab = next_slab;
                         array_pool_[cur_slab].push_back(elem_id);
                     }
@@ -273,7 +361,7 @@ private:
                     if (!object_pool_[cur_slab].insert_or_assign(it.key(), val_id)) {
                         // Current slab is full — allocate a new one and chain it.
                         uint32_t next_slab = alloc_object_slab();
-                        object_pool_[cur_slab].next_node_id = next_slab;
+                        object_pool_[cur_slab].next_node.set_addr(next_slab);  // Task 3.2.2: was next_node_id
                         cur_slab = next_slab;
                         object_pool_[cur_slab].insert_or_assign(it.key(), val_id);
                     }
@@ -319,7 +407,7 @@ private:
                     for (uint32_t i = 0; i < slab.size; ++i) {
                         arr.push_back(export_node(slab[i]));
                     }
-                    slab_id = slab.next_slab_id;
+                    slab_id = slab.next_slab.addr();
                 }
                 return arr;
             }
@@ -333,7 +421,7 @@ private:
                         const auto& entry = slab[i];
                         obj[entry.key.to_std_string()] = export_node(entry.value);
                     }
-                    slab_id = slab.next_node_id;
+                    slab_id = slab.next_node.addr();  // Task 3.2.2: was next_node_id
                 }
                 return obj;
             }

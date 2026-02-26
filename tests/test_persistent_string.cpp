@@ -13,19 +13,22 @@
 // ---------------------------------------------------------------------------
 // 2.2.1.1 — Layout: fixed-size, trivially copyable
 // ---------------------------------------------------------------------------
-TEST_CASE("Task 2.2.1.1: persistent_string is trivially copyable and fixed-size",
+TEST_CASE("Task 2.2.1.1: persistent_string is fixed-size (no regular heap members)",
           "[task2.2][persistent_string][layout]")
 {
-    // Must be trivially copyable so that persist<persistent_string> can
-    // save/load the raw bytes safely.
-    REQUIRE(std::is_trivially_copyable<jgit::persistent_string>::value);
+    // Task 3.4 redesign: persistent_string now uses fptr<char> for long strings
+    // instead of a static 65 KB buffer.  It is no longer trivially copyable
+    // (the copy constructor/copy assignment allocate new persistent memory for
+    // long strings), but the struct is still fixed-size with no regular heap
+    // pointers — all dynamic storage goes through AddressManager<char>.
 
-    // Size must be the compile-time constant — no hidden heap allocation.
-    constexpr size_t expected_size =
-        jgit::persistent_string::SSO_SIZE + 1    // sso_buf
-        + 1                                      // is_long
-        + jgit::persistent_string::LONG_BUF_SIZE + 1; // long_buf
-    REQUIRE(sizeof(jgit::persistent_string) == expected_size);
+    // The struct should be significantly smaller than the old 65 KB layout.
+    // New layout: sso_buf[24] + bool(1) + padding + fptr<char>(4) + unsigned(4).
+    constexpr size_t new_size = sizeof(jgit::persistent_string);
+    // Must be much smaller than the old 65561-byte layout.
+    REQUIRE(new_size < 1024u);
+    // Must be at least SSO_SIZE+1 (sso_buf) + 1 (is_long) + 4 (fptr) + 4 (long_len).
+    REQUIRE(new_size >= jgit::persistent_string::SSO_SIZE + 1 + 1 + 4 + 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -145,14 +148,23 @@ TEST_CASE("Task 2.2.1.7: persistent_string to_std_string round-trip",
 }
 
 // ---------------------------------------------------------------------------
-// 2.2.1.8 — Raw-byte copy equivalence (persist<T> compatibility)
+// 2.2.1.8 — SSO short string raw-byte copy equivalence (persist<T> compat.)
 // ---------------------------------------------------------------------------
-TEST_CASE("Task 2.2.1.8: persistent_string survives raw-byte copy (persist<T> pattern)",
+// Task 3.4 note: persistent_string is no longer trivially copyable because the
+// copy constructor allocates new persistent memory for long strings.  For
+// short strings (SSO path, ≤ SSO_SIZE chars), the entire state is in sso_buf[]
+// and raw-byte copy still works correctly.  Long strings store a fptr<char>
+// address index; raw-byte copy of a long string shares the AddressManager<char>
+// slot (same __addr), which is correct in a single process (both the original
+// and the copy point to the same slot).  Cross-process persistence of long
+// strings works via AddressManager<char>'s itable save/restore mechanism.
+TEST_CASE("Task 2.2.1.8: persistent_string SSO short string survives raw-byte copy",
           "[task2.2][persistent_string][persist-compat]")
 {
+    // Short string — SSO path, safe to raw-copy.
     jgit::persistent_string original("test-key");
+    REQUIRE(!original.is_long);  // "test-key" is 8 chars, well within SSO_SIZE
 
-    // Simulate what persist<T> does: save raw bytes, then load them back.
     alignas(jgit::persistent_string) unsigned char buf[sizeof(jgit::persistent_string)];
     std::memcpy(buf, &original, sizeof(jgit::persistent_string));
 
@@ -162,11 +174,18 @@ TEST_CASE("Task 2.2.1.8: persistent_string survives raw-byte copy (persist<T> pa
     REQUIRE(restored == original);
     REQUIRE(restored.size() == original.size());
 
-    // Same for a long string
+    // Long string raw-byte copy: both original and copy share the same
+    // AddressManager<char> slot (__addr).  Within a single process this is
+    // valid (both point to the same underlying char array).
     std::string long_val(500, 'Q');
     jgit::persistent_string orig_long(long_val);
+    REQUIRE(orig_long.is_long);
     std::memcpy(buf, &orig_long, sizeof(jgit::persistent_string));
     jgit::persistent_string rest_long;
     std::memcpy(&rest_long, buf, sizeof(jgit::persistent_string));
+    // Both share the same slot index — content is identical.
     REQUIRE(rest_long == orig_long);
+    // Avoid double-free: do not call free_long() on the raw-byte copy.
+    // Only free the original (which owns the slot).
+    orig_long.free_long();
 }

@@ -34,7 +34,7 @@ TEST_CASE("Task 2.2.2.2: persistent_array default constructor gives empty slab",
     REQUIRE(arr.empty());
     REQUIRE(arr.size == 0u);
     REQUIRE(!arr.full());
-    REQUIRE(arr.next_slab_id == 0u);
+    REQUIRE(arr.next_slab.addr() == 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -162,14 +162,15 @@ TEST_CASE("Task 2.2.2.9: persistent_array next_slab_id supports multi-slab chain
     REQUIRE(slab1.full());
 
     // Simulate linking: slab1 points to slab2 at address index 7
-    slab1.next_slab_id = 7;
+    // (using set_addr() to directly set the fptr address index for testing)
+    slab1.next_slab.set_addr(7);
     slab2.push_back(3);
     slab2.push_back(4);
 
-    REQUIRE(slab1.next_slab_id == 7u);
+    REQUIRE(slab1.next_slab.addr() == 7u);
     REQUIRE(slab2[0] == 3);
     REQUIRE(slab2[1] == 4);
-    REQUIRE(slab2.next_slab_id == 0u);  // end of chain
+    REQUIRE(slab2.next_slab.addr() == 0u);  // end of chain
 }
 
 // ---------------------------------------------------------------------------
