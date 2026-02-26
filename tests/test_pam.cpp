@@ -30,12 +30,12 @@ namespace {
 // ---------------------------------------------------------------------------
 // Структуры заголовка и дескриптора — тривиально копируемы
 // ---------------------------------------------------------------------------
-TEST_CASE("slot_descriptor: тривиально копируем", "[pam][layout]")
+TEST_CASE("slot_descriptor: is trivially copyable", "[pam][layout]")
 {
     REQUIRE(std::is_trivially_copyable<slot_descriptor>::value);
 }
 
-TEST_CASE("pap_header: тривиально копируем", "[pam][layout]")
+TEST_CASE("pap_header: is trivially copyable", "[pam][layout]")
 {
     REQUIRE(std::is_trivially_copyable<pap_header>::value);
 }
@@ -43,7 +43,7 @@ TEST_CASE("pap_header: тривиально копируем", "[pam][layout]")
 // ---------------------------------------------------------------------------
 // Init с несуществующим файлом создаёт пустой образ
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: Init() с несуществующим файлом — пустой образ",
+TEST_CASE("PersistentAddressSpace: Init() with nonexistent file creates empty image",
           "[pam][init]")
 {
     const char* fname = "./test_pam_init_empty.pap";
@@ -63,7 +63,7 @@ TEST_CASE("PersistentAddressSpace: Init() с несуществующим фай
 // ---------------------------------------------------------------------------
 // Create возвращает ненулевое смещение
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: Create<int>() возвращает ненулевое смещение",
+TEST_CASE("PersistentAddressSpace: Create<int>() returns nonzero offset",
           "[pam][create]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -77,7 +77,7 @@ TEST_CASE("PersistentAddressSpace: Create<int>() возвращает ненул
 // ---------------------------------------------------------------------------
 // Resolve возвращает указатель; запись и чтение работают
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: Resolve<int>() — запись и чтение",
+TEST_CASE("PersistentAddressSpace: Resolve<int>() write and read",
           "[pam][resolve]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -97,7 +97,7 @@ TEST_CASE("PersistentAddressSpace: Resolve<int>() — запись и чтени
 // ---------------------------------------------------------------------------
 // Поиск по имени (Тр.14, Тр.15, Тр.16)
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: Create с именем — Find возвращает то же смещение",
+TEST_CASE("PersistentAddressSpace: Create with name -- Find returns same offset",
           "[pam][find][named]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -120,7 +120,7 @@ TEST_CASE("PersistentAddressSpace: Create с именем — Find возвра�
 // ---------------------------------------------------------------------------
 // FindTyped — поиск с проверкой типа
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: FindTyped<T> находит объект правильного типа",
+TEST_CASE("PersistentAddressSpace: FindTyped<T> finds object of correct type",
           "[pam][find_typed]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -140,7 +140,7 @@ TEST_CASE("PersistentAddressSpace: FindTyped<T> находит объект пр
 // ---------------------------------------------------------------------------
 // Delete освобождает слот
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: Delete освобождает слот",
+TEST_CASE("PersistentAddressSpace: Delete frees slot",
           "[pam][delete]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -157,7 +157,7 @@ TEST_CASE("PersistentAddressSpace: Delete освобождает слот",
 // ---------------------------------------------------------------------------
 // CreateArray — массив объектов
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: CreateArray<char>(100) — массив из 100 байт",
+TEST_CASE("PersistentAddressSpace: CreateArray<char>(100) creates 100-byte array",
           "[pam][array]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -181,7 +181,7 @@ TEST_CASE("PersistentAddressSpace: CreateArray<char>(100) — массив из 
 // ---------------------------------------------------------------------------
 // ResolveElement — доступ к элементу массива по индексу
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: ResolveElement<int> — доступ к элементам массива",
+TEST_CASE("PersistentAddressSpace: ResolveElement<int> accesses array elements",
           "[pam][array][resolve_element]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -201,7 +201,7 @@ TEST_CASE("PersistentAddressSpace: ResolveElement<int> — доступ к эл�
 // ---------------------------------------------------------------------------
 // Единое ПАП для разных типов (Тр.4)
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: объекты int и double в одном ПАП (Тр.4)",
+TEST_CASE("PersistentAddressSpace: int and double objects in unified PAP (Tr.4)",
           "[pam][unified_space]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -236,7 +236,7 @@ TEST_CASE("PersistentAddressSpace: объекты int и double в одном П
 // ---------------------------------------------------------------------------
 // FindByPtr — обратный поиск по указателю
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: FindByPtr возвращает смещение по указателю",
+TEST_CASE("PersistentAddressSpace: FindByPtr returns offset by pointer",
           "[pam][find_by_ptr]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -256,7 +256,7 @@ TEST_CASE("PersistentAddressSpace: FindByPtr возвращает смещени
 // ---------------------------------------------------------------------------
 // Save и повторная загрузка через Init (Тр.10 — без конструкторов)
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: Save и Init — объекты восстанавливаются",
+TEST_CASE("PersistentAddressSpace: Save and Init -- objects are restored",
           "[pam][save_reload]")
 {
     const char* fname = "./test_pam_save_reload.pap";
@@ -299,7 +299,7 @@ TEST_CASE("PersistentAddressSpace: Save и Init — объекты восста�
 // ---------------------------------------------------------------------------
 // GetCount возвращает корректное число элементов
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: GetCount возвращает число элементов массива",
+TEST_CASE("PersistentAddressSpace: GetCount returns correct element count",
           "[pam][count]")
 {
     auto& pam = PersistentAddressSpace::Get();
@@ -316,7 +316,7 @@ TEST_CASE("PersistentAddressSpace: GetCount возвращает число эл
 // ---------------------------------------------------------------------------
 // Создание нескольких массивов не приводит к наложению (алиасингу)
 // ---------------------------------------------------------------------------
-TEST_CASE("PersistentAddressSpace: несколько массивов не перекрываются",
+TEST_CASE("PersistentAddressSpace: multiple arrays do not overlap",
           "[pam][array][no_alias]")
 {
     auto& pam = PersistentAddressSpace::Get();
