@@ -102,7 +102,7 @@ static uintptr_t nlohmann_to_pjson_limited(const json& src, pjson& dst,
 // ---------------------------------------------------------------------------
 // Тест: загрузка test.json через nlohmann — проверка структуры верхнего уровня
 // ---------------------------------------------------------------------------
-TEST_CASE("pjson large: test.json корректно загружается через nlohmann::json",
+TEST_CASE("pjson large: test.json loads correctly via nlohmann::json",
           "[pjson][large][json]")
 {
     std::ifstream f(TEST_JSON_PATH);
@@ -124,7 +124,7 @@ TEST_CASE("pjson large: test.json корректно загружается че
 // ---------------------------------------------------------------------------
 // Тест: конвертация первых N узлов test.json в pjson
 // ---------------------------------------------------------------------------
-TEST_CASE("pjson large: первые ключи test.json сохраняются в pjson",
+TEST_CASE("pjson large: first keys from test.json are stored in pjson",
           "[pjson][large][json]")
 {
     std::ifstream f(TEST_JSON_PATH);
@@ -181,7 +181,7 @@ TEST_CASE("pjson large: первые ключи test.json сохраняются
 // ---------------------------------------------------------------------------
 // Тест: строковые значения корректно копируются из nlohmann в pjson
 // ---------------------------------------------------------------------------
-TEST_CASE("pjson large: строковые значения из test.json корректно сохраняются в pjson",
+TEST_CASE("pjson large: string values from test.json are stored correctly in pjson",
           "[pjson][large][json]")
 {
     std::ifstream f(TEST_JSON_PATH);
@@ -219,7 +219,7 @@ TEST_CASE("pjson large: строковые значения из test.json ко�
 // ---------------------------------------------------------------------------
 // Тест: объектные ключи из test.json корректно хранятся в pjson
 // ---------------------------------------------------------------------------
-TEST_CASE("pjson large: ключи из test.json корректно хранятся в pjson-объекте",
+TEST_CASE("pjson large: keys from test.json are stored correctly in pjson object",
           "[pjson][large][json]")
 {
     std::ifstream f(TEST_JSON_PATH);
