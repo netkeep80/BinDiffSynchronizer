@@ -132,7 +132,7 @@ private:
     ~pjson() = default;
 
     // Разрешаем доступ к приватному конструктору только для фабричных методов ПАМ.
-    template<class U, unsigned A> friend class AddressManager;
+    template<class U> friend class AddressManager;
     friend class PersistentAddressSpace;
 
     // internal helpers — объявлены, определены ниже
@@ -271,12 +271,17 @@ inline void pjson::set_string(const char* s)
     if( s == nullptr || s[0] == '\0' ) return;
 
     uintptr_t len = static_cast<uintptr_t>(std::strlen(s));
-    payload.string_val.length = len;
+    // Сохраняем смещение `this` перед выделением памяти (возможный realloc).
+    auto& pam = PersistentAddressSpace::Get();
+    uintptr_t self_offset = pam.PtrToOffset(this);
     fptr<char> chars;
-    chars.NewArray(static_cast<unsigned>(len + 1));
+    chars.NewArray(static_cast<unsigned>(len + 1));  // Может вызвать realloc!
     for( uintptr_t i = 0; i <= len; i++ )
         chars[static_cast<unsigned>(i)] = s[i];
-    payload.string_val.chars_slot = chars.addr();
+    // Повторно разрешаем `this` после возможного realloc.
+    pjson* self = pam.Resolve<pjson>(self_offset);
+    self->payload.string_val.length = len;
+    self->payload.string_val.chars_slot = chars.addr();
 }
 
 inline void pjson::set_array()
@@ -297,6 +302,12 @@ inline void pjson::set_object()
 
 inline pjson& pjson::push_back()
 {
+    // Сохраняем смещение `this` ДО любого выделения памяти.
+    // После realloc буфера ПАМ `this` может стать недействительным указателем.
+    // После выделения повторно разрешаем указатель через смещение.
+    auto& pam = PersistentAddressSpace::Get();
+    uintptr_t self_offset = pam.PtrToOffset(this);
+
     uintptr_t old_size = payload.array_val.size;
     uintptr_t new_size = old_size + 1;
 
@@ -304,7 +315,9 @@ inline pjson& pjson::push_back()
     {
         // Первый элемент: выделяем начальную ёмкость.
         fptr<pjson> arr;
-        arr.NewArray(4);
+        arr.NewArray(4);  // Может вызвать realloc!
+        // Повторно разрешаем `this` после возможного realloc.
+        pjson* self = pam.Resolve<pjson>(self_offset);
         // Инициализируем все слоты нулями.
         for( unsigned i = 0; i < 4; i++ )
         {
@@ -312,7 +325,10 @@ inline pjson& pjson::push_back()
             e.type = pjson_type::null;
             e.payload.uint_val = 0;
         }
-        payload.array_val.data_slot = arr.addr();
+        self->payload.array_val.data_slot = arr.addr();
+        self->payload.array_val.size = new_size;
+        return AddressManager<pjson>::GetArrayElement(
+                   self->payload.array_val.data_slot, old_size);
     }
     else if( new_size > AddressManager<pjson>::GetCount(
                             payload.array_val.data_slot ) )
@@ -322,9 +338,13 @@ inline pjson& pjson::push_back()
                                 payload.array_val.data_slot);
         uintptr_t new_cap = old_cap * 2;
         if( new_cap < new_size ) new_cap = new_size;
+        uintptr_t old_data_slot = payload.array_val.data_slot;
 
         fptr<pjson> new_arr;
-        new_arr.NewArray(static_cast<unsigned>(new_cap));
+        new_arr.NewArray(static_cast<unsigned>(new_cap));  // Может вызвать realloc!
+        // Повторно разрешаем `this` после возможного realloc.
+        pjson* self = pam.Resolve<pjson>(self_offset);
+
         for( uintptr_t i = 0; i < new_cap; i++ )
         {
             pjson& e = new_arr[static_cast<unsigned>(i)];
@@ -335,13 +355,15 @@ inline pjson& pjson::push_back()
         // вложенные объекты сохраняют свои смещения в ПАП).
         for( uintptr_t i = 0; i < old_size; i++ )
             new_arr[static_cast<unsigned>(i)] =
-                AddressManager<pjson>::GetArrayElement(
-                    payload.array_val.data_slot, i);
+                AddressManager<pjson>::GetArrayElement(old_data_slot, i);
 
         fptr<pjson> old_arr;
-        old_arr.set_addr(payload.array_val.data_slot);
+        old_arr.set_addr(old_data_slot);
         old_arr.DeleteArray();
-        payload.array_val.data_slot = new_arr.addr();
+        self->payload.array_val.data_slot = new_arr.addr();
+        self->payload.array_val.size = new_size;
+        return AddressManager<pjson>::GetArrayElement(
+                   self->payload.array_val.data_slot, old_size);
     }
 
     payload.array_val.size = new_size;
@@ -422,21 +444,36 @@ inline void pjson::_assign_key( pjson_kv_entry& entry, const char* s )
         return;
     }
     uintptr_t len = static_cast<uintptr_t>(std::strlen(s));
-    entry.key_length = len;
-    entry.key_chars.NewArray(static_cast<unsigned>(len + 1));
+    // Сохраняем смещение `entry` перед выделением памяти (возможный realloc).
+    auto& pam = PersistentAddressSpace::Get();
+    uintptr_t entry_offset = pam.PtrToOffset(&entry);
+    // NewArray может вызвать realloc, делая `entry` недействительным.
+    fptr<char> chars;
+    chars.NewArray(static_cast<unsigned>(len + 1));
     for( uintptr_t i = 0; i <= len; i++ )
-        entry.key_chars[static_cast<unsigned>(i)] = s[i];
+        chars[static_cast<unsigned>(i)] = s[i];
+    // Повторно разрешаем `entry` после возможного realloc.
+    pjson_kv_entry* ep = pam.Resolve<pjson_kv_entry>(entry_offset);
+    ep->key_length = len;
+    ep->key_chars.set_addr(chars.addr());
 }
 
 inline pjson& pjson::obj_insert(const char* key)
 {
+    // Сохраняем смещение `this` ДО любого выделения памяти.
+    // После realloc буфера ПАМ `this` может стать недействительным указателем.
+    auto& pam = PersistentAddressSpace::Get();
+    uintptr_t self_offset = pam.PtrToOffset(this);
+
     uintptr_t sz = payload.object_val.size;
 
     if( payload.object_val.pairs_slot == 0 )
     {
         // Первая запись: выделяем начальную ёмкость — 4 пары.
         fptr<pjson_kv_entry> arr;
-        arr.NewArray(4);
+        arr.NewArray(4);  // Может вызвать realloc!
+        // Повторно разрешаем `this` после возможного realloc.
+        pjson* self = pam.Resolve<pjson>(self_offset);
         for( unsigned i = 0; i < 4; i++ )
         {
             pjson_kv_entry& p = arr[i];
@@ -445,17 +482,21 @@ inline pjson& pjson::obj_insert(const char* key)
             p.value.type = pjson_type::null;
             p.value.payload.uint_val = 0;
         }
-        payload.object_val.pairs_slot = arr.addr();
+        self->payload.object_val.pairs_slot = arr.addr();
+        // Обновляем локальные переменные из свежего self.
+        sz = self->payload.object_val.size;
     }
 
-    uintptr_t idx = _obj_lower_bound(key);
+    // Повторно разрешаем `this` (возможно, после realloc выше).
+    pjson* self = pam.Resolve<pjson>(self_offset);
+    uintptr_t idx = self->_obj_lower_bound(key);
 
     // Проверяем, существует ли ключ.
     if( idx < sz )
     {
         pjson_kv_entry& pair =
             AddressManager<pjson_kv_entry>::GetArrayElement(
-                payload.object_val.pairs_slot, idx);
+                self->payload.object_val.pairs_slot, idx);
         const char* k = (pair.key_chars.addr() != 0) ? &pair.key_chars[0] : "";
         if( std::strcmp(k, key) == 0 )
         {
@@ -468,13 +509,16 @@ inline pjson& pjson::obj_insert(const char* key)
     // Вставляем новую запись в позицию idx, сдвигая вправо.
     uintptr_t new_size = sz + 1;
     uintptr_t cap = AddressManager<pjson_kv_entry>::GetCount(
-                        payload.object_val.pairs_slot);
+                        self->payload.object_val.pairs_slot);
     if( new_size > cap )
     {
         uintptr_t new_cap = cap * 2;
         if( new_cap < new_size ) new_cap = new_size;
+        uintptr_t old_pairs_slot = self->payload.object_val.pairs_slot;
         fptr<pjson_kv_entry> new_arr;
-        new_arr.NewArray(static_cast<unsigned>(new_cap));
+        new_arr.NewArray(static_cast<unsigned>(new_cap));  // Может вызвать realloc!
+        // Повторно разрешаем `this` после возможного realloc.
+        self = pam.Resolve<pjson>(self_offset);
         for( uintptr_t i = 0; i < new_cap; i++ )
         {
             pjson_kv_entry& p = new_arr[static_cast<unsigned>(i)];
@@ -486,36 +530,49 @@ inline pjson& pjson::obj_insert(const char* key)
         for( uintptr_t i = 0; i < sz; i++ )
             new_arr[static_cast<unsigned>(i)] =
                 AddressManager<pjson_kv_entry>::GetArrayElement(
-                    payload.object_val.pairs_slot, i);
+                    old_pairs_slot, i);
         fptr<pjson_kv_entry> old_arr;
-        old_arr.set_addr(payload.object_val.pairs_slot);
+        old_arr.set_addr(old_pairs_slot);
         old_arr.DeleteArray();
-        payload.object_val.pairs_slot = new_arr.addr();
+        self->payload.object_val.pairs_slot = new_arr.addr();
     }
 
     // Сдвигаем элементы вправо, освобождая место в позиции idx.
     for( uintptr_t i = sz; i > idx; i-- )
     {
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            payload.object_val.pairs_slot, i) =
+            self->payload.object_val.pairs_slot, i) =
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            payload.object_val.pairs_slot, i - 1);
+            self->payload.object_val.pairs_slot, i - 1);
     }
 
     // Записываем новую пару в позицию idx.
-    pjson_kv_entry& new_pair =
-        AddressManager<pjson_kv_entry>::GetArrayElement(
-            payload.object_val.pairs_slot, idx);
-    new_pair.value.type = pjson_type::null;
-    new_pair.value.payload.uint_val = 0;
-    // Обнуляем слот ключа ДО вызова _assign_key, чтобы не освободить
-    // chars_slot, который теперь принадлежит сдвинутому соседу [idx+1].
-    new_pair.key_chars.set_addr(0);
-    new_pair.key_length = 0;
-    _assign_key(new_pair, key);
+    {
+        pjson_kv_entry& new_pair =
+            AddressManager<pjson_kv_entry>::GetArrayElement(
+                self->payload.object_val.pairs_slot, idx);
+        new_pair.value.type = pjson_type::null;
+        new_pair.value.payload.uint_val = 0;
+        // Обнуляем слот ключа ДО вызова _assign_key, чтобы не освободить
+        // chars_slot, который теперь принадлежит сдвинутому соседу [idx+1].
+        new_pair.key_chars.set_addr(0);
+        new_pair.key_length = 0;
+    }
+    // _assign_key может вызвать realloc: передаём ссылку, которая обновится внутри.
+    // После _assign_key re-resolve self и new_pair.
+    {
+        uintptr_t pairs_slot_before = self->payload.object_val.pairs_slot;
+        pjson_kv_entry& new_pair_ref =
+            AddressManager<pjson_kv_entry>::GetArrayElement(pairs_slot_before, idx);
+        _assign_key(new_pair_ref, key);
+    }
 
-    payload.object_val.size = new_size;
-    return new_pair.value;
+    // После _assign_key (возможный realloc): re-resolve self.
+    self = pam.Resolve<pjson>(self_offset);
+    self->payload.object_val.size = new_size;
+    // Re-resolve new_pair для возврата.
+    return AddressManager<pjson_kv_entry>::GetArrayElement(
+               self->payload.object_val.pairs_slot, idx).value;
 }
 
 inline bool pjson::obj_erase(const char* key)

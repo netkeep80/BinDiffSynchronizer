@@ -40,7 +40,7 @@
 
 template <class _T> class persist;
 template <class _T> class fptr;
-template<class _T, unsigned AddressSpace> class AddressManager;
+template<class _T> class AddressManager;
 
 // ---------------------------------------------------------------------------
 // persist<T> — обёртка для тривиально копируемого типа T.
@@ -85,7 +85,7 @@ private:
     persist() = default;
 
     // Разрешаем доступ к приватному конструктору только для фабричных методов.
-    template<class U, unsigned A> friend class AddressManager;
+    template<class U> friend class AddressManager;
     friend class PersistentAddressSpace;
 };
 
@@ -118,6 +118,18 @@ class fptr
 public:
     /// Конструктор по умолчанию — нулевой указатель.
     inline fptr() : __addr(0) {}
+
+    /**
+     * Конструктор с инициализацией по строковому имени объекта в ПАМ (Тр.15).
+     * Автоматически выполняет поиск по слотам ПАМ при создании fptr.
+     * @param name Строковое имя объекта (не имя файла).
+     */
+    inline explicit fptr(const char* name) : __addr(0)
+    {
+        if( name != nullptr && name[0] != '\0' )
+            __addr = static_cast<uintptr_t>(
+                PersistentAddressSpace::Get().FindTyped<_T>(name));
+    }
 
     /// Конструктор копирования.
     inline fptr(const fptr<_T>&) = default;
@@ -254,22 +266,19 @@ static_assert(sizeof(fptr<double>) == sizeof(void*),
               "sizeof(fptr<T>) должен быть равен sizeof(void*) (Тр.5)");
 
 // ---------------------------------------------------------------------------
-// Значение по умолчанию для размера адресного пространства (для AddressManager)
-// ---------------------------------------------------------------------------
-
-#define ADDRESS_SPACE 1024
-
-// ---------------------------------------------------------------------------
-// AddressManager<T, AddressSpace> — тонкий адаптер над PersistentAddressSpace.
+// AddressManager<T> — тонкий адаптер над PersistentAddressSpace.
 //
 // Обеспечивает обратную совместимость с кодом фазы 1 (pstring, pvector, pmap,
 // pjson), который использует AddressManager<T>::CreateArray() и т.д.
 // В фазе 2 вся логика делегируется в PersistentAddressSpace (Тр.4).
 //
-// Слот 0 зарезервирован как null/недопустимый (совместимость с фазой 1:
-// fptr<T>::addr() == 0 означает null).
+// Размер адресного пространства динамический (задача #54, пункт 6):
+//   — удалена жёсткая привязка к фиксированному константе ADDRESS_SPACE.
+//   — параметр шаблона AddressSpace удалён.
+//
+// Смещение 0 означает null/недопустимый адрес (fptr<T>::addr() == 0 — null).
 // ---------------------------------------------------------------------------
-template<class _T, unsigned AddressSpace = ADDRESS_SPACE>
+template<class _T>
 class AddressManager
 {
     friend class persist<_T>;
@@ -309,7 +318,8 @@ public:
     // -----------------------------------------------------------------------
 
     /**
-     * Освободить слот по смещению.
+     * Освободить слот именованного объекта по смещению.
+     * Для безымянных объектов — no-op.
      */
     static void Delete(uintptr_t offset)
     {
@@ -329,7 +339,7 @@ public:
     // -----------------------------------------------------------------------
 
     /**
-     * Найти объект по имени.
+     * Найти именованный объект по имени.
      * @return Смещение или 0.
      */
     static uintptr_t Find(const char* name)
@@ -338,7 +348,7 @@ public:
     }
 
     /**
-     * Найти слот по raw-указателю (обратный поиск).
+     * Найти именованный слот по raw-указателю (обратный поиск).
      * @return Смещение или 0.
      */
     static uintptr_t FindByPtr(const _T* p)
@@ -352,7 +362,7 @@ public:
     // -----------------------------------------------------------------------
 
     /**
-     * Получить счётчик элементов массива по смещению.
+     * Получить счётчик элементов массива по смещению (только для именованных).
      */
     static uintptr_t GetCount(uintptr_t offset)
     {
@@ -378,9 +388,9 @@ public:
     /**
      * Получить экземпляр менеджера (для совместимости с фазой 1).
      */
-    static AddressManager<_T, AddressSpace>& GetManager()
+    static AddressManager<_T>& GetManager()
     {
-        static AddressManager<_T, AddressSpace> _mgr;
+        static AddressManager<_T> _mgr;
         return _mgr;
     }
 

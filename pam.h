@@ -12,79 +12,91 @@
  * pam.h — Персистный адресный менеджер (ПАМ).
  *
  * Реализует единое персистное адресное пространство (ПАП) для объектов
- * произвольных типов. ПАП хранится в одном бинарном файле и загружается
- * в оперативную память без вызова конструкторов объектов.
+ * произвольных типов. ПАП хранится в одном бинарном файле с расширением .pam
+ * и загружается в оперативную память без вызова конструкторов объектов.
  *
- * Структура файла ПАП:
- *   [pap_header]              — заголовок: магия, версия, размер области данных
- *   [slot_descriptor * N]     — таблица слотов (дескрипторов объектов)
+ * Структура файла ПАМ:
+ *   [pam_header]              — заголовок: магия, версия, размер области данных,
+ *                               число именованных слотов, ёмкость слотов
+ *   [slot_descriptor * cap]   — таблица слотов (дескрипторов именованных объектов),
+ *                               ёмкость сохраняется в заголовке
  *   [байты объектов]          — область данных (смежный байтовый пул)
  *
- * Ключевые требования (из задачи #45):
+ * Ключевые требования (из задачи #45, #54):
  *   Тр.4  — единое ПАП для объектов разных типов
  *   Тр.5  — sizeof(fptr<T>) == sizeof(void*)
  *   Тр.10 — при загрузке образа ПАП конструкторы объектов не вызываются
  *   Тр.14 — ПАМ сам является персистным объектом и хранит имена объектов
  *   Тр.15 — fptr<T> может инициализироваться строками-именами объектов
  *   Тр.16 — ПАМ хранит карту объектов и их имена
+ *
+ * Изменения (задача #54):
+ *   — Расширение файла: .pam (вместо .pap)
+ *   — Таблица слотов динамическая (malloc/realloc, не статический массив)
+ *   — Слоты только для именованных объектов (count = число именованных)
+ *   — Начальный размер области данных уменьшен до PAM_INITIAL_DATA_SIZE (10 КБ)
+ *   — Начальная ёмкость слотов динамическая, растёт при необходимости
+ *   — Удалена жёсткая привязка к ADDRESS_SPACE
  */
 
 // ---------------------------------------------------------------------------
-// Константы ПАП
+// Константы ПАМ
 // ---------------------------------------------------------------------------
 
-/// Магическое число для идентификации файла ПАП.
-constexpr uint32_t PAP_MAGIC   = 0x50415000u;  // 'PAP\0'
+/// Магическое число для идентификации файла ПАМ.
+constexpr uint32_t PAM_MAGIC   = 0x50414D00u;  // 'PAM\0'
 
-/// Версия формата файла ПАП.
-constexpr uint32_t PAP_VERSION = 1u;
-
-/// Максимальное число слотов в таблице дескрипторов.
-constexpr unsigned PAP_MAX_SLOTS = 4096u;
+/// Версия формата файла ПАМ.
+constexpr uint32_t PAM_VERSION = 2u;
 
 /// Максимальная длина идентификатора типа в дескрипторе слота.
-constexpr unsigned PAP_TYPE_ID_SIZE = 64u;
+constexpr unsigned PAM_TYPE_ID_SIZE = 64u;
 
 /// Максимальная длина имени объекта в дескрипторе слота.
-constexpr unsigned PAP_NAME_SIZE = 64u;
+constexpr unsigned PAM_NAME_SIZE = 64u;
 
-/// Начальный размер области данных ПАП (байт).
-constexpr uintptr_t PAP_INITIAL_DATA_SIZE = 1024u * 1024u;  // 1 МБ
+/// Начальный размер области данных ПАМ (байт) — 10 КБ.
+constexpr uintptr_t PAM_INITIAL_DATA_SIZE = 10u * 1024u;
+
+/// Начальная ёмкость таблицы именованных слотов (число слотов).
+constexpr unsigned PAM_INITIAL_SLOT_CAPACITY = 16u;
 
 // ---------------------------------------------------------------------------
-// slot_descriptor — дескриптор одного слота в таблице ПАМ
+// slot_descriptor — дескриптор одного именованного объекта в таблице ПАМ
 // ---------------------------------------------------------------------------
 
-/// Дескриптор одного объекта в едином ПАП.
+/// Дескриптор именованного объекта в едином ПАП.
 /// Все поля фиксированного размера, тривиально копируемы.
+/// Слоты создаются ТОЛЬКО для объектов, имеющих строковое имя.
 struct slot_descriptor
 {
     bool      used;                      ///< Слот занят
     uintptr_t offset;                    ///< Смещение объекта в области данных ПАП
     uintptr_t size;                      ///< Размер объекта в байтах
     uintptr_t count;                     ///< Количество элементов (для массивов)
-    char      type_id[PAP_TYPE_ID_SIZE]; ///< Имя типа (из typeid(T).name())
-    char      name[PAP_NAME_SIZE];       ///< Имя объекта (не имя файла)
+    char      type_id[PAM_TYPE_ID_SIZE]; ///< Имя типа (из typeid(T).name())
+    char      name[PAM_NAME_SIZE];       ///< Имя объекта (не имя файла)
 };
 
 static_assert(std::is_trivially_copyable<slot_descriptor>::value,
               "slot_descriptor должен быть тривиально копируемым");
 
 // ---------------------------------------------------------------------------
-// pap_header — заголовок файла ПАП
+// pam_header — заголовок файла ПАМ
 // ---------------------------------------------------------------------------
 
 /// Заголовок файла персистного адресного пространства.
-struct pap_header
+struct pam_header
 {
-    uint32_t  magic;          ///< PAP_MAGIC — признак файла ПАП
-    uint32_t  version;        ///< PAP_VERSION — версия формата
+    uint32_t  magic;          ///< PAM_MAGIC — признак файла ПАМ
+    uint32_t  version;        ///< PAM_VERSION — версия формата
     uintptr_t data_area_size; ///< Размер области данных в байтах
-    unsigned  slot_count;     ///< Число использованных слотов
+    unsigned  slot_count;     ///< Число именованных слотов (только named)
+    unsigned  slot_capacity;  ///< Ёмкость таблицы слотов (число записей в файле)
 };
 
-static_assert(std::is_trivially_copyable<pap_header>::value,
-              "pap_header должен быть тривиально копируемым");
+static_assert(std::is_trivially_copyable<pam_header>::value,
+              "pam_header должен быть тривиально копируемым");
 
 // ---------------------------------------------------------------------------
 // PersistentAddressSpace — единый персистный адресный менеджер
@@ -94,12 +106,15 @@ static_assert(std::is_trivially_copyable<pap_header>::value,
  * Единый менеджер персистного адресного пространства (ПАМ).
  *
  * Управляет плоским байтовым буфером (_data), загружаемым из файла без вызова
- * конструкторов. Хранит таблицу слотов (_slots) с описанием каждого объекта.
+ * конструкторов. Хранит динамическую таблицу слотов (_slots) только для
+ * ИМЕНОВАННЫХ объектов. Безымянные объекты выделяются из области данных
+ * напрямую (bump-аллокатор) без создания слота.
  *
  * Использование:
- *   PersistentAddressSpace::Init("myapp.pap");
+ *   PersistentAddressSpace::Init("myapp.pam");
  *   auto& pam = PersistentAddressSpace::Get();
- *   uintptr_t off = pam.Create<int>("counter");
+ *   uintptr_t off = pam.Create<int>("counter");   // именованный — создаёт слот
+ *   uintptr_t off2 = pam.Create<int>();           // безымянный — только память
  *   int* p = pam.Resolve<int>(off);
  *   *p = 42;
  *   pam.Save();
@@ -141,13 +156,15 @@ public:
     /**
      * Создать один объект типа T в ПАП.
      * @param name  Имя объекта (необязательно, можно nullptr).
+     *              Если имя задано — создаётся именованный слот для поиска.
+     *              Если nullptr — память выделяется без слота.
      * @return Смещение (offset) объекта в области данных ПАП.
-     *         0 означает ошибку (нет свободных слотов или памяти).
+     *         0 означает ошибку (нет памяти).
      */
     template<class T>
     uintptr_t Create(const char* name = nullptr)
     {
-        return _alloc_slot(sizeof(T), 1, typeid(T).name(), name);
+        return _alloc(sizeof(T), 1, typeid(T).name(), name);
     }
 
     /**
@@ -160,7 +177,7 @@ public:
     uintptr_t CreateArray(unsigned count, const char* name = nullptr)
     {
         if( count == 0 ) return 0;
-        return _alloc_slot(sizeof(T), count, typeid(T).name(), name);
+        return _alloc(sizeof(T), count, typeid(T).name(), name);
     }
 
     // -----------------------------------------------------------------------
@@ -168,23 +185,26 @@ public:
     // -----------------------------------------------------------------------
 
     /**
-     * Освободить слот, занятый объектом по смещению offset.
+     * Освободить слот по смещению offset.
      * Конструкторы/деструкторы НЕ вызываются (Тр.10).
+     * Для именованных объектов также уменьшается счётчик slot_count.
      */
     void Delete(uintptr_t offset)
     {
         if( offset == 0 ) return;
-        for( unsigned i = 1; i < PAP_MAX_SLOTS; i++ )
+        for( unsigned i = 0; i < _slot_capacity; i++ )
         {
             if( _slots[i].used && _slots[i].offset == offset )
             {
+                // Уменьшаем счётчик только для именованных слотов.
+                bool was_named = (_slots[i].name[0] != '\0');
                 _slots[i].used = false;
                 _slots[i].offset = 0;
                 _slots[i].size = 0;
                 _slots[i].count = 0;
                 _slots[i].type_id[0] = '\0';
                 _slots[i].name[0] = '\0';
-                if( _header().slot_count > 0 )
+                if( was_named && _header().slot_count > 0 )
                     _header().slot_count--;
                 return;
             }
@@ -192,46 +212,46 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // Поиск по имени
+    // Поиск по имени (только для именованных объектов)
     // -----------------------------------------------------------------------
 
     /**
-     * Найти объект по имени.
+     * Найти именованный объект по имени.
      * @return Смещение объекта или 0, если не найден.
      */
     uintptr_t Find(const char* name) const
     {
         if( name == nullptr || name[0] == '\0' ) return 0;
-        for( unsigned i = 1; i < PAP_MAX_SLOTS; i++ )
+        for( unsigned i = 0; i < _slot_capacity; i++ )
         {
             if( _slots[i].used &&
-                std::strncmp(_slots[i].name, name, PAP_NAME_SIZE) == 0 )
+                std::strncmp(_slots[i].name, name, PAM_NAME_SIZE) == 0 )
                 return _slots[i].offset;
         }
         return 0;
     }
 
     /**
-     * Найти объект по имени с проверкой типа.
+     * Найти именованный объект по имени с проверкой типа.
      * @return Смещение объекта или 0, если не найден или тип не совпадает.
      */
     template<class T>
     uintptr_t FindTyped(const char* name) const
     {
         if( name == nullptr || name[0] == '\0' ) return 0;
-        for( unsigned i = 1; i < PAP_MAX_SLOTS; i++ )
+        for( unsigned i = 0; i < _slot_capacity; i++ )
         {
             if( _slots[i].used &&
-                std::strncmp(_slots[i].name, name, PAP_NAME_SIZE) == 0 &&
-                std::strncmp(_slots[i].type_id, typeid(T).name(), PAP_TYPE_ID_SIZE) == 0 )
+                std::strncmp(_slots[i].name, name, PAM_NAME_SIZE) == 0 &&
+                std::strncmp(_slots[i].type_id, typeid(T).name(), PAM_TYPE_ID_SIZE) == 0 )
                 return _slots[i].offset;
         }
         return 0;
     }
 
     /**
-     * Найти смещение по указателю (для обратного поиска слота из raw-указателя).
-     * @return Смещение объекта или 0, если указатель не принадлежит ПАП.
+     * Найти смещение по указателю (для именованных объектов).
+     * @return Смещение объекта или 0, если указатель не принадлежит именованному объекту ПАМ.
      */
     uintptr_t FindByPtr(const void* p) const
     {
@@ -241,8 +261,8 @@ public:
         uintptr_t data_size = _header_const().data_area_size;
         if( ptr < base || ptr >= base + data_size ) return 0;
         uintptr_t offset = static_cast<uintptr_t>(ptr - base);
-        // Проверяем, совпадает ли смещение с началом какого-либо слота.
-        for( unsigned i = 1; i < PAP_MAX_SLOTS; i++ )
+        // Проверяем именованные слоты.
+        for( unsigned i = 0; i < _slot_capacity; i++ )
         {
             if( _slots[i].used && _slots[i].offset == offset )
                 return offset;
@@ -251,18 +271,33 @@ public:
     }
 
     /**
-     * Получить счётчик элементов для слота по смещению.
-     * @return Число элементов или 0.
+     * Получить счётчик элементов для именованного слота по смещению.
+     * @return Число элементов или 0 (в т.ч. для безымянных объектов).
      */
     uintptr_t GetCount(uintptr_t offset) const
     {
         if( offset == 0 ) return 0;
-        for( unsigned i = 1; i < PAP_MAX_SLOTS; i++ )
+        for( unsigned i = 0; i < _slot_capacity; i++ )
         {
             if( _slots[i].used && _slots[i].offset == offset )
                 return _slots[i].count;
         }
         return 0;
+    }
+
+    /**
+     * Преобразовать указатель на объект в ПАП в его смещение.
+     * Используется для сохранения «текущего положения» перед перераспределением
+     * памяти (realloc), после которого указатель становится недействительным.
+     * @return Смещение объекта или 0, если указатель вне ПАМ.
+     */
+    uintptr_t PtrToOffset(const void* p) const
+    {
+        if( p == nullptr || _data == nullptr ) return 0;
+        const char* ptr = static_cast<const char*>(p);
+        uintptr_t data_size = _header_const().data_area_size;
+        if( ptr < _data || ptr >= _data + data_size ) return 0;
+        return static_cast<uintptr_t>(ptr - _data);
     }
 
     // -----------------------------------------------------------------------
@@ -313,16 +348,16 @@ public:
     // -----------------------------------------------------------------------
 
     /**
-     * Сохранить весь образ ПАП в файл.
-     * Записывает: заголовок, таблицу слотов, область данных.
+     * Сохранить весь образ ПАМ в файл.
+     * Записывает: заголовок, таблицу именованных слотов, область данных.
      */
     void Save()
     {
         if( _filename[0] == '\0' ) return;
         std::FILE* f = std::fopen(_filename, "wb");
         if( f == nullptr ) return;
-        std::fwrite(&_header(), sizeof(pap_header), 1, f);
-        std::fwrite(_slots, sizeof(slot_descriptor), PAP_MAX_SLOTS, f);
+        std::fwrite(&_header(), sizeof(pam_header), 1, f);
+        std::fwrite(_slots, sizeof(slot_descriptor), _slot_capacity, f);
         std::fwrite(_data, 1, static_cast<std::size_t>(_header().data_area_size), f);
         std::fclose(f);
     }
@@ -339,6 +374,11 @@ public:
             std::free(_data);
             _data = nullptr;
         }
+        if( _slots != nullptr )
+        {
+            std::free(_slots);
+            _slots = nullptr;
+        }
     }
 
 private:
@@ -346,15 +386,15 @@ private:
     // Внутреннее состояние
     // -----------------------------------------------------------------------
 
-    char            _filename[256];           ///< Путь к файлу ПАП
-    char*           _data;                    ///< Буфер области данных
-    slot_descriptor _slots[PAP_MAX_SLOTS];    ///< Таблица слотов
+    char              _filename[256];  ///< Путь к файлу ПАМ
+    char*             _data;           ///< Буфер области данных
+    slot_descriptor*  _slots;          ///< Динамическая таблица именованных слотов
+    unsigned          _slot_capacity;  ///< Текущая ёмкость таблицы слотов
 
-    // Заголовок хранится в начале буфера _data как pap_header.
-    // _data[0..sizeof(pap_header)-1] — заголовок.
-    // Область данных начинается сразу после заголовка + таблицы слотов?
-    // Нет — для простоты заголовок и слоты хранятся отдельно (_slots[]),
-    // _data хранит только объекты (смещения отсчитываются от 0 внутри _data).
+    // Заголовок хранится в начале буфера _data как pam_header.
+    // _data[0..sizeof(pam_header)-1] — заголовок.
+    // Слоты хранятся отдельно (_slots — динамический буфер).
+    // Область данных начинается после заголовка.
 
     /// Счётчик следующего доступного смещения в области данных (bump-allocator).
     uintptr_t _bump;
@@ -363,14 +403,14 @@ private:
     // Доступ к заголовку
     // -----------------------------------------------------------------------
 
-    pap_header& _header()
+    pam_header& _header()
     {
-        return *reinterpret_cast<pap_header*>(_data);
+        return *reinterpret_cast<pam_header*>(_data);
     }
 
-    const pap_header& _header_const() const
+    const pam_header& _header_const() const
     {
-        return *reinterpret_cast<const pap_header*>(_data);
+        return *reinterpret_cast<const pam_header*>(_data);
     }
 
     // -----------------------------------------------------------------------
@@ -379,10 +419,11 @@ private:
 
     PersistentAddressSpace()
         : _data(nullptr)
-        , _bump(sizeof(pap_header))
+        , _slots(nullptr)
+        , _slot_capacity(0)
+        , _bump(sizeof(pam_header))
     {
         _filename[0] = '\0';
-        std::memset(_slots, 0, sizeof(_slots));
     }
 
     static PersistentAddressSpace& _instance()
@@ -405,6 +446,12 @@ private:
             std::free(_data);
             _data = nullptr;
         }
+        if( _slots != nullptr )
+        {
+            std::free(_slots);
+            _slots = nullptr;
+            _slot_capacity = 0;
+        }
 
         std::FILE* f = std::fopen(filename, "rb");
         if( f == nullptr )
@@ -415,22 +462,40 @@ private:
         }
 
         // Считываем заголовок.
-        pap_header hdr{};
-        if( std::fread(&hdr, sizeof(pap_header), 1, f) != 1 ||
-            hdr.magic != PAP_MAGIC || hdr.version != PAP_VERSION )
+        pam_header hdr{};
+        if( std::fread(&hdr, sizeof(pam_header), 1, f) != 1 ||
+            hdr.magic != PAM_MAGIC || hdr.version != PAM_VERSION )
         {
             std::fclose(f);
             _init_empty();
             return;
         }
 
-        // Считываем таблицу слотов.
-        if( std::fread(_slots, sizeof(slot_descriptor), PAP_MAX_SLOTS, f)
-                != PAP_MAX_SLOTS )
+        unsigned cap = hdr.slot_capacity;
+        if( cap < PAM_INITIAL_SLOT_CAPACITY )
+            cap = PAM_INITIAL_SLOT_CAPACITY;
+
+        // Выделяем таблицу слотов.
+        _slots = static_cast<slot_descriptor*>(
+            std::malloc(sizeof(slot_descriptor) * cap));
+        if( _slots == nullptr )
         {
             std::fclose(f);
-            _init_empty();
-            return;
+            throw std::bad_alloc{};
+        }
+        std::memset(_slots, 0, sizeof(slot_descriptor) * cap);
+        _slot_capacity = cap;
+
+        // Считываем таблицу слотов из файла (только сохранённое количество).
+        if( hdr.slot_capacity > 0 )
+        {
+            if( std::fread(_slots, sizeof(slot_descriptor), hdr.slot_capacity, f)
+                    != hdr.slot_capacity )
+            {
+                std::fclose(f);
+                _init_empty();
+                return;
+            }
         }
 
         // Выделяем буфер и считываем область данных.
@@ -451,9 +516,13 @@ private:
         }
         std::fclose(f);
 
+        // Обновляем заголовок в буфере данных.
+        _header() = hdr;
+        _header().slot_capacity = _slot_capacity;
+
         // Восстанавливаем bump из уже занятых слотов.
-        _bump = sizeof(pap_header);
-        for( unsigned i = 1; i < PAP_MAX_SLOTS; i++ )
+        _bump = sizeof(pam_header);
+        for( unsigned i = 0; i < _slot_capacity; i++ )
         {
             if( _slots[i].used )
             {
@@ -469,56 +538,104 @@ private:
 
     void _init_empty()
     {
-        uintptr_t data_size = PAP_INITIAL_DATA_SIZE;
+        // Выделяем начальную таблицу слотов.
+        _slot_capacity = PAM_INITIAL_SLOT_CAPACITY;
+        _slots = static_cast<slot_descriptor*>(
+            std::malloc(sizeof(slot_descriptor) * _slot_capacity));
+        if( _slots == nullptr )
+            throw std::bad_alloc{};
+        std::memset(_slots, 0, sizeof(slot_descriptor) * _slot_capacity);
+
+        // Выделяем буфер данных.
+        uintptr_t data_size = PAM_INITIAL_DATA_SIZE;
         _data = static_cast<char*>(std::malloc(static_cast<std::size_t>(data_size)));
         if( _data == nullptr )
+        {
+            std::free(_slots);
+            _slots = nullptr;
             throw std::bad_alloc{};
+        }
         std::memset(_data, 0, static_cast<std::size_t>(data_size));
-        std::memset(_slots, 0, sizeof(_slots));
 
         // Записываем заголовок в начало буфера данных.
-        pap_header& hdr = _header();
-        hdr.magic          = PAP_MAGIC;
-        hdr.version        = PAP_VERSION;
+        pam_header& hdr = _header();
+        hdr.magic          = PAM_MAGIC;
+        hdr.version        = PAM_VERSION;
         hdr.data_area_size = data_size;
         hdr.slot_count     = 0;
+        hdr.slot_capacity  = _slot_capacity;
 
         // Область данных начинается после заголовка.
-        _bump = sizeof(pap_header);
+        _bump = sizeof(pam_header);
     }
 
     // -----------------------------------------------------------------------
-    // Bump-аллокатор области данных
+    // Расширение таблицы именованных слотов
     // -----------------------------------------------------------------------
 
     /**
-     * Выделить size*count байт в области данных ПАП.
-     * Записывает дескриптор слота и возвращает смещение.
-     * Возвращает 0 при ошибке (нет слотов или памяти).
+     * Расширить таблицу слотов, если свободных нет.
+     * @return Индекс свободного слота или UINT_MAX при ошибке.
      */
-    uintptr_t _alloc_slot(uintptr_t elem_size, uintptr_t count,
-                          const char* type_id, const char* name)
+    unsigned _ensure_free_slot()
     {
-        // Найти свободный слот (слот 0 зарезервирован как null).
-        unsigned slot_idx = 0;
-        for( unsigned i = 1; i < PAP_MAX_SLOTS; i++ )
+        // Ищем свободный слот.
+        for( unsigned i = 0; i < _slot_capacity; i++ )
         {
             if( !_slots[i].used )
-            {
-                slot_idx = i;
-                break;
-            }
+                return i;
         }
-        if( slot_idx == 0 ) return 0;  // Нет свободных слотов.
 
+        // Нет свободных — расширяем таблицу.
+        unsigned new_cap = _slot_capacity * 2;
+        if( new_cap < PAM_INITIAL_SLOT_CAPACITY )
+            new_cap = PAM_INITIAL_SLOT_CAPACITY;
+
+        slot_descriptor* new_slots = static_cast<slot_descriptor*>(
+            std::realloc(_slots, sizeof(slot_descriptor) * new_cap));
+        if( new_slots == nullptr ) return static_cast<unsigned>(-1);
+
+        // Инициализируем новые слоты нулями.
+        std::memset(new_slots + _slot_capacity, 0,
+                    sizeof(slot_descriptor) * (new_cap - _slot_capacity));
+
+        unsigned free_idx = _slot_capacity;  // Первый новый слот.
+        _slots = new_slots;
+        _slot_capacity = new_cap;
+        _header().slot_capacity = _slot_capacity;
+
+        return free_idx;
+    }
+
+    // -----------------------------------------------------------------------
+    // Аллокатор области данных
+    // -----------------------------------------------------------------------
+
+    /**
+     * Выделить size*count байт в области данных ПАМ.
+     * Всегда создаётся запись в таблице слотов (нужна для GetCount/Delete/FindByPtr).
+     * Если name задано — слот именованный (для поиска по имени),
+     * и увеличивается счётчик slot_count (число ИМЕНОВАННЫХ объектов).
+     * Безымянные слоты не увеличивают slot_count в заголовке.
+     * Возвращает смещение или 0 при ошибке.
+     */
+    uintptr_t _alloc(uintptr_t elem_size, uintptr_t count,
+                     const char* type_id, const char* name)
+    {
         uintptr_t total_size = elem_size * count;
         uintptr_t data_size  = _header().data_area_size;
 
+        // Выравниваем bump по natural alignment элемента (до 8 байт).
+        uintptr_t align = elem_size >= 8 ? 8u :
+                          elem_size >= 4 ? 4u :
+                          elem_size >= 2 ? 2u : 1u;
+        uintptr_t aligned_bump = (_bump + align - 1) & ~(align - 1);
+
         // Если не хватает места — расширяем область данных.
-        if( _bump + total_size > data_size )
+        if( aligned_bump + total_size > data_size )
         {
             uintptr_t new_size = data_size * 2;
-            while( _bump + total_size > new_size )
+            while( aligned_bump + total_size > new_size )
                 new_size *= 2;
 
             char* new_data = static_cast<char*>(
@@ -528,29 +645,41 @@ private:
             std::memset(_data + data_size, 0,
                         static_cast<std::size_t>(new_size - data_size));
             _header().data_area_size = new_size;
+            // Пересчитываем aligned_bump после возможного realloc (размер мог измениться).
+            data_size = new_size;
+            aligned_bump = (_bump + align - 1) & ~(align - 1);
         }
 
-        uintptr_t offset = _bump;
-        _bump += total_size;
+        uintptr_t offset = aligned_bump;
+        _bump = aligned_bump + total_size;
 
-        // Заполняем дескриптор слота.
+        // Всегда создаём запись в таблице слотов (нужна для GetCount/Delete/FindByPtr).
+        unsigned slot_idx = _ensure_free_slot();
+        if( slot_idx == static_cast<unsigned>(-1) ) return 0;  // Ошибка выделения слота.
+
         slot_descriptor& sd = _slots[slot_idx];
         sd.used   = true;
         sd.offset = offset;
         sd.size   = elem_size;
         sd.count  = count;
         if( type_id != nullptr )
-            std::strncpy(sd.type_id, type_id, PAP_TYPE_ID_SIZE - 1);
+            std::strncpy(sd.type_id, type_id, PAM_TYPE_ID_SIZE - 1);
         else
             sd.type_id[0] = '\0';
-        sd.type_id[PAP_TYPE_ID_SIZE - 1] = '\0';
-        if( name != nullptr )
-            std::strncpy(sd.name, name, PAP_NAME_SIZE - 1);
-        else
-            sd.name[0] = '\0';
-        sd.name[PAP_NAME_SIZE - 1] = '\0';
+        sd.type_id[PAM_TYPE_ID_SIZE - 1] = '\0';
 
-        _header().slot_count++;
+        bool named = (name != nullptr && name[0] != '\0');
+        if( named )
+        {
+            std::strncpy(sd.name, name, PAM_NAME_SIZE - 1);
+            sd.name[PAM_NAME_SIZE - 1] = '\0';
+            _header().slot_count++;  // Увеличиваем счётчик ТОЛЬКО именованных.
+        }
+        else
+        {
+            sd.name[0] = '\0';
+        }
+
         return offset;
     }
 };
