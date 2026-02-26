@@ -3,36 +3,37 @@
 #include <cstring>
 #include <algorithm>
 
-// pstring — a persistent string.
+// pstring — персистная строка.
 //
-// The string header (pstring_data) is trivially copyable and can be stored
-// via persist<pstring_data>. Character data is stored in AddressManager<char>
-// via an fptr<char> slot index.
+// Заголовок строки (pstring_data) тривиально копируем и может быть сохранён
+// через persist<pstring_data>. Символьные данные хранятся в ПАП через fptr<char>.
 //
-// Design constraints:
-//   - pstring_data is trivially copyable (no virtual, no non-trivial ctor/dtor).
-//   - Characters are stored as a char array in AddressManager<char>.
-//   - The NUL terminator is always written as the last character.
-//   - An empty / null pstring has chars.addr() == 0 and length == 0.
+// Ограничения:
+//   - pstring_data тривиально копируема (без виртуальных функций, без нетривиальных
+//     конструкторов/деструкторов).
+//   - Символы хранятся в ПАП через AddressManager<char>.
+//   - Нулевой терминатор всегда записывается последним символом.
+//   - Пустая/нулевая pstring имеет chars.addr() == 0 и length == 0.
 //
-// Usage:
+// Использование:
 //   pstring_data sd{};
 //   pstring ps(sd);
 //   ps.assign("hello");
-//   // sd.chars.addr() now holds the slot index; sd.length == 5
-//   // On next run, load sd from persist<pstring_data> and wrap it again.
+//   // sd.chars.addr() содержит смещение в ПАП; sd.length == 5
+//   // При следующем запуске загрузите sd из persist<pstring_data> и оберните снова.
 
+/// Заголовок персистной строки (тривиально копируем).
 struct pstring_data
 {
-    unsigned   length;   // number of characters (not counting NUL terminator)
-    fptr<char> chars;    // slot index in AddressManager<char>; 0 = null/empty
+    unsigned   length;   ///< Число символов (без учёта нулевого терминатора)
+    fptr<char> chars;    ///< Смещение в ПАП для массива символов; 0 = пусто
 };
 
 static_assert(std::is_trivially_copyable<pstring_data>::value,
-              "pstring_data must be trivially copyable for use with persist<T>");
+              "pstring_data должна быть тривиально копируемой для использования с persist<T>");
 
-// pstring is a thin non-owning wrapper around a pstring_data reference.
-// The caller owns pstring_data (typically via persist<pstring_data>).
+// pstring — тонкая не-владеющая обёртка над ссылкой pstring_data.
+// Владелец pstring_data — вызывающий код (как правило, persist<pstring_data>).
 class pstring
 {
     pstring_data& _d;
@@ -40,8 +41,8 @@ class pstring
 public:
     explicit pstring(pstring_data& data) : _d(data) {}
 
-    // assign: store a C-string value.
-    // Frees the previous character array if any, then allocates a new one.
+    // assign: сохранить C-строку в ПАП.
+    // Освобождает предыдущий массив символов (если есть), затем выделяет новый.
     void assign(const char* s)
     {
         if( _d.chars.addr() != 0 )
@@ -55,14 +56,14 @@ public:
         }
         unsigned len = static_cast<unsigned>(std::strlen(s));
         _d.length = len;
-        // Allocate len+1 chars (includes NUL terminator).
+        // Выделяем len+1 символов (включая нулевой терминатор).
         _d.chars.NewArray(len + 1);
         for( unsigned i = 0; i <= len; i++ )
             _d.chars[i] = s[i];
     }
 
-    // c_str: return a raw pointer to the character data.
-    // Valid as long as AddressManager<char> is alive and the slot is not freed.
+    // c_str: вернуть raw-указатель на символьные данные.
+    // Действителен, пока AddressManager<char> жив и слот не освобождён.
     const char* c_str() const
     {
         if( _d.chars.addr() == 0 ) return "";
@@ -72,7 +73,7 @@ public:
     unsigned size() const { return _d.length; }
     bool     empty() const { return _d.length == 0; }
 
-    // clear: free character data and reset to empty.
+    // clear: освободить символьные данные и обнулить длину.
     void clear()
     {
         if( _d.chars.addr() != 0 )
@@ -82,8 +83,8 @@ public:
         _d.length = 0;
     }
 
-    // operator[]: access character at index (no bounds check).
-    char& operator[](unsigned idx) { return _d.chars[idx]; }
+    // operator[]: доступ к символу по индексу (без проверки границ).
+    char& operator[](unsigned idx)       { return _d.chars[idx]; }
     const char& operator[](unsigned idx) const { return _d.chars[idx]; }
 
     bool operator==(const char* s) const
