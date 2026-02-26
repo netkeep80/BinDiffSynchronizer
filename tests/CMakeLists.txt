@@ -35,12 +35,20 @@ set(TEST_SOURCES
     # Task 3.3 — Instantiate nlohmann::basic_json<> with persistent classes
     test_persistent_string_extended.cpp
     test_persist_json.cpp
+    # Task 3.3.4 — Final persistent_json with persistent_map_adapter / persistent_array_adapter
+    test_persist_json_final.cpp
     # Task 3.5 — Integration tests
     test_phase3_integration.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
 target_link_libraries(tests PRIVATE bindiff Catch2::Catch2WithMain)
+
+# Provide the path to tests/test.json as a compile-time definition so that
+# test_persist_json_final.cpp can find it regardless of the working directory.
+target_compile_definitions(tests PRIVATE
+    TEST_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test.json"
+)
 
 include(CTest)
 include(Catch)
