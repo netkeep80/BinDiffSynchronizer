@@ -179,65 +179,6 @@ public:
 };
 
 /*
-template <class _T>
-class Buffer
-{
-public:
-	typedef Buffer<_T> Buffer_T;
-	Buffer() { Allocated = Used = 0; Ptr = NULL; };
-	~Buffer() { if( Allocated ) delete[] Ptr; };
-
-	unsigned		Push( _T Item )
-	{
-		if( Used >= Allocated ) Resize( Allocated + 1 );
-		Ptr[Used] = Item;
-		return Used++;
-	};
-
-	_T*			Next()
-	{
-		if( Used >= Allocated ) Resize( Allocated + 1 );
-		_T*	NextPtr = &Ptr[Used++];
-		return	NextPtr;
-	};
-
-	_T*			Last() { return (Used > 0 ? &Ptr[Used-1] : NULL); };
-	_T*			GetPtr() { return Ptr; };
-	unsigned	Size() const { return Used; };
-	void		Clear() { Used = 0; };
-	inline _T&	operator[]( unsigned pos ) { return Ptr[pos]; };
-
-private:
-	unsigned	Allocated;
-	unsigned	Used;
-	_T*			Ptr;
-
-	void		Resize( unsigned size )
-	{
-		unsigned	oldSize = Allocated;
-		_T*			oldPtr = Ptr;
-
-		if( Allocated < 32 ) Allocated = 32;
-		while( Allocated < size ) Allocated += Allocated >> 2;
-		Ptr = new _T[Allocated];
-
-		if( !Ptr )
-		{
-			Ptr = oldPtr;
-			Allocated = oldSize;
-			throw( "Not enough memory!" );
-		}
-
-		if( oldSize )
-		{
-			memcpy( Ptr, oldPtr, Used * sizeof(_T) );
-			delete[] oldPtr;
-		}
-	};
-};
-*/
-
-/*
 
 для того что бы обеспечить наследование и полиморфизм персистных объектов
 необходимо сделать единое адресное пространство для всех используемых объектов.
