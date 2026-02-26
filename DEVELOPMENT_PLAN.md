@@ -135,6 +135,8 @@ struct pmap_entry {
 
 #### 2.4 `pallocator<T>` — Persistent STL Allocator
 
+- **Status**: Implemented, bug fixed, and tested.
+
 An STL-compatible allocator backed by `AddressManager<T>`. Allows passing persistent containers to standard library algorithms.
 
 **Design**:
@@ -147,6 +149,10 @@ public:
     void deallocate(T* p, std::size_t n);
 };
 ```
+
+**Bug fixed**: `deallocate()` was accessing `AddressManager<T>::__itable` directly, which is a private member. Fixed by adding a public static `FindByPtr(_T* p)` method to `AddressManager` that encapsulates the reverse-lookup from raw pointer to slot index.
+
+**Tests**: `tests/test_pallocator.cpp` — type aliases, rebind, construct/destroy, allocate/deallocate, `std::vector` integration, no-alias, nullptr safety.
 
 **Limitation**: Standard STL containers (`std::basic_string`, `std::vector`, `std::map`) require allocators that return raw pointers into a flat, uniform address space. Since `AddressManager` uses slot indices (not raw pointers), direct use of `pallocator` with `std::basic_json` is not possible without translating slot indices to pointers. This is handled at the `pjson` level (see Phase 2).
 
@@ -203,16 +209,16 @@ CMakeLists.txt will:
 
 ## Milestones
 
-| Milestone | Deliverable |
-|-----------|-------------|
-| M1 | `CMakeLists.txt`, CI passing for `main.cpp` |
-| M2 | Unit tests for core infrastructure (`persist`, `AddressManager`, `fptr`, `Cache`, `MemoryDevice`) passing |
-| M3 | `pstring` implemented and tested |
-| M4 | `pvector<T>` implemented and tested |
-| M5 | `pmap<K, V>` implemented and tested |
-| M6 | `pallocator<T>` implemented and tested |
-| M7 | `pjson` design decision and prototype |
-| M8 | Updated `readme.md` and merged PR |
+| Milestone | Deliverable | Status |
+|-----------|-------------|--------|
+| M1 | `CMakeLists.txt`, CI passing for `main.cpp` | ✅ Done |
+| M2 | Unit tests for core infrastructure (`persist`, `AddressManager`, `fptr`, `Cache`, `MemoryDevice`) passing | ✅ Done |
+| M3 | `pstring` implemented and tested | ✅ Done |
+| M4 | `pvector<T>` implemented and tested | ✅ Done |
+| M5 | `pmap<K, V>` implemented and tested | ✅ Done |
+| M6 | `pallocator<T>` implemented and tested | ✅ Done |
+| M7 | `pjson` design decision and prototype | ⬜ Next |
+| M8 | Updated `readme.md` and merged PR | ⬜ Pending |
 
 ---
 
@@ -222,21 +228,20 @@ CMakeLists.txt will:
 BinDiffSynchronizer.h     — unchanged
 PageDevice.h              — unchanged (previously fixed bugs documented)
 StaticPageDevice.h        — unchanged
-persist.h                 — unchanged (previously fixed bugs documented)
-pstring.h                 — NEW: persistent string
-pvector.h                 — NEW: persistent vector
-pmap.h                    — NEW: persistent map
-pallocator.h              — NEW: persistent STL allocator
-CMakeLists.txt            — NEW: build system
+persist.h                 — UPDATED: added FindByPtr() to AddressManager
+pstring.h                 — persistent string
+pvector.h                 — persistent vector
+pmap.h                    — persistent map
+pallocator.h              — UPDATED: fixed deallocate() to use FindByPtr()
+CMakeLists.txt            — build system
 tests/
-  test_persist.cpp        — NEW
-  test_address_manager.cpp — NEW
-  test_fptr.cpp           — NEW
-  test_pstring.cpp        — NEW
-  test_pvector.cpp        — NEW
-  test_pmap.cpp           — NEW
+  test_persist.cpp        — tests for persist<T>, AddressManager<T>, fptr<T>
+  test_pstring.cpp        — tests for pstring
+  test_pvector.cpp        — tests for pvector<T>
+  test_pmap.cpp           — tests for pmap<K,V>
+  test_pallocator.cpp     — NEW: tests for pallocator<T>
 readme.md                 — UPDATED: persistent infrastructure description
-DEVELOPMENT_PLAN.md       — NEW: this document
+DEVELOPMENT_PLAN.md       — UPDATED: milestones and status
 ```
 
 ---

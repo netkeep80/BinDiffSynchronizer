@@ -552,6 +552,19 @@ public:
 
         return 0;
     }
+
+    // FindByPtr(): scan the slot table for a slot whose in-memory pointer equals p.
+    // Returns the slot index (≥ 1) if found, 0 otherwise.
+    // Used by pallocator<T>::deallocate() to reverse-lookup a slot from a raw pointer.
+    static unsigned FindByPtr( const _T* p )
+    {
+        if( p == nullptr ) return 0;
+        auto& mgr = AddressManager<_T, AddressSpace>::GetManager();
+        for( unsigned i = 1; i < AddressSpace; i++ )
+            if( mgr.__itable[i].__used && mgr.__itable[i].__ptr == p )
+                return i;
+        return 0;
+    }
 };
 
 // реестр фабрик классов

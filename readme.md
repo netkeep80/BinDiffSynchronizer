@@ -143,6 +143,14 @@ A persistent key-value map backed by a sorted `pvector<pmap_entry<K, V>>`. Suppo
 
 An STL-compatible allocator backed by `AddressManager<T>`. Enables passing persistent containers to standard library algorithms.
 
+```cpp
+std::vector<int, pallocator<int>> v;
+v.push_back(42);
+// memory lives in AddressManager<int>; slot index must be persisted separately
+```
+
+**Constraint**: `T` must be trivially copyable (enforced by `AddressManager<T>`).
+
 ---
 
 ### Design Principles
