@@ -47,14 +47,15 @@ static json pjson_to_nlohmann(const pjson& src)
     case pjson_type::object:
     {
         json obj = json::object();
-        // Итерируемся по парам объекта через внутренний слот.
+        // Итерируемся по парам объекта через data.addr() (pvector-совместимая раскладка).
         uintptr_t sz = src.size();
-        uintptr_t pairs_slot = src.payload.object_val.pairs_slot;
+        uintptr_t data_addr = src.payload.object_val.data.addr();
         for( uintptr_t i = 0; i < sz; i++ )
         {
             const pjson_kv_entry& pair =
-                AddressManager<pjson_kv_entry>::GetArrayElement(pairs_slot, i);
-            const char* key = (pair.key_chars.addr() != 0) ? &pair.key_chars[0] : "";
+                AddressManager<pjson_kv_entry>::GetArrayElement(data_addr, i);
+            // Используем pstring::c_str() для получения ключа.
+            const char* key = pair.key.c_str();
             obj[key] = pjson_to_nlohmann(pair.value);
         }
         return obj;

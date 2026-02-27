@@ -85,19 +85,11 @@ static void print_pjson(const fptr<pjson>& fpj, int indent)
         for( uintptr_t i = 0; i < sz; i++ )
         {
             print_indent(indent + 1);
-            // Получаем временный fptr для вывода элемента массива
-            fptr<pjson> elem;
-            elem.set_addr(j.payload.array_val.data_slot);
-            // Обращаемся напрямую к PersistentAddressSpace для получения элемента
+            // Обращаемся к элементам массива через data.addr() (pvector-совместимая раскладка).
             pjson* ep = PersistentAddressSpace::Get().Resolve<pjson>(
-                j.payload.array_val.data_slot) + i;
+                j.payload.array_val.data.addr()) + i;
             if( ep )
             {
-                fptr<pjson> fe;
-                fe.set_addr(static_cast<uintptr_t>(
-                    reinterpret_cast<char*>(ep) -
-                    reinterpret_cast<char*>(PersistentAddressSpace::Get().Resolve<char>(0) + 0)
-                ));
                 // Вывод непосредственно через указатель
                 switch( ep->type_tag() )
                 {
@@ -123,14 +115,14 @@ static void print_pjson(const fptr<pjson>& fpj, int indent)
         uintptr_t sz = j.size();
         for( uintptr_t i = 0; i < sz; i++ )
         {
+            // Обращаемся к парам объекта через data.addr() (pvector-совместимая раскладка).
             pjson_kv_entry* pair = PersistentAddressSpace::Get().Resolve<pjson_kv_entry>(
-                j.payload.object_val.pairs_slot) + i;
+                j.payload.object_val.data.addr()) + i;
             if( pair )
             {
                 print_indent(indent + 1);
-                // Выводим ключ
-                const char* key = (pair->key_chars.addr() != 0)
-                    ? &(pair->key_chars[0]) : "";
+                // Выводим ключ через pstring::c_str().
+                const char* key = pair->key.c_str();
                 std::printf("\"%s\": ", key);
                 // Выводим значение
                 switch( pair->value.type_tag() )
