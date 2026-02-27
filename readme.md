@@ -12,7 +12,7 @@
 
 ---
 
-## Архитектура (фаза 3)
+## Архитектура (фаза 5)
 
 ### Требования
 
@@ -47,6 +47,45 @@
 | `pjson_data.payload` | `string_val.length`, `string_val.chars_slot` | `unsigned` | `uintptr_t` |
 | `pjson_data.payload` | `array_val.size`, `array_val.data_slot` | `unsigned` | `uintptr_t` |
 | `pjson_data.payload` | `object_val.size`, `object_val.pairs_slot` | `unsigned` | `uintptr_t` |
+
+### Изменения Phase 5 (таблица имён, issue #58)
+
+#### Таблица имён (name_registry)
+
+В Phase 4 имена объектов хранились непосредственно в `slot_descriptor` как `char name[64]`.
+При N аллоцированных объектах (включая безымянные) каждый слот занимал лишние 64 байта.
+
+В Phase 5 введена отдельная динамическая таблица имён (`name_info_entry[]`), где имя
+объекта хранится **один раз** и только для **именованных** объектов. В `slot_descriptor`
+поле `char name[PAM_NAME_SIZE]` (64 байта) заменено на `uintptr_t name_idx` (8 байт) —
+индекс в таблицу имён (`PAM_INVALID_IDX` для безымянных). Экономия: **64 байта на каждый
+безымянный слот** и **56 байт на каждый именованный слот**.
+
+**Двусторонняя связь «имя ↔ слот»**:
+- `name_info_entry.slot_idx` → индекс в `slot_descriptor` (поиск объекта по имени)
+- `slot_descriptor.name_idx` → индекс в `name_info_entry` (получение имени по слоту)
+
+**Уникальность имён**: ПАМ гарантирует, что каждое непустое имя встречается не более
+одного раза. Попытка создать объект с уже существующим именем возвращает 0 (ошибка).
+
+| Структура | Поля до (Phase 4) | Поля после (Phase 5) |
+|-----------|-------------------|----------------------|
+| `slot_descriptor` | `offset`, `count`, `type_idx`, `char name[64]` | `offset`, `count`, `type_idx`, `name_idx` |
+| `name_info_entry` | *(новая)* | `used`, `slot_idx`, `name[64]` |
+| `pam_header` | `magic`, `version`, `data_area_size`, `slot_count/cap`, `type_count/cap` | + `name_count`, `name_capacity` |
+
+**Формат файла ПАМ (фаза 5, версия 4):**
+```
+[pam_header]                  — заголовок (добавлены name_count, name_capacity)
+[type_info_entry * type_cap]  — таблица типов (один раз на уникальный тип)
+[name_info_entry * name_cap]  — таблица имён (один раз на каждое имя + ссылка на слот)
+[slot_descriptor * cap]       — таблица слотов (name_idx вместо char name[64])
+[байты объектов]              — область данных
+```
+
+Новый метод `GetName(offset)` возвращает имя объекта по его смещению через таблицу имён.
+
+---
 
 ### Изменения Phase 4 (code review `pam.h`, issue #58)
 
@@ -110,15 +149,18 @@
 
 Реализует единое ПАП через класс `PersistentAddressSpace`.
 
-Структура файла ПАМ (расширение .pam, версия 3, фаза 4):
+Структура файла ПАМ (расширение .pam, версия 4, фаза 5):
 ```
 [pam_header]                  — заголовок (магия, версия, размер области данных,
                                 число именованных слотов, ёмкость слотов,
-                                число типов, ёмкость таблицы типов)
+                                число типов, ёмкость таблицы типов,
+                                число имён, ёмкость таблицы имён)
 [type_info_entry * type_cap]  — таблица типов (имя и размер элемента — по одной
                                 записи на каждый уникальный тип)
+[name_info_entry * name_cap]  — таблица имён (имя объекта и ссылка на слот — по
+                                одной записи на каждое именованное объект)
 [slot_descriptor * cap]       — динамическая таблица дескрипторов объектов
-                                (type_idx вместо char type_id[64])
+                                (name_idx вместо char name[64])
 [байты объектов]              — область данных (непрерывный байтовый пул)
 ```
 
@@ -137,14 +179,18 @@ uintptr_t found = pam.Find("счётчик");
 // Получение размера элемента через таблицу типов (фаза 4)
 uintptr_t elem_size = pam.GetElemSize(off);  // == sizeof(int)
 
+// Получение имени объекта по смещению (фаза 5, двусторонняя связь)
+const char* name = pam.GetName(off);  // == "счётчик"
+
 // Сохранение ПАП
 pam.Save();
 ```
 
 **Ключевые типы:**
 - `type_info_entry` — запись таблицы типов (имя типа + размер элемента, хранится один раз)
-- `slot_descriptor` — дескриптор объекта (смещение, число элементов, индекс типа, имя)
-- `pam_header` — заголовок файла ПАМ (фаза 4: добавлены поля `type_count`, `type_capacity`)
+- `name_info_entry` — запись таблицы имён (имя объекта + обратная ссылка на слот; уникальность)
+- `slot_descriptor` — дескриптор объекта (смещение, число элементов, индекс типа, индекс имени)
+- `pam_header` — заголовок файла ПАМ (фаза 5: добавлены поля `name_count`, `name_capacity`)
 
 ---
 
@@ -300,7 +346,7 @@ ctest --test-dir build --output-on-failure
 
 ```
 tests/
-  test_pam.cpp          — тесты PersistentAddressSpace (ПАМ), включая таблицу типов (фаза 4)
+  test_pam.cpp          — тесты PersistentAddressSpace (ПАМ), таблица типов (фаза 4), таблица имён (фаза 5)
   test_pam_dynamic.cpp  — тесты динамичности ПАМ: массовое создание именованных объектов
   test_persist.cpp      — тесты persist<T>, fptr<T>, AddressManager<T>
   test_pstring.cpp      — тесты pstring

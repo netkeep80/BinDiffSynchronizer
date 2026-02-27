@@ -1050,3 +1050,137 @@ tests/
 readme.md           — ОБНОВЛЁН: описание Phase 4
 DEVELOPMENT_PLAN.md — ОБНОВЛЁН: план Phase 4
 ```
+
+---
+
+# Фаза 5 — Таблица имён объектов (задача #58)
+
+## Обзор
+
+По запросу владельца репозитория (комментарий к PR #59): имена объектов должны быть
+вынесены в отдельную структуру `name_info_entry` с двусторонней связью со слотом,
+обеспечивающей поиск по имени и получение имени по слоту. Таблица имён динамическая
+(аналогично таблицам слотов и типов). Уникальность имён гарантируется ПАМ.
+
+---
+
+## Анализ проблем (задача #58, продолжение)
+
+### Проблема 1: Дублирование памяти на имена в безымянных слотах
+
+В Phase 4 структура `slot_descriptor` содержала `char name[PAM_NAME_SIZE]` (64 байта)
+в КАЖДОМ слоте — включая безымянные. При создании N безымянных объектов каждый слот
+тратит 64 байта на поле имени, которое всегда пусто.
+
+### Проблема 2: Нет уникальности имён
+
+В Phase 4 можно было создать два объекта с одинаковым именем: `Find()` вернул бы
+первый найденный. Это нарушает ожидаемую семантику именованных объектов.
+
+### Проблема 3: Нет обратной ссылки «слот → имя»
+
+В Phase 4 не было способа получить имя объекта по его смещению, не перебирая все слоты.
+
+---
+
+## Решения Phase 5
+
+### Задача 5.1: Структура `name_info_entry`
+
+**Файл**: `pam.h`
+
+**Новая структура** `name_info_entry`:
+```cpp
+struct name_info_entry
+{
+    bool      used;                 ///< Запись занята
+    uintptr_t slot_idx;             ///< Индекс слота в таблице slot_descriptor
+    char      name[PAM_NAME_SIZE];  ///< Имя объекта (уникально среди занятых записей)
+};
+```
+
+### Задача 5.2: Изменения в `slot_descriptor`
+
+- Удалено поле: `char name[PAM_NAME_SIZE]` (64 байта).
+- Добавлено поле: `uintptr_t name_idx` (8 байт) — индекс в таблицу имён;
+  `PAM_INVALID_IDX` (= `uintptr_t(-1)`) для безымянных объектов.
+
+### Задача 5.3: Изменения в `pam_header`
+
+- Добавлены поля: `unsigned name_count`, `unsigned name_capacity`.
+- Версия формата: `PAM_VERSION = 4u`.
+
+### Задача 5.4: Изменения в `PersistentAddressSpace`
+
+- Добавлены поля: `name_info_entry* _names`, `unsigned _name_capacity`.
+- Добавлена константа `PAM_INITIAL_NAME_CAPACITY = 16u`.
+- Добавлен метод `_register_name(name, slot_idx)` — регистрирует имя, проверяет
+  уникальность, возвращает индекс или `PAM_INVALID_IDX`.
+- Добавлен публичный метод `GetName(offset)` — возвращает имя объекта по смещению
+  через двустороннюю связь `slot_descriptor.name_idx → name_info_entry.name`.
+- Обновлён `_alloc()`: вместо записи имени в слот — вызов `_register_name()`;
+  при конфликте имён слот откатывается и возвращается 0.
+- Обновлён `Delete()`: освобождает запись в таблице имён при удалении именованного объекта.
+- Обновлён `Find()`: поиск через таблицу имён (`name_info_entry → slot_idx → offset`).
+- Обновлён `FindTyped()`: аналогично `Find()`, с дополнительной проверкой типа.
+- Обновлены `Save()`, `_load()`, `_init_empty()` для поддержки таблицы имён.
+
+**Формат файла ПАМ (версия 4)**:
+```
+[pam_header]                  — заголовок (добавлены name_count, name_capacity)
+[type_info_entry * type_cap]  — таблица типов
+[name_info_entry * name_cap]  — таблица имён (новая секция)
+[slot_descriptor * slot_cap]  — таблица слотов (name_idx вместо char name[64])
+[байты объектов]              — область данных
+```
+
+---
+
+## Тесты Phase 5 (добавлены в `tests/test_pam.cpp`)
+
+| Тест | Проверяемое поведение |
+|------|----------------------|
+| `name_info_entry: is trivially copyable` | `name_info_entry` тривиально копируем |
+| `GetName returns object name by offset` | Двусторонняя связь slot → name; безымянный → nullptr |
+| `duplicate name returns 0 (name uniqueness)` | Уникальность: дубликат возвращает 0; после Delete имя освобождается |
+| `Find uses name table for lookup` | Find через таблицу имён; после Delete имя недоступно |
+| `Delete frees name table entry` | Delete освобождает name_info_entry; имя можно использовать снова |
+| `Save and Init -- name registry is restored` | Таблица имён восстанавливается после перезагрузки |
+| `multiple named objects have independent name entries` | N объектов — N независимых записей; Find и GetName верны для каждого |
+
+---
+
+## Стратегия реализации
+
+| Этап | Задача | Зависимости |
+|------|--------|-------------|
+| Этап A | 5.1: `name_info_entry`, обновление `slot_descriptor`, `pam_header` | нет |
+| Этап B | 5.2: обновление `PersistentAddressSpace` | Этап A |
+| Этап C | 5.3: тесты Phase 5 | Этапы A–B |
+| Этап D | регрессия: все тесты проходят | Этап C |
+
+---
+
+## Вехи Phase 5
+
+| Веха | Результат | Статус |
+|------|-----------|--------|
+| M31 | `name_info_entry` определён, `slot_descriptor` обновлён (`name_idx` вместо `char name[64]`) | ✅ Выполнено |
+| M32 | `pam_header` обновлён (`name_count`, `name_capacity`), `PAM_VERSION = 4` | ✅ Выполнено |
+| M33 | `PersistentAddressSpace` обновлён: таблица имён, `GetName`, уникальность, двусторонняя связь | ✅ Выполнено |
+| M34 | 7 новых тестов в `test_pam.cpp`, все тесты проходят | ✅ Выполнено |
+| M35 | Обновлены `readme.md` и `DEVELOPMENT_PLAN.md` | ✅ Выполнено |
+
+---
+
+## Инвентаризация файлов после Phase 5
+
+```
+pam.h               — ОБНОВЛЁН: name_info_entry, slot_descriptor (name_idx),
+                      pam_header (name_count/capacity), PAM_VERSION=4,
+                      PersistentAddressSpace (таблица имён, GetName, уникальность)
+tests/
+  test_pam.cpp      — ОБНОВЛЁН: 7 новых тестов для таблицы имён (Phase 5)
+readme.md           — ОБНОВЛЁН: описание Phase 5
+DEVELOPMENT_PLAN.md — ОБНОВЛЁН: план Phase 5
+```

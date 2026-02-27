@@ -464,3 +464,187 @@ TEST_CASE("PersistentAddressSpace: Save and Init -- type registry is restored",
 
     rm_file(fname);
 }
+
+// ---------------------------------------------------------------------------
+// name_info_entry — тривиально копируемый (задача #58, фаза 5)
+// ---------------------------------------------------------------------------
+TEST_CASE("name_info_entry: is trivially copyable", "[pam][layout][name_registry]")
+{
+    REQUIRE(std::is_trivially_copyable<name_info_entry>::value);
+}
+
+// ---------------------------------------------------------------------------
+// Таблица имён: GetName возвращает имя объекта по смещению (двусторонняя связь)
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: GetName returns object name by offset",
+          "[pam][name_registry]")
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    const char* name = "pam_name_reg_get_name";
+    uintptr_t offset = pam.Create<int>(name);
+    REQUIRE(offset != 0u);
+
+    // GetName должен вернуть то же имя (двусторонняя связь slot → name).
+    const char* retrieved = pam.GetName(offset);
+    REQUIRE(retrieved != nullptr);
+    REQUIRE(std::strcmp(retrieved, name) == 0);
+
+    // Для безымянного объекта GetName должен вернуть nullptr.
+    uintptr_t anon_offset = pam.Create<int>();
+    REQUIRE(anon_offset != 0u);
+    REQUIRE(pam.GetName(anon_offset) == nullptr);
+
+    pam.Delete(offset);
+    pam.Delete(anon_offset);
+}
+
+// ---------------------------------------------------------------------------
+// Таблица имён: уникальность имён — создание дубликата возвращает 0
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: duplicate name returns 0 (name uniqueness)",
+          "[pam][name_registry][unique]")
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    const char* name = "pam_name_unique_test";
+    uintptr_t off1 = pam.Create<int>(name);
+    REQUIRE(off1 != 0u);
+
+    // Попытка создать второй объект с тем же именем должна вернуть 0.
+    uintptr_t off2 = pam.Create<int>(name);
+    REQUIRE(off2 == 0u);
+
+    // После удаления первого — имя освобождается.
+    pam.Delete(off1);
+
+    // Теперь можно создать с тем же именем снова.
+    uintptr_t off3 = pam.Create<int>(name);
+    REQUIRE(off3 != 0u);
+
+    pam.Delete(off3);
+}
+
+// ---------------------------------------------------------------------------
+// Таблица имён: Find использует таблицу имён (двусторонняя связь name → slot)
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: Find uses name table for lookup",
+          "[pam][name_registry]")
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    const char* name = "pam_name_reg_find_test";
+    uintptr_t offset = pam.Create<double>(name);
+    REQUIRE(offset != 0u);
+
+    // Find через таблицу имён: name_info_entry.slot_idx → slot_descriptor.offset.
+    uintptr_t found = pam.Find(name);
+    REQUIRE(found == offset);
+
+    pam.Delete(offset);
+
+    // После удаления запись в таблице имён освобождается.
+    REQUIRE(pam.Find(name) == 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Таблица имён: Delete освобождает запись в таблице имён
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: Delete frees name table entry",
+          "[pam][name_registry][delete]")
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    const char* name = "pam_name_delete_frees_entry";
+    uintptr_t offset = pam.Create<int>(name);
+    REQUIRE(offset != 0u);
+    REQUIRE(pam.GetName(offset) != nullptr);
+    REQUIRE(pam.Find(name) == offset);
+
+    pam.Delete(offset);
+
+    // После удаления: Find не находит объект.
+    REQUIRE(pam.Find(name) == 0u);
+    // offset больше не является валидным слотом → GetName вернёт nullptr.
+    REQUIRE(pam.GetName(offset) == nullptr);
+
+    // Имя теперь свободно — можно создать снова.
+    uintptr_t off2 = pam.Create<int>(name);
+    REQUIRE(off2 != 0u);
+    pam.Delete(off2);
+}
+
+// ---------------------------------------------------------------------------
+// Таблица имён: Save и Init — таблица имён восстанавливается
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: Save and Init -- name registry is restored",
+          "[pam][name_registry][save_reload]")
+{
+    const char* fname = "./test_pam_name_registry.pam";
+    rm_file(fname);
+
+    uintptr_t saved_off = 0;
+    {
+        PersistentAddressSpace::Init(fname);
+        auto& pam = PersistentAddressSpace::Get();
+
+        saved_off = pam.Create<int>("name_reg_saved_obj");
+        REQUIRE(saved_off != 0u);
+        *pam.Resolve<int>(saved_off) = 999;
+
+        pam.Save();
+    }
+
+    // Перезагружаем ПАМ.
+    PersistentAddressSpace::Init(fname);
+    {
+        auto& pam = PersistentAddressSpace::Get();
+
+        // Find через восстановленную таблицу имён.
+        uintptr_t off = pam.Find("name_reg_saved_obj");
+        REQUIRE(off == saved_off);
+
+        // GetName через восстановленную таблицу имён (двусторонняя связь).
+        const char* name = pam.GetName(off);
+        REQUIRE(name != nullptr);
+        REQUIRE(std::strcmp(name, "name_reg_saved_obj") == 0);
+
+        // Данные восстановлены.
+        REQUIRE(*pam.Resolve<int>(off) == 999);
+
+        pam.Delete(off);
+    }
+
+    rm_file(fname);
+}
+
+// ---------------------------------------------------------------------------
+// Таблица имён: несколько объектов — разные имена, разные слоты
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: multiple named objects have independent name entries",
+          "[pam][name_registry]")
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    uintptr_t off_a = pam.Create<int>("pam_name_multi_a");
+    uintptr_t off_b = pam.Create<int>("pam_name_multi_b");
+    uintptr_t off_c = pam.Create<double>("pam_name_multi_c");
+
+    REQUIRE(off_a != 0u);
+    REQUIRE(off_b != 0u);
+    REQUIRE(off_c != 0u);
+
+    // Каждое имя ведёт к своему смещению.
+    REQUIRE(pam.Find("pam_name_multi_a") == off_a);
+    REQUIRE(pam.Find("pam_name_multi_b") == off_b);
+    REQUIRE(pam.Find("pam_name_multi_c") == off_c);
+
+    // GetName возвращает верное имя для каждого слота.
+    REQUIRE(std::strcmp(pam.GetName(off_a), "pam_name_multi_a") == 0);
+    REQUIRE(std::strcmp(pam.GetName(off_b), "pam_name_multi_b") == 0);
+    REQUIRE(std::strcmp(pam.GetName(off_c), "pam_name_multi_c") == 0);
+
+    pam.Delete(off_a);
+    pam.Delete(off_b);
+    pam.Delete(off_c);
+}
