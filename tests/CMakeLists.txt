@@ -17,6 +17,7 @@ set(TEST_SOURCES
     test_pallocator.cpp
     test_pjson.cpp
     test_pjson_large.cpp
+    test_pjson_serial.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
