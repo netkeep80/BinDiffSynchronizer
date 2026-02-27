@@ -1184,3 +1184,221 @@ tests/
 readme.md           — ОБНОВЛЁН: описание Phase 5
 DEVELOPMENT_PLAN.md — ОБНОВЛЁН: план Phase 5
 ```
+
+---
+
+# Фаза 6 — Рефакторинг pjson: использовать pstring, pvector, pmap, pallocator (issue #60)
+
+## Обзор
+
+После Phase 5 структура `pjson` хранила строки и массивы в «сырых» байтах через
+`uintptr_t chars_slot`, `uintptr_t data_slot`, `uintptr_t pairs_slot`. Такой подход
+дублировал логику `pstring` и `pvector`, затруднял сопровождение и не использовал
+возможности уже реализованных персистных контейнеров.
+
+**Цель Phase 6**: переработать `pjson.h` так, чтобы:
+- `payload.string_val` имел тип `pstring` (вместо raw-полей `length` + `chars_slot`)
+- `payload.array_val` хранил capacity и использовал pvector-совместимую раскладку
+- `payload.object_val` хранил capacity и использовал pvector-совместимую раскладку
+- `pjson_kv_entry::key` имел тип `pstring` (вместо `key_length` + `key_chars`)
+- Освобождение через `pstring::clear()` вместо ручного `DeleteArray`
+
+---
+
+## Изменения Phase 6
+
+### `pjson.h`
+
+| Поле | До (Phase 5) | После (Phase 6) |
+|------|-------------|----------------|
+| `payload.string_val` | `struct { uintptr_t length; uintptr_t chars_slot; }` | `pstring` |
+| `payload.array_val`  | `struct { uintptr_t size; uintptr_t data_slot; }` | pvector-совместимая раскладка (size + capacity + data) |
+| `payload.object_val` | `struct { uintptr_t size; uintptr_t pairs_slot; }` | pvector-совместимая раскладка (size + capacity + data) |
+| `pjson_kv_entry.key` | `uintptr_t key_length` + `fptr<char> key_chars` | `pstring key` |
+
+Ключевые изменения:
+- `string_val` теперь имеет тип `pstring`; освобождение через `pstring::clear()`
+- `array_val` и `object_val` хранят `capacity` (pvector-стратегия роста через удвоение)
+- Ключи объекта хранятся как `pstring`; сравнение через `pstring::c_str()`
+- Добавлены includes: `pvector.h`, `pmap.h`, `pallocator.h`
+
+### Ограничение раскладки
+
+`pvector<pjson>` нельзя использовать напрямую в `union payload_t`, так как `pjson`
+является неполным типом в точке определения объединения. Вместо этого используются
+structs с идентичной раскладкой (`size + capacity + data`), совместимой с `pvector<T>`.
+
+### Тесты
+
+Тест раскладки в `test_pjson.cpp` обновлён под новые имена полей:
+`array_val.capacity`, `object_val.capacity`, `string_val.chars`.
+
+В `test_pjson_large.cpp` добавлены функции преобразования:
+- `nlohmann_to_pjson_full(const json& src, uintptr_t dst_offset)` — полное преобразование
+  `nlohmann::json` → `pjson` с защитой от инвалидации указателей при realloc
+- `nlohmann_to_pjson_limited(...)` — преобразование с ограничениями глубины и числа узлов
+- `pjson_to_nlohmann(const pjson& src)` — обратное преобразование `pjson` → `nlohmann::json`
+
+Добавлен тест полного round-trip: `test.json` → `pjson` → nlohmann::json → сравнение.
+
+---
+
+## Вехи Phase 6
+
+| Веха | Результат | Статус |
+|------|-----------|--------|
+| M36 | `payload.string_val` переведён на `pstring`; `pjson_kv_entry.key` → `pstring` | ✅ Выполнено |
+| M37 | `payload.array_val` и `payload.object_val` получили поле `capacity` (pvector-раскладка) | ✅ Выполнено |
+| M38 | Методы `pjson` переведены на `pstring::clear()`, `pstring::c_str()`, `pstring::assign()` | ✅ Выполнено |
+| M39 | Добавлены includes: `pvector.h`, `pmap.h`, `pallocator.h` | ✅ Выполнено |
+| M40 | Тесты `test_pjson.cpp` обновлены под новые имена полей | ✅ Выполнено |
+| M41 | `test_pjson_large.cpp`: добавлены `nlohmann_to_pjson_full`, `pjson_to_nlohmann`, round-trip тест | ✅ Выполнено |
+| M42 | Все 130 тестов проходят после рефакторинга | ✅ Выполнено |
+| M43 | Обновлены `readme.md` и `DEVELOPMENT_PLAN.md` | ✅ Выполнено |
+
+---
+
+## Инвентаризация файлов после Phase 6
+
+```
+pjson.h             — ОБНОВЛЁН: string_val → pstring, array/object capacity,
+                      key → pstring, includes pvector.h, pmap.h, pallocator.h
+tests/
+  test_pjson.cpp    — ОБНОВЛЁН: тест раскладки под новые имена полей
+  test_pjson_large.cpp — ОБНОВЛЁН: nlohmann_to_pjson_full, pjson_to_nlohmann, round-trip
+main.cpp            — ОБНОВЛЁН: использует data.addr() и key.c_str()
+readme.md           — ОБНОВЛЁН: описание Phase 6
+DEVELOPMENT_PLAN.md — ОБНОВЛЁН: план Phase 6
+```
+
+---
+
+# Фаза 7 — Сериализация/десериализация pjson: to_string() и from_string() (issue #22)
+
+## Обзор
+
+После Phase 6 `pjson` имеет полный набор операций для работы с данными внутри ПАП,
+но не предоставляет публичного API для преобразования между `pjson` и текстом JSON.
+Функции преобразования (`nlohmann_to_pjson_full`, `pjson_to_nlohmann`) существуют
+только как файловые вспомогательные функции в `tests/test_pjson_large.cpp` и
+не доступны пользователям библиотеки.
+
+**Цель Phase 7**: добавить в `pjson.h` два публичных метода:
+- `to_string()` — сериализация `pjson` в строку JSON (с использованием `nlohmann::json`)
+- `from_string(const char*)` — десериализация строки JSON в `pjson`
+
+Эти методы завершают «цикл» данных: JSON-текст → ПАП → JSON-текст.
+
+---
+
+## Анализ
+
+### Зависимость от nlohmann::json
+
+`nlohmann::json` уже используется в тестах через `third_party/nlohmann/json.hpp`.
+Для сериализации/десериализации в `pjson.h` необходимо добавить include этого заголовка.
+Это приемлемо: `nlohmann/json.hpp` — header-only библиотека без внешних зависимостей.
+
+### Защита от realloc в from_string
+
+Как и в `nlohmann_to_pjson_full`, метод `from_string` должен работать через смещения
+ПАМ (не через сырые указатели), чтобы реаллокация буфера ПАМ не делала указатели
+недействительными. Реализация будет повторять логику `nlohmann_to_pjson_full`.
+
+---
+
+## Задачи Phase 7
+
+### Задача 7.1: Метод `pjson::to_string() const`
+
+**Файл**: `pjson.h`
+
+Сериализует `pjson` в строку JSON через конвертацию в `nlohmann::json`.
+
+```cpp
+// Сериализовать pjson в строку JSON.
+// Возвращает std::string с минимальным JSON-представлением.
+std::string to_string() const;
+```
+
+Реализация:
+- Рекурсивно обходит `pjson`, строя `nlohmann::json`.
+- Возвращает `nlohmann_json.dump()`.
+
+### Задача 7.2: Статический метод `pjson::from_string(const char* s, uintptr_t dst_offset)`
+
+**Файл**: `pjson.h`
+
+Десериализует строку JSON в существующий `pjson` по смещению в ПАМ.
+
+```cpp
+// Десериализовать строку JSON в pjson по смещению dst_offset в ПАМ.
+// Принимает смещение (не сырой указатель) для защиты от realloc.
+static void from_string(const char* s, uintptr_t dst_offset);
+```
+
+Реализация:
+- Парсит `s` через `nlohmann::json::parse()`.
+- Рекурсивно заполняет `pjson` по смещению `dst_offset`.
+
+---
+
+## Стратегия тестирования Phase 7
+
+### Новые тесты (`tests/test_pjson_serial.cpp`)
+
+| Тест | Проверяемое поведение |
+|------|----------------------|
+| `pjson: to_string для null` | `to_string()` null → `"null"` |
+| `pjson: to_string для boolean` | `to_string()` true → `"true"`, false → `"false"` |
+| `pjson: to_string для integer` | `to_string()` int → корректное число |
+| `pjson: to_string для real` | `to_string()` double → корректное число |
+| `pjson: to_string для string` | `to_string()` string → `"\"hello\""` |
+| `pjson: to_string для array` | `to_string()` array → `"[1,2,3]"` |
+| `pjson: to_string для object` | `to_string()` object → `"{\"a\":1}"` |
+| `pjson: from_string для null` | `from_string("null", off)` → null |
+| `pjson: from_string для boolean` | `from_string("true", off)` → boolean true |
+| `pjson: from_string для integer` | `from_string("42", off)` → integer 42 |
+| `pjson: from_string для string` | `from_string("\"hello\"", off)` → string "hello" |
+| `pjson: from_string для array` | `from_string("[1,2,3]", off)` → array 3 элемента |
+| `pjson: from_string для object` | `from_string("{\"a\":1}", off)` → object 1 ключ |
+| `pjson: round-trip строка-объект-строка` | `from_string → to_string` → совпадает с оригинальным `dump()` |
+| `pjson: round-trip test.json` | `from_string(test.json) → to_string` → совпадает |
+
+---
+
+## Стратегия реализации
+
+| Этап | Задача | Зависимости |
+|------|--------|-------------|
+| Этап A | 7.1: `to_string()` | нет |
+| Этап B | 7.2: `from_string()` | нет |
+| Этап C | Новые тесты `test_pjson_serial.cpp` | Этапы A, B |
+| Этап D | Регрессия: все 130 тестов проходят | Этап C |
+| Этап E | Обновление `readme.md` и `DEVELOPMENT_PLAN.md` | Этап D |
+
+---
+
+## Вехи Phase 7
+
+| Веха | Результат | Статус |
+|------|-----------|--------|
+| M44 | `pjson::to_string()` реализован в `pjson.h` | ✅ Выполнено |
+| M45 | `pjson::from_string()` реализован в `pjson.h` | ✅ Выполнено |
+| M46 | `tests/test_pjson_serial.cpp` создан с 30 тестами | ✅ Выполнено |
+| M47 | Все 160 тестов проходят (включая новые) | ✅ Выполнено |
+| M48 | Обновлены `readme.md` и `DEVELOPMENT_PLAN.md` | ✅ Выполнено |
+
+---
+
+## Инвентаризация файлов после Phase 7
+
+```
+pjson.h               — ОБНОВЛЁН: to_string(), from_string(), _to_nlohmann(),
+                        _from_nlohmann(), include nlohmann/json.hpp, include <string>
+tests/
+  test_pjson_serial.cpp — НОВЫЙ: 30 тестов to_string, from_string и round-trip
+  CMakeLists.txt      — ОБНОВЛЁН: добавлен test_pjson_serial.cpp в TEST_SOURCES
+readme.md             — ОБНОВЛЁН: описание Phase 7
+DEVELOPMENT_PLAN.md   — ОБНОВЛЁН: план Phase 6 и Phase 7
+```

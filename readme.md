@@ -12,7 +12,7 @@
 
 ---
 
-## Архитектура (фаза 5)
+## Архитектура (фаза 7)
 
 ### Требования
 
@@ -34,6 +34,22 @@
 | Тр.14 | ПАМ — персистный объект, хранит имена объектов |
 | Тр.15 | `fptr<T>` инициализируется строковым именем объекта через ПАМ |
 | Тр.16 | ПАМ хранит карту объектов и их имена |
+
+### Изменения Phase 7 (сериализация pjson, issue #22)
+
+Добавлены методы сериализации/десериализации в `pjson.h`:
+
+| Метод | Описание |
+|-------|----------|
+| `std::string to_string() const` | Сериализация `pjson` → строка JSON (через nlohmann::json) |
+| `static void from_string(const char* s, uintptr_t dst_offset)` | Десериализация строки JSON → `pjson` по смещению в ПАМ |
+
+Метод `from_string` принимает смещение в ПАМ (не сырой указатель) для защиты от
+инвалидации указателей при реаллокации буфера ПАМ.
+
+Методы реализованы через внутренние вспомогательные функции:
+- `_to_nlohmann()` — рекурсивная конвертация `pjson` → `nlohmann::json`
+- `_from_nlohmann(src, dst_offset)` — рекурсивная конвертация `nlohmann::json` → `pjson`
 
 ### Изменения Phase 6 (рефакторинг pjson, issue #60)
 
@@ -342,8 +358,20 @@ fv->obj_insert("возраст").set_int(30);
 pjson* name = fv->obj_find("имя");
 std::cout << name->get_string() << "\n";  // Alice
 
+// Сериализация в строку JSON (фаза 7)
+std::string json_str = fv->to_string();
+// {"возраст":30,"имя":"Alice"}
+
 fv->free();
 fv.Delete();
+
+// Десериализация из строки JSON (фаза 7)
+fptr<pjson> fv2;
+fv2.New();
+pjson::from_string("{\"x\":1,\"arr\":[1,2,3]}", fv2.addr());
+std::cout << fv2->to_string() << "\n";  // {"arr":[1,2,3],"x":1}
+fv2->free();
+fv2.Delete();
 ```
 
 ---
@@ -375,14 +403,16 @@ ctest --test-dir build --output-on-failure
 
 ```
 tests/
-  test_pam.cpp          — тесты PersistentAddressSpace (ПАМ), таблица типов (фаза 4), таблица имён (фаза 5)
-  test_pam_dynamic.cpp  — тесты динамичности ПАМ: массовое создание именованных объектов
-  test_persist.cpp      — тесты persist<T>, fptr<T>, AddressManager<T>
-  test_pstring.cpp      — тесты pstring
-  test_pvector.cpp      — тесты pvector<T>
-  test_pmap.cpp         — тесты pmap<K,V>
-  test_pallocator.cpp   — тесты pallocator<T>
-  test_pjson.cpp        — тесты pjson
+  test_pam.cpp           — тесты PersistentAddressSpace (ПАМ), таблица типов (фаза 4), таблица имён (фаза 5)
+  test_pam_dynamic.cpp   — тесты динамичности ПАМ: массовое создание именованных объектов
+  test_persist.cpp       — тесты persist<T>, fptr<T>, AddressManager<T>
+  test_pstring.cpp       — тесты pstring
+  test_pvector.cpp       — тесты pvector<T>
+  test_pmap.cpp          — тесты pmap<K,V>
+  test_pallocator.cpp    — тесты pallocator<T>
+  test_pjson.cpp         — тесты pjson
+  test_pjson_large.cpp   — тесты загрузки большого JSON (round-trip через nlohmann)
+  test_pjson_serial.cpp  — тесты to_string() и from_string() (фаза 7)
 ```
 
 Тестовый фреймворк: [Catch2 v3](https://github.com/catchorg/Catch2).

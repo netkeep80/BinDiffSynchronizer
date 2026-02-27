@@ -17,20 +17,17 @@ set(TEST_SOURCES
     test_pallocator.cpp
     test_pjson.cpp
     test_pjson_large.cpp
+    test_pjson_serial.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
 target_link_libraries(tests PRIVATE bindiff Catch2::Catch2WithMain)
 
-# Путь к большому тестовому JSON-файлу (абсолютный путь из источников)
+# Path to the large test JSON file (absolute path from sources)
 target_compile_definitions(tests PRIVATE
     TEST_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test.json"
 )
 
 include(CTest)
 include(Catch)
-# DISCOVERY_MODE PRE_TEST — обнаружение тестов при запуске, а не при конфигурации CMake.
-# Это нужно для корректной обработки кириллических имён тестов на Windows/MSVC:
-# без этого флага CMake кодирует имена при конфигурации в системной кодировке (CP1251),
-# а при запуске Catch2 использует UTF-8, что вызывает несовпадение фильтров.
-catch_discover_tests(tests DISCOVERY_MODE PRE_TEST)
+catch_discover_tests(tests)

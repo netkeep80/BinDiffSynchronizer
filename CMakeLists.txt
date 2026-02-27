@@ -15,7 +15,6 @@ target_include_directories(bindiff INTERFACE
 
 # Compiler warnings
 if(MSVC)
-    # /utf-8 — кодировка исходников и исполнения UTF-8 (для кириллицы в именах тестов)
     target_compile_options(bindiff INTERFACE /W4 /utf-8)
 else()
     target_compile_options(bindiff INTERFACE -Wall -Wextra -Wpedantic)
