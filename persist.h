@@ -40,7 +40,7 @@
 
 template <class _T> class persist;
 template <class _T> class fptr;
-template<class _T> class AddressManager;
+template <class _T> class AddressManager;
 
 // ---------------------------------------------------------------------------
 // persist<T> — обёртка для тривиально копируемого типа T.
@@ -57,43 +57,36 @@ template<class _T> class AddressManager;
 // запрещено: конструктор по умолчанию является private (Тр.11).
 // Создание объектов — только через PersistentAddressSpace::Create<T>().
 // ---------------------------------------------------------------------------
-template <class _T>
-class persist
+template <class _T> class persist
 {
-    static_assert(std::is_trivially_copyable<_T>::value,
-                  "persist<T> требует, чтобы T был тривиально копируемым");
+    static_assert( std::is_trivially_copyable<_T>::value, "persist<T> требует, чтобы T был тривиально копируемым" );
 
     // Размер persist<T> == sizeof(T) (Тр.8)
-    unsigned char _data[sizeof(_T)];
+    unsigned char _data[sizeof( _T )];
 
-public:
+  public:
     // Получение ссылки на хранимое значение.
     typedef _T& _Tref;
     typedef _T* _Tptr;
 
-    operator _Tref()       { return *reinterpret_cast<_T*>(_data); }
-    operator _Tref() const { return *reinterpret_cast<const _T*>(_data); }
-    _T* operator&()        { return reinterpret_cast<_T*>(_data); }
-    _Tref operator=(const _T& ref)
-    {
-        return (*reinterpret_cast<_T*>(_data)) = ref;
-    }
+    operator _Tref() { return *reinterpret_cast<_T*>( _data ); }
+    operator _Tref() const { return *reinterpret_cast<const _T*>( _data ); }
+    _T*   operator&() { return reinterpret_cast<_T*>( _data ); }
+    _Tref operator=( const _T& ref ) { return ( *reinterpret_cast<_T*>( _data ) ) = ref; }
 
-private:
+  private:
     // Создание persist<T> на стеке или как статической переменной запрещено.
     // Используйте PersistentAddressSpace::Create<persist<T>>() (Тр.11).
     persist() = default;
 
     // Разрешаем доступ к приватному конструктору только для фабричных методов.
-    template<class U> friend class AddressManager;
+    template <class U> friend class AddressManager;
     friend class PersistentAddressSpace;
 };
 
 // Проверяем требование Тр.8.
-static_assert(sizeof(persist<int>) == sizeof(int),
-              "sizeof(persist<T>) должен быть равен sizeof(T) (Тр.8)");
-static_assert(sizeof(persist<double>) == sizeof(double),
-              "sizeof(persist<T>) должен быть равен sizeof(T) (Тр.8)");
+static_assert( sizeof( persist<int> ) == sizeof( int ), "sizeof(persist<T>) должен быть равен sizeof(T) (Тр.8)" );
+static_assert( sizeof( persist<double> ) == sizeof( double ), "sizeof(persist<T>) должен быть равен sizeof(T) (Тр.8)" );
 
 // ---------------------------------------------------------------------------
 // fptr<T> — персистный указатель (хранит смещение в образе ПАП).
@@ -105,8 +98,7 @@ static_assert(sizeof(persist<double>) == sizeof(double),
 //   Тр.13 — может находиться как в обычной, так и в персистной памяти
 //   Тр.15 — метод find(name) для инициализации по имени объекта через ПАМ
 // ---------------------------------------------------------------------------
-template <class _T>
-class fptr
+template <class _T> class fptr
 {
     typedef _T& _Tref;
     typedef _T* _Tptr;
@@ -115,24 +107,23 @@ class fptr
     /// Размер == sizeof(void*) на целевой платформе (Тр.5).
     uintptr_t __addr;
 
-public:
+  public:
     /// Конструктор по умолчанию — нулевой указатель.
-    inline fptr() : __addr(0) {}
+    inline fptr() : __addr( 0 ) {}
 
     /**
      * Конструктор с инициализацией по строковому имени объекта в ПАМ (Тр.15).
      * Автоматически выполняет поиск по слотам ПАМ при создании fptr.
      * @param name Строковое имя объекта (не имя файла).
      */
-    inline explicit fptr(const char* name) : __addr(0)
+    inline explicit fptr( const char* name ) : __addr( 0 )
     {
-        if( name != nullptr && name[0] != '\0' )
-            __addr = static_cast<uintptr_t>(
-                PersistentAddressSpace::Get().FindTyped<_T>(name));
+        if ( name != nullptr && name[0] != '\0' )
+            __addr = static_cast<uintptr_t>( PersistentAddressSpace::Get().FindTyped<_T>( name ) );
     }
 
     /// Конструктор копирования.
-    inline fptr(const fptr<_T>&) = default;
+    inline fptr( const fptr<_T>& ) = default;
 
     /// Деструктор — ничего не делает (не освобождает ресурсы).
     inline ~fptr() = default;
@@ -145,10 +136,9 @@ public:
      * Найти объект по имени в ПАМ и установить указатель.
      * @param name Строковое имя объекта (не имя файла).
      */
-    void find(const char* name)
+    void find( const char* name )
     {
-        __addr = static_cast<uintptr_t>(
-            PersistentAddressSpace::Get().FindTyped<_T>(name));
+        __addr = static_cast<uintptr_t>( PersistentAddressSpace::Get().FindTyped<_T>( name ) );
     }
 
     // -----------------------------------------------------------------------
@@ -156,41 +146,20 @@ public:
     // -----------------------------------------------------------------------
 
     /// Разыменование — возвращает указатель на объект в ПАП.
-    inline operator _Tptr()
-    {
-        return PersistentAddressSpace::Get().Resolve<_T>(__addr);
-    }
-    inline operator _Tptr() const
-    {
-        return PersistentAddressSpace::Get().Resolve<_T>(__addr);
-    }
+    inline operator _Tptr() { return PersistentAddressSpace::Get().Resolve<_T>( __addr ); }
+    inline operator _Tptr() const { return PersistentAddressSpace::Get().Resolve<_T>( __addr ); }
 
-    inline _T& operator*()
-    {
-        return *PersistentAddressSpace::Get().Resolve<_T>(__addr);
-    }
-    inline const _T& operator*() const
-    {
-        return *PersistentAddressSpace::Get().Resolve<_T>(__addr);
-    }
+    inline _T&       operator*() { return *PersistentAddressSpace::Get().Resolve<_T>( __addr ); }
+    inline const _T& operator*() const { return *PersistentAddressSpace::Get().Resolve<_T>( __addr ); }
 
-    inline _T* operator->()
-    {
-        return PersistentAddressSpace::Get().Resolve<_T>(__addr);
-    }
-    inline const _T* operator->() const
-    {
-        return PersistentAddressSpace::Get().Resolve<_T>(__addr);
-    }
+    inline _T*       operator->() { return PersistentAddressSpace::Get().Resolve<_T>( __addr ); }
+    inline const _T* operator->() const { return PersistentAddressSpace::Get().Resolve<_T>( __addr ); }
 
     /// Доступ к элементу массива по индексу.
-    inline _T& operator[](unsigned idx)
+    inline _T& operator[]( unsigned idx ) { return PersistentAddressSpace::Get().ResolveElement<_T>( __addr, idx ); }
+    inline const _T& operator[]( unsigned idx ) const
     {
-        return PersistentAddressSpace::Get().ResolveElement<_T>(__addr, idx);
-    }
-    inline const _T& operator[](unsigned idx) const
-    {
-        return PersistentAddressSpace::Get().ResolveElement<_T>(__addr, idx);
+        return PersistentAddressSpace::Get().ResolveElement<_T>( __addr, idx );
     }
 
     // -----------------------------------------------------------------------
@@ -201,10 +170,9 @@ public:
      * Создать новый объект типа T в ПАП.
      * @param name Необязательное имя объекта.
      */
-    void New(const char* name = nullptr)
+    void New( const char* name = nullptr )
     {
-        __addr = static_cast<uintptr_t>(
-            PersistentAddressSpace::Get().Create<_T>(name));
+        __addr = static_cast<uintptr_t>( PersistentAddressSpace::Get().Create<_T>( name ) );
     }
 
     /**
@@ -212,10 +180,9 @@ public:
      * @param count Число элементов.
      * @param name  Необязательное имя массива.
      */
-    void NewArray(unsigned count, const char* name = nullptr)
+    void NewArray( unsigned count, const char* name = nullptr )
     {
-        __addr = static_cast<uintptr_t>(
-            PersistentAddressSpace::Get().CreateArray<_T>(count, name));
+        __addr = static_cast<uintptr_t>( PersistentAddressSpace::Get().CreateArray<_T>( count, name ) );
     }
 
     /**
@@ -224,7 +191,7 @@ public:
      */
     void Delete()
     {
-        PersistentAddressSpace::Get().Delete(__addr);
+        PersistentAddressSpace::Get().Delete( __addr );
         __addr = 0;
     }
 
@@ -233,7 +200,7 @@ public:
      */
     void DeleteArray()
     {
-        PersistentAddressSpace::Get().Delete(__addr);
+        PersistentAddressSpace::Get().Delete( __addr );
         __addr = 0;
     }
 
@@ -245,25 +212,24 @@ public:
     uintptr_t addr() const { return __addr; }
 
     /// Установить смещение объекта в ПАП вручную.
-    void set_addr(uintptr_t a) { __addr = a; }
+    void set_addr( uintptr_t a ) { __addr = a; }
 
     /// Получить число элементов массива (через ПАМ).
     uintptr_t count() const
     {
-        if( __addr == 0 ) return 0;
-        return PersistentAddressSpace::Get().GetCount(__addr);
+        if ( __addr == 0 )
+            return 0;
+        return PersistentAddressSpace::Get().GetCount( __addr );
     }
 
     /// Сравнение с nullptr.
-    bool operator==(std::nullptr_t) const { return __addr == 0; }
-    bool operator!=(std::nullptr_t) const { return __addr != 0; }
+    bool operator==( std::nullptr_t ) const { return __addr == 0; }
+    bool operator!=( std::nullptr_t ) const { return __addr != 0; }
 };
 
 // Проверяем требование Тр.5.
-static_assert(sizeof(fptr<int>) == sizeof(void*),
-              "sizeof(fptr<T>) должен быть равен sizeof(void*) (Тр.5)");
-static_assert(sizeof(fptr<double>) == sizeof(void*),
-              "sizeof(fptr<T>) должен быть равен sizeof(void*) (Тр.5)");
+static_assert( sizeof( fptr<int> ) == sizeof( void* ), "sizeof(fptr<T>) должен быть равен sizeof(void*) (Тр.5)" );
+static_assert( sizeof( fptr<double> ) == sizeof( void* ), "sizeof(fptr<T>) должен быть равен sizeof(void*) (Тр.5)" );
 
 // ---------------------------------------------------------------------------
 // AddressManager<T> — тонкий адаптер над PersistentAddressSpace.
@@ -278,14 +244,13 @@ static_assert(sizeof(fptr<double>) == sizeof(void*),
 //
 // Смещение 0 означает null/недопустимый адрес (fptr<T>::addr() == 0 — null).
 // ---------------------------------------------------------------------------
-template<class _T>
-class AddressManager
+template <class _T> class AddressManager
 {
     friend class persist<_T>;
     friend class fptr<_T>;
 
-public:
-    AddressManager() = default;
+  public:
+    AddressManager()  = default;
     ~AddressManager() = default;
 
     // -----------------------------------------------------------------------
@@ -297,10 +262,7 @@ public:
      * @param name Имя объекта (C-строка, может быть nullptr).
      * @return Смещение объекта в ПАП (ненулевое), или 0 при ошибке.
      */
-    static uintptr_t Create(const char* name)
-    {
-        return PersistentAddressSpace::Get().Create<_T>(name);
-    }
+    static uintptr_t Create( const char* name ) { return PersistentAddressSpace::Get().Create<_T>( name ); }
 
     /**
      * Создать массив из count объектов типа T в ПАП.
@@ -308,9 +270,9 @@ public:
      * @param name  Имя массива (может быть nullptr).
      * @return Смещение первого элемента, или 0 при ошибке.
      */
-    static uintptr_t CreateArray(unsigned count, const char* name)
+    static uintptr_t CreateArray( unsigned count, const char* name )
     {
-        return PersistentAddressSpace::Get().CreateArray<_T>(count, name);
+        return PersistentAddressSpace::Get().CreateArray<_T>( count, name );
     }
 
     // -----------------------------------------------------------------------
@@ -321,18 +283,12 @@ public:
      * Освободить слот именованного объекта по смещению.
      * Для безымянных объектов — no-op.
      */
-    static void Delete(uintptr_t offset)
-    {
-        PersistentAddressSpace::Get().Delete(offset);
-    }
+    static void Delete( uintptr_t offset ) { PersistentAddressSpace::Get().Delete( offset ); }
 
     /**
      * Освободить массив по смещению (синоним Delete).
      */
-    static void DeleteArray(uintptr_t offset)
-    {
-        PersistentAddressSpace::Get().Delete(offset);
-    }
+    static void DeleteArray( uintptr_t offset ) { PersistentAddressSpace::Get().Delete( offset ); }
 
     // -----------------------------------------------------------------------
     // Поиск
@@ -342,19 +298,15 @@ public:
      * Найти именованный объект по имени.
      * @return Смещение или 0.
      */
-    static uintptr_t Find(const char* name)
-    {
-        return PersistentAddressSpace::Get().Find(name);
-    }
+    static uintptr_t Find( const char* name ) { return PersistentAddressSpace::Get().Find( name ); }
 
     /**
      * Найти именованный слот по raw-указателю (обратный поиск).
      * @return Смещение или 0.
      */
-    static uintptr_t FindByPtr(const _T* p)
+    static uintptr_t FindByPtr( const _T* p )
     {
-        return PersistentAddressSpace::Get().FindByPtr(
-            static_cast<const void*>(p));
+        return PersistentAddressSpace::Get().FindByPtr( static_cast<const void*>( p ) );
     }
 
     // -----------------------------------------------------------------------
@@ -364,26 +316,20 @@ public:
     /**
      * Получить счётчик элементов массива по смещению (только для именованных).
      */
-    static uintptr_t GetCount(uintptr_t offset)
-    {
-        return PersistentAddressSpace::Get().GetCount(offset);
-    }
+    static uintptr_t GetCount( uintptr_t offset ) { return PersistentAddressSpace::Get().GetCount( offset ); }
 
     /**
      * Получить ссылку на элемент массива по смещению и индексу.
      */
-    static _T& GetArrayElement(uintptr_t offset, uintptr_t elem)
+    static _T& GetArrayElement( uintptr_t offset, uintptr_t elem )
     {
-        return PersistentAddressSpace::Get().ResolveElement<_T>(offset, elem);
+        return PersistentAddressSpace::Get().ResolveElement<_T>( offset, elem );
     }
 
     /**
      * Получить ссылку на объект (одиночный) по смещению.
      */
-    static _T& GetObject(uintptr_t offset)
-    {
-        return *PersistentAddressSpace::Get().Resolve<_T>(offset);
-    }
+    static _T& GetObject( uintptr_t offset ) { return *PersistentAddressSpace::Get().Resolve<_T>( offset ); }
 
     /**
      * Получить экземпляр менеджера (для совместимости с фазой 1).
@@ -397,10 +343,7 @@ public:
     /**
      * Оператор [] для доступа к объекту по смещению (совместимость).
      */
-    _T& operator[](uintptr_t offset)
-    {
-        return *PersistentAddressSpace::Get().Resolve<_T>(offset);
-    }
+    _T& operator[]( uintptr_t offset ) { return *PersistentAddressSpace::Get().Resolve<_T>( offset ); }
 };
 
 // ---------------------------------------------------------------------------
