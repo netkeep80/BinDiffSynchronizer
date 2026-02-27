@@ -186,9 +186,13 @@ struct pjson_kv_entry
     pjson   value;  ///< Значение (pjson)
 };
 
-// Проверяем, что pvector<pjson_kv_entry> имеет ожидаемую раскладку.
-static_assert(sizeof(pvector<pjson_kv_entry>) == 3 * sizeof(void*),
-              "pvector<pjson_kv_entry> должна занимать 3 * sizeof(void*) байт");
+// Проверяем, что раскладка pvector совместима с object_layout (3 * sizeof(void*)).
+// Используем pvector<int> (тривиально копируемый тип) вместо pvector<pjson_kv_entry>,
+// так как pjson_kv_entry содержит pstring с приватным деструктором и не является
+// тривиально копируемым — что запрещено статическим ассертом pvector<T>.
+// Размер pvector<T> одинаков для всех T (size_ + capacity_ + fptr<T>).
+static_assert(sizeof(pvector<int>) == 3 * sizeof(void*),
+              "pvector<T> должна занимать 3 * sizeof(void*) байт");
 
 // ---------------------------------------------------------------------------
 // Определения методов pjson (inline) — после полного определения pjson_kv_entry
