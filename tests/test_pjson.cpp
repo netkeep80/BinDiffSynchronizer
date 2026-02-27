@@ -10,19 +10,27 @@
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// Layout: pjson payload fields are uintptr_t (Phase 3)
+// Layout: pjson payload uses pstring and pvector-compatible layout
 // ---------------------------------------------------------------------------
-TEST_CASE("pjson: payload slot fields are uintptr_t (Phase 3)",
-          "[pjson][layout][phase3]")
+TEST_CASE("pjson: payload uses pstring for string_val and pvector-compatible layout for array/object",
+          "[pjson][layout]")
 {
-    // Все поля slot/size в payload должны иметь размер sizeof(void*)
-    // для согласованности с Phase 2 PAM API.
-    REQUIRE(sizeof(pjson::payload_t::string_val.chars_slot) == sizeof(void*));
+    // string_val — тип pstring (length + chars), оба поля sizeof(void*).
+    REQUIRE(sizeof(pjson::payload_t::string_val) == 2 * sizeof(void*));
     REQUIRE(sizeof(pjson::payload_t::string_val.length) == sizeof(void*));
-    REQUIRE(sizeof(pjson::payload_t::array_val.data_slot) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::string_val.chars) == sizeof(void*));
+
+    // array_val — раскладка pvector<pjson> (size + capacity + data), 3 * sizeof(void*).
+    REQUIRE(sizeof(pjson::payload_t::array_val) == 3 * sizeof(void*));
     REQUIRE(sizeof(pjson::payload_t::array_val.size) == sizeof(void*));
-    REQUIRE(sizeof(pjson::payload_t::object_val.pairs_slot) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::array_val.capacity) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::array_val.data) == sizeof(void*));
+
+    // object_val — раскладка pvector<pjson_kv_entry> (size + capacity + data), 3 * sizeof(void*).
+    REQUIRE(sizeof(pjson::payload_t::object_val) == 3 * sizeof(void*));
     REQUIRE(sizeof(pjson::payload_t::object_val.size) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::object_val.capacity) == sizeof(void*));
+    REQUIRE(sizeof(pjson::payload_t::object_val.data) == sizeof(void*));
 }
 
 // ---------------------------------------------------------------------------

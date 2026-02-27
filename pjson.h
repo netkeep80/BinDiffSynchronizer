@@ -1,5 +1,8 @@
 #pragma once
 #include "pstring.h"
+#include "pvector.h"
+#include "pmap.h"
+#include "pallocator.h"
 #include <cstring>
 #include <cstdint>
 #include <type_traits>
@@ -13,10 +16,18 @@
 //   - Конструктор и деструктор приватные; создание только через ПАМ (Тр.2, Тр.11).
 //   - При загрузке образа ПАП конструкторы не вызываются (Тр.10).
 //
-// Дизайн: Пользовательская персистная дискриминантная структура,
-// построенная напрямую на fptr<T>, с ключами в виде C-строк в ПАП.
+// Дизайн: Персистная дискриминантная структура, использующая:
+//   - pstring для строковых значений (поле string_val в payload_t)
+//   - pvector<pjson> для массивов (поле array_val, совместимая раскладка)
+//   - pvector<pjson_kv_entry> для объектов (поле object_val, совместимая раскладка)
+//   - pstring для ключей объекта (поле pjson_kv_entry::key)
+//   - pallocator<T> для совместимости с STL-аллокаторами
 //
-// Phase 3: поля chars_slot, data_slot, pairs_slot имеют тип uintptr_t.
+// Раскладка payload_t:
+//   pstring занимает 2 * sizeof(void*) (length + chars).
+//   pvector<T> занимает 3 * sizeof(void*) (size + capacity + data).
+//   array_val и object_val имеют совместимую с pvector раскладку (3 поля).
+//   Поэтому sizeof(payload_t) >= 3 * sizeof(void*).
 
 // ---------------------------------------------------------------------------
 // pjson_type — тег-дискриминант типа значения
@@ -43,6 +54,10 @@ struct pjson_kv_entry;
 // ---------------------------------------------------------------------------
 // pjson — персистная дискриминантная структура JSON-значения.
 // Живёт только в ПАП, доступ через fptr<pjson>.
+//
+// payload_t::string_val — тип pstring (length + chars, 2 * sizeof(void*)).
+// payload_t::array_val  — раскладка pvector<pjson> (size + capacity + data, 3 * sizeof(void*)).
+// payload_t::object_val — раскладка pvector<pjson_kv_entry> (size + capacity + data).
 // ---------------------------------------------------------------------------
 struct pjson
 {
@@ -55,15 +70,26 @@ struct pjson
         uint64_t    uint_val;
         double      real_val;
 
-        // Для строки: длина строки и смещение в ПАП для массива символов.
-        // Phase 3: оба поля имеют тип uintptr_t для корректного хранения смещений ПАМ.
-        struct { uintptr_t length; uintptr_t chars_slot; } string_val;
+        // Для строки: pstring (length + chars).
+        // Раскладка идентична pstring: { uintptr_t length; fptr<char> chars; }.
+        pstring string_val;
 
-        // Для массива: размер и смещение в ПАП для массива pjson.
-        struct { uintptr_t size; uintptr_t data_slot; } array_val;
+        // Для массива: раскладка совместима с pvector<pjson>.
+        // Используется struct вместо pvector<pjson> напрямую, так как pjson
+        // является неполным типом в точке определения union.
+        // В методах array_val приводится к pvector<pjson>& через reinterpret_cast.
+        struct array_layout {
+            uintptr_t   size;      ///< Текущее число элементов (pvector::size_)
+            uintptr_t   capacity;  ///< Выделенная ёмкость (pvector::capacity_)
+            fptr<pjson> data;      ///< Смещение массива в ПАП (pvector::data_)
+        } array_val;
 
-        // Для объекта: размер и смещение в ПАП для массива pjson_kv_entry.
-        struct { uintptr_t size; uintptr_t pairs_slot; } object_val;
+        // Для объекта: раскладка совместима с pvector<pjson_kv_entry>.
+        struct object_layout {
+            uintptr_t            size;      ///< Текущее число пар (pvector::size_)
+            uintptr_t            capacity;  ///< Выделенная ёмкость (pvector::capacity_)
+            fptr<pjson_kv_entry> data;      ///< Смещение массива пар в ПАП (pvector::data_)
+        } object_val;
     } payload;
 
     // ----- Запросы типа ---------------------------------------------------
@@ -85,7 +111,7 @@ struct pjson
         if( type == pjson_type::object )
             return payload.object_val.size;
         if( type == pjson_type::string )
-            return payload.string_val.length;
+            return payload.string_val.size();
         return 0;
     }
 
@@ -96,11 +122,10 @@ struct pjson
     uint64_t get_uint() const { return payload.uint_val; }
     double   get_real() const { return payload.real_val; }
 
+    // get_string: вернуть raw-указатель на строковые данные через pstring::c_str().
     const char* get_string() const
     {
-        if( payload.string_val.chars_slot == 0 ) return "";
-        return &AddressManager<char>::GetArrayElement(
-                    payload.string_val.chars_slot, 0);
+        return payload.string_val.c_str();
     }
 
     // Методы, требующие полного определения pjson_kv_entry,
@@ -141,93 +166,96 @@ private:
     uintptr_t _obj_lower_bound( const char* s ) const;
 };
 
-// Phase 3: проверяем размеры полей payload.
-static_assert(sizeof(pjson::payload_t::string_val.chars_slot) == sizeof(void*),
-              "pjson::payload.string_val.chars_slot должен иметь размер void* (Phase 3)");
-static_assert(sizeof(pjson::payload_t::array_val.data_slot) == sizeof(void*),
-              "pjson::payload.array_val.data_slot должен иметь размер void* (Phase 3)");
-static_assert(sizeof(pjson::payload_t::object_val.pairs_slot) == sizeof(void*),
-              "pjson::payload.object_val.pairs_slot должен иметь размер void* (Phase 3)");
+// Проверяем размеры раскладки payload.
+static_assert(sizeof(pstring) == 2 * sizeof(void*),
+              "pstring должна занимать 2 * sizeof(void*) байт");
+static_assert(sizeof(pjson::payload_t::array_layout) == 3 * sizeof(void*),
+              "pjson::payload_t::array_layout должна занимать 3 * sizeof(void*) байт");
+static_assert(sizeof(pjson::payload_t::object_layout) == 3 * sizeof(void*),
+              "pjson::payload_t::object_layout должна занимать 3 * sizeof(void*) байт");
 
 // ---------------------------------------------------------------------------
 // pjson_kv_entry — одна пара (строка-ключ, pjson-значение).
 // Определяется ПОСЛЕ pjson, чтобы можно было встроить pjson как поле.
-// Используется как тип элемента отсортированного массива в объектах pjson.
+// Ключ хранится как pstring (length + chars в ПАП).
+// Используется как тип элемента отсортированного pvector в объектах pjson.
 // ---------------------------------------------------------------------------
 struct pjson_kv_entry
 {
-    uintptr_t  key_length;  ///< Длина строки-ключа (без нулевого терминатора)
-    fptr<char> key_chars;   ///< Смещение в ПАП для массива символов ключа; 0 = пусто
-    pjson      value;       ///< Значение (pjson)
+    pstring key;    ///< Ключ (pstring: length + chars в ПАП)
+    pjson   value;  ///< Значение (pjson)
 };
+
+// Проверяем, что pvector<pjson_kv_entry> имеет ожидаемую раскладку.
+static_assert(sizeof(pvector<pjson_kv_entry>) == 3 * sizeof(void*),
+              "pvector<pjson_kv_entry> должна занимать 3 * sizeof(void*) байт");
 
 // ---------------------------------------------------------------------------
 // Определения методов pjson (inline) — после полного определения pjson_kv_entry
 // ---------------------------------------------------------------------------
 
+// Вспомогательный метод: освободить все ресурсы pjson рекурсивно.
 inline void pjson::_free_impl()
 {
     switch( type )
     {
     case pjson_type::string:
-        if( payload.string_val.chars_slot != 0 )
-        {
-            fptr<char> tmp;
-            tmp.set_addr( payload.string_val.chars_slot );
-            tmp.DeleteArray();
-            payload.string_val.chars_slot = 0;
-            payload.string_val.length = 0;
-        }
+        // Используем pstring::clear() для освобождения символьных данных.
+        payload.string_val.clear();
         break;
 
     case pjson_type::array:
-        if( payload.array_val.data_slot != 0 )
+    {
+        // Рекурсивно освобождаем каждый элемент массива.
+        uintptr_t sz = payload.array_val.size;
+        uintptr_t data_addr = payload.array_val.data.addr();
+        if( data_addr != 0 )
         {
-            // Рекурсивно освобождаем каждый элемент.
-            uintptr_t sz = payload.array_val.size;
             for( uintptr_t i = 0; i < sz; i++ )
             {
-                pjson& elem =
-                    AddressManager<pjson>::GetArrayElement(
-                        payload.array_val.data_slot, i );
+                pjson& elem = AddressManager<pjson>::GetArrayElement(data_addr, i);
                 elem._free_impl();
             }
-            fptr<pjson> tmp;
-            tmp.set_addr( payload.array_val.data_slot );
-            tmp.DeleteArray();
-            payload.array_val.data_slot = 0;
-            payload.array_val.size = 0;
+            // Освобождаем буфер массива через fptr::DeleteArray().
+            payload.array_val.data.DeleteArray();
         }
+        payload.array_val.size     = 0;
+        payload.array_val.capacity = 0;
         break;
+    }
 
     case pjson_type::object:
-        if( payload.object_val.pairs_slot != 0 )
+    {
+        // Рекурсивно освобождаем пары ключ-значение.
+        uintptr_t sz = payload.object_val.size;
+        uintptr_t data_addr = payload.object_val.data.addr();
+        if( data_addr != 0 )
         {
-            uintptr_t sz = payload.object_val.size;
             for( uintptr_t i = 0; i < sz; i++ )
             {
                 pjson_kv_entry& pair =
-                    AddressManager<pjson_kv_entry>::GetArrayElement(
-                        payload.object_val.pairs_slot, i );
-                // Освобождаем строку-ключ.
-                if( pair.key_chars.addr() != 0 )
-                    pair.key_chars.DeleteArray();
+                    AddressManager<pjson_kv_entry>::GetArrayElement(data_addr, i);
+                // Используем pstring::clear() для освобождения ключа.
+                pair.key.clear();
                 // Рекурсивно освобождаем значение.
                 pair.value._free_impl();
             }
-            fptr<pjson_kv_entry> tmp;
-            tmp.set_addr( payload.object_val.pairs_slot );
-            tmp.DeleteArray();
-            payload.object_val.pairs_slot = 0;
-            payload.object_val.size = 0;
+            // Освобождаем буфер массива пар.
+            payload.object_val.data.DeleteArray();
         }
+        payload.object_val.size     = 0;
+        payload.object_val.capacity = 0;
         break;
+    }
 
     default:
         break;
     }
     type = pjson_type::null;
-    payload.uint_val = 0;
+    // Обнуляем весь payload (3 поля объектного/массивного layout).
+    payload.object_val.size     = 0;
+    payload.object_val.capacity = 0;
+    payload.object_val.data.set_addr(0);
 }
 
 inline void pjson::free() { _free_impl(); }
@@ -266,121 +294,112 @@ inline void pjson::set_string(const char* s)
 {
     _free_impl();
     type = pjson_type::string;
-    payload.string_val.chars_slot = 0;
+    // Инициализируем pstring нулями перед использованием.
     payload.string_val.length = 0;
+    payload.string_val.chars.set_addr(0);
     if( s == nullptr || s[0] == '\0' ) return;
 
-    uintptr_t len = static_cast<uintptr_t>(std::strlen(s));
-    // Сохраняем смещение `this` перед выделением памяти (возможный realloc).
-    auto& pam = PersistentAddressSpace::Get();
-    uintptr_t self_offset = pam.PtrToOffset(this);
-    fptr<char> chars;
-    chars.NewArray(static_cast<unsigned>(len + 1));  // Может вызвать realloc!
-    for( uintptr_t i = 0; i <= len; i++ )
-        chars[static_cast<unsigned>(i)] = s[i];
-    // Повторно разрешаем `this` после возможного realloc.
-    pjson* self = pam.Resolve<pjson>(self_offset);
-    self->payload.string_val.length = len;
-    self->payload.string_val.chars_slot = chars.addr();
+    // Используем pstring::assign() для сохранения строки в ПАП.
+    // pstring::assign() сам обрабатывает realloc-безопасность:
+    // сохраняет смещение this (адрес pstring в ПАМ) до выделения памяти
+    // и повторно разрешает через смещение после возможного realloc.
+    payload.string_val.assign(s);
 }
 
 inline void pjson::set_array()
 {
     _free_impl();
     type = pjson_type::array;
-    payload.array_val.size = 0;
-    payload.array_val.data_slot = 0;
+    // Инициализируем поля pvector-совместимой раскладки нулями.
+    payload.array_val.size     = 0;
+    payload.array_val.capacity = 0;
+    payload.array_val.data.set_addr(0);
 }
 
 inline void pjson::set_object()
 {
     _free_impl();
     type = pjson_type::object;
-    payload.object_val.size = 0;
-    payload.object_val.pairs_slot = 0;
+    // Инициализируем поля pvector-совместимой раскладки нулями.
+    payload.object_val.size     = 0;
+    payload.object_val.capacity = 0;
+    payload.object_val.data.set_addr(0);
 }
 
 inline pjson& pjson::push_back()
 {
-    // Сохраняем смещение `this` ДО любого выделения памяти.
-    // После realloc буфера ПАМ `this` может стать недействительным указателем.
-    // После выделения повторно разрешаем указатель через смещение.
+    // Сохраняем смещение this ДО любого выделения памяти.
+    // После realloc буфера ПАМ this может стать недействительным.
     auto& pam = PersistentAddressSpace::Get();
     uintptr_t self_offset = pam.PtrToOffset(this);
 
     uintptr_t old_size = payload.array_val.size;
     uintptr_t new_size = old_size + 1;
+    uintptr_t cap      = payload.array_val.capacity;
 
-    if( payload.array_val.data_slot == 0 )
+    if( new_size > cap )
     {
-        // Первый элемент: выделяем начальную ёмкость.
-        fptr<pjson> arr;
-        arr.NewArray(4);  // Может вызвать realloc!
-        // Повторно разрешаем `this` после возможного realloc.
-        pjson* self = pam.Resolve<pjson>(self_offset);
-        // Инициализируем все слоты нулями.
-        for( unsigned i = 0; i < 4; i++ )
-        {
-            pjson& e = arr[i];
-            e.type = pjson_type::null;
-            e.payload.uint_val = 0;
-        }
-        self->payload.array_val.data_slot = arr.addr();
-        self->payload.array_val.size = new_size;
-        return AddressManager<pjson>::GetArrayElement(
-                   self->payload.array_val.data_slot, old_size);
-    }
-    else if( new_size > AddressManager<pjson>::GetCount(
-                            payload.array_val.data_slot ) )
-    {
-        // Рост: удваиваем ёмкость.
-        uintptr_t old_cap = AddressManager<pjson>::GetCount(
-                                payload.array_val.data_slot);
-        uintptr_t new_cap = old_cap * 2;
+        // Рост: удваиваем ёмкость (pvector-стратегия).
+        uintptr_t new_cap = (cap == 0) ? 4 : cap * 2;
         if( new_cap < new_size ) new_cap = new_size;
-        uintptr_t old_data_slot = payload.array_val.data_slot;
+        uintptr_t old_data_addr = payload.array_val.data.addr();
 
         fptr<pjson> new_arr;
         new_arr.NewArray(static_cast<unsigned>(new_cap));  // Может вызвать realloc!
-        // Повторно разрешаем `this` после возможного realloc.
+        // Повторно разрешаем this после возможного realloc.
         pjson* self = pam.Resolve<pjson>(self_offset);
 
+        // Инициализируем новые слоты нулями.
         for( uintptr_t i = 0; i < new_cap; i++ )
         {
             pjson& e = new_arr[static_cast<unsigned>(i)];
             e.type = pjson_type::null;
-            e.payload.uint_val = 0;
+            e.payload.object_val.size     = 0;
+            e.payload.object_val.capacity = 0;
+            e.payload.object_val.data.set_addr(0);
         }
-        // Переносим существующие элементы (поверхностная копия — только примитивы;
-        // вложенные объекты сохраняют свои смещения в ПАП).
+
+        // Переносим существующие элементы (поверхностная копия — смещения ПАП валидны).
         for( uintptr_t i = 0; i < old_size; i++ )
             new_arr[static_cast<unsigned>(i)] =
-                AddressManager<pjson>::GetArrayElement(old_data_slot, i);
+                AddressManager<pjson>::GetArrayElement(old_data_addr, i);
 
-        fptr<pjson> old_arr;
-        old_arr.set_addr(old_data_slot);
-        old_arr.DeleteArray();
-        self->payload.array_val.data_slot = new_arr.addr();
-        self->payload.array_val.size = new_size;
+        if( old_data_addr != 0 )
+        {
+            fptr<pjson> old_arr;
+            old_arr.set_addr(old_data_addr);
+            old_arr.DeleteArray();
+        }
+
+        // Повторно разрешаем self (DeleteArray не вызывает realloc, но для единообразия).
+        self = pam.Resolve<pjson>(self_offset);
+        self->payload.array_val.data.set_addr(new_arr.addr());
+        self->payload.array_val.capacity = new_cap;
+        self->payload.array_val.size     = new_size;
         return AddressManager<pjson>::GetArrayElement(
-                   self->payload.array_val.data_slot, old_size);
+                   self->payload.array_val.data.addr(), old_size);
     }
 
+    // Ёмкость достаточна: инициализируем следующий слот нулями.
+    pjson& new_elem =
+        AddressManager<pjson>::GetArrayElement(payload.array_val.data.addr(), old_size);
+    new_elem.type = pjson_type::null;
+    new_elem.payload.object_val.size     = 0;
+    new_elem.payload.object_val.capacity = 0;
+    new_elem.payload.object_val.data.set_addr(0);
+
     payload.array_val.size = new_size;
-    return AddressManager<pjson>::GetArrayElement(
-               payload.array_val.data_slot, old_size);
+    return new_elem;
 }
 
 inline pjson& pjson::operator[](uintptr_t idx)
 {
-    return AddressManager<pjson>::GetArrayElement(
-               payload.array_val.data_slot, idx);
+    return payload.array_val.data[static_cast<unsigned>(idx)];
 }
 
 inline const pjson& pjson::operator[](uintptr_t idx) const
 {
-    return AddressManager<pjson>::GetArrayElement(
-               payload.array_val.data_slot, idx);
+    return payload.array_val.data[static_cast<unsigned>(idx)];
 }
 
 inline uintptr_t pjson::_obj_lower_bound( const char* s ) const
@@ -390,12 +409,11 @@ inline uintptr_t pjson::_obj_lower_bound( const char* s ) const
     while( lo < hi )
     {
         uintptr_t mid = (lo + hi) / 2;
-        pjson_kv_entry& pair =
+        // Используем pstring::c_str() для получения строки ключа.
+        const pjson_kv_entry& pair =
             AddressManager<pjson_kv_entry>::GetArrayElement(
-                payload.object_val.pairs_slot, mid );
-        const char* k = (pair.key_chars.addr() != 0)
-                        ? &pair.key_chars[0]
-                        : "";
+                payload.object_val.data.addr(), mid );
+        const char* k = pair.key.c_str();
         if( std::strcmp(k, s) < 0 )
             lo = mid + 1;
         else
@@ -407,87 +425,79 @@ inline uintptr_t pjson::_obj_lower_bound( const char* s ) const
 inline pjson* pjson::obj_find(const char* key)
 {
     if( type != pjson_type::object ) return nullptr;
-    if( payload.object_val.pairs_slot == 0 ) return nullptr;
+    if( payload.object_val.data.addr() == 0 ) return nullptr;
     uintptr_t idx = _obj_lower_bound(key);
     uintptr_t sz  = payload.object_val.size;
     if( idx >= sz ) return nullptr;
     pjson_kv_entry& pair =
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            payload.object_val.pairs_slot, idx);
-    const char* k = (pair.key_chars.addr() != 0) ? &pair.key_chars[0] : "";
-    if( std::strcmp(k, key) != 0 ) return nullptr;
+            payload.object_val.data.addr(), idx);
+    // Используем pstring::c_str() для сравнения ключа.
+    if( std::strcmp(pair.key.c_str(), key) != 0 ) return nullptr;
     return &pair.value;
 }
 
 inline const pjson* pjson::obj_find(const char* key) const
 {
     if( type != pjson_type::object ) return nullptr;
-    if( payload.object_val.pairs_slot == 0 ) return nullptr;
+    if( payload.object_val.data.addr() == 0 ) return nullptr;
     uintptr_t idx = _obj_lower_bound(key);
     uintptr_t sz  = payload.object_val.size;
     if( idx >= sz ) return nullptr;
     const pjson_kv_entry& pair =
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            payload.object_val.pairs_slot, idx);
-    const char* k = (pair.key_chars.addr() != 0) ? &pair.key_chars[0] : "";
-    if( std::strcmp(k, key) != 0 ) return nullptr;
+            payload.object_val.data.addr(), idx);
+    // Используем pstring::c_str() для сравнения ключа.
+    if( std::strcmp(pair.key.c_str(), key) != 0 ) return nullptr;
     return &pair.value;
 }
 
 inline void pjson::_assign_key( pjson_kv_entry& entry, const char* s )
 {
-    if( entry.key_chars.addr() != 0 )
-        entry.key_chars.DeleteArray();
-    if( s == nullptr || s[0] == '\0' )
+    // Используем pstring::assign() для установки ключа в ПАП.
+    // Сначала очищаем предыдущее значение через pstring::clear().
+    entry.key.clear();
+    if( s != nullptr && s[0] != '\0' )
     {
-        entry.key_length = 0;
-        return;
+        // pstring::assign() сам обрабатывает realloc-безопасность.
+        entry.key.assign(s);
     }
-    uintptr_t len = static_cast<uintptr_t>(std::strlen(s));
-    // Сохраняем смещение `entry` перед выделением памяти (возможный realloc).
-    auto& pam = PersistentAddressSpace::Get();
-    uintptr_t entry_offset = pam.PtrToOffset(&entry);
-    // NewArray может вызвать realloc, делая `entry` недействительным.
-    fptr<char> chars;
-    chars.NewArray(static_cast<unsigned>(len + 1));
-    for( uintptr_t i = 0; i <= len; i++ )
-        chars[static_cast<unsigned>(i)] = s[i];
-    // Повторно разрешаем `entry` после возможного realloc.
-    pjson_kv_entry* ep = pam.Resolve<pjson_kv_entry>(entry_offset);
-    ep->key_length = len;
-    ep->key_chars.set_addr(chars.addr());
 }
 
 inline pjson& pjson::obj_insert(const char* key)
 {
-    // Сохраняем смещение `this` ДО любого выделения памяти.
-    // После realloc буфера ПАМ `this` может стать недействительным указателем.
+    // Сохраняем смещение this ДО любого выделения памяти.
     auto& pam = PersistentAddressSpace::Get();
     uintptr_t self_offset = pam.PtrToOffset(this);
 
     uintptr_t sz = payload.object_val.size;
 
-    if( payload.object_val.pairs_slot == 0 )
+    if( payload.object_val.data.addr() == 0 )
     {
-        // Первая запись: выделяем начальную ёмкость — 4 пары.
+        // Первая запись: выделяем начальную ёмкость — 4 пары (pvector-стратегия).
         fptr<pjson_kv_entry> arr;
         arr.NewArray(4);  // Может вызвать realloc!
-        // Повторно разрешаем `this` после возможного realloc.
+        // Повторно разрешаем this после возможного realloc.
         pjson* self = pam.Resolve<pjson>(self_offset);
+        // Инициализируем слоты нулями.
         for( unsigned i = 0; i < 4; i++ )
         {
             pjson_kv_entry& p = arr[i];
-            p.key_length = 0;
-            p.key_chars.set_addr(0);
+            // Инициализируем pstring нулями.
+            p.key.length = 0;
+            p.key.chars.set_addr(0);
+            // Инициализируем pjson нулями.
             p.value.type = pjson_type::null;
-            p.value.payload.uint_val = 0;
+            p.value.payload.object_val.size     = 0;
+            p.value.payload.object_val.capacity = 0;
+            p.value.payload.object_val.data.set_addr(0);
         }
-        self->payload.object_val.pairs_slot = arr.addr();
-        // Обновляем локальные переменные из свежего self.
+        self->payload.object_val.data.set_addr(arr.addr());
+        self->payload.object_val.capacity = 4;
         sz = self->payload.object_val.size;
     }
 
-    // Повторно разрешаем `this` (возможно, после realloc выше).
+    // Повторно разрешаем this (возможно, после realloc выше).
     pjson* self = pam.Resolve<pjson>(self_offset);
     uintptr_t idx = self->_obj_lower_bound(key);
 
@@ -496,9 +506,9 @@ inline pjson& pjson::obj_insert(const char* key)
     {
         pjson_kv_entry& pair =
             AddressManager<pjson_kv_entry>::GetArrayElement(
-                self->payload.object_val.pairs_slot, idx);
-        const char* k = (pair.key_chars.addr() != 0) ? &pair.key_chars[0] : "";
-        if( std::strcmp(k, key) == 0 )
+                self->payload.object_val.data.addr(), idx);
+        // Используем pstring::c_str() для сравнения.
+        if( std::strcmp(pair.key.c_str(), key) == 0 )
         {
             // Ключ найден — освобождаем старое значение и возвращаем слот.
             pair.value._free_impl();
@@ -508,98 +518,108 @@ inline pjson& pjson::obj_insert(const char* key)
 
     // Вставляем новую запись в позицию idx, сдвигая вправо.
     uintptr_t new_size = sz + 1;
-    uintptr_t cap = AddressManager<pjson_kv_entry>::GetCount(
-                        self->payload.object_val.pairs_slot);
+    uintptr_t cap = self->payload.object_val.capacity;
     if( new_size > cap )
     {
-        uintptr_t new_cap = cap * 2;
+        // Рост: удваиваем ёмкость (pvector-стратегия).
+        uintptr_t new_cap = (cap == 0) ? 4 : cap * 2;
         if( new_cap < new_size ) new_cap = new_size;
-        uintptr_t old_pairs_slot = self->payload.object_val.pairs_slot;
+        uintptr_t old_data_addr = self->payload.object_val.data.addr();
+
         fptr<pjson_kv_entry> new_arr;
         new_arr.NewArray(static_cast<unsigned>(new_cap));  // Может вызвать realloc!
-        // Повторно разрешаем `this` после возможного realloc.
+        // Повторно разрешаем this после возможного realloc.
         self = pam.Resolve<pjson>(self_offset);
+
+        // Инициализируем новые слоты нулями.
         for( uintptr_t i = 0; i < new_cap; i++ )
         {
             pjson_kv_entry& p = new_arr[static_cast<unsigned>(i)];
-            p.key_length = 0;
-            p.key_chars.set_addr(0);
+            p.key.length = 0;
+            p.key.chars.set_addr(0);
             p.value.type = pjson_type::null;
-            p.value.payload.uint_val = 0;
+            p.value.payload.object_val.size     = 0;
+            p.value.payload.object_val.capacity = 0;
+            p.value.payload.object_val.data.set_addr(0);
         }
+        // Копируем существующие записи.
         for( uintptr_t i = 0; i < sz; i++ )
+        {
             new_arr[static_cast<unsigned>(i)] =
-                AddressManager<pjson_kv_entry>::GetArrayElement(
-                    old_pairs_slot, i);
+                AddressManager<pjson_kv_entry>::GetArrayElement(old_data_addr, i);
+        }
         fptr<pjson_kv_entry> old_arr;
-        old_arr.set_addr(old_pairs_slot);
+        old_arr.set_addr(old_data_addr);
         old_arr.DeleteArray();
-        self->payload.object_val.pairs_slot = new_arr.addr();
+        self->payload.object_val.data.set_addr(new_arr.addr());
+        self->payload.object_val.capacity = new_cap;
     }
 
     // Сдвигаем элементы вправо, освобождая место в позиции idx.
     for( uintptr_t i = sz; i > idx; i-- )
     {
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            self->payload.object_val.pairs_slot, i) =
+            self->payload.object_val.data.addr(), i) =
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            self->payload.object_val.pairs_slot, i - 1);
+            self->payload.object_val.data.addr(), i - 1);
     }
 
     // Записываем новую пару в позицию idx.
     {
         pjson_kv_entry& new_pair =
             AddressManager<pjson_kv_entry>::GetArrayElement(
-                self->payload.object_val.pairs_slot, idx);
+                self->payload.object_val.data.addr(), idx);
         new_pair.value.type = pjson_type::null;
-        new_pair.value.payload.uint_val = 0;
-        // Обнуляем слот ключа ДО вызова _assign_key, чтобы не освободить
-        // chars_slot, который теперь принадлежит сдвинутому соседу [idx+1].
-        new_pair.key_chars.set_addr(0);
-        new_pair.key_length = 0;
+        new_pair.value.payload.object_val.size     = 0;
+        new_pair.value.payload.object_val.capacity = 0;
+        new_pair.value.payload.object_val.data.set_addr(0);
+        // Обнуляем pstring ДО вызова _assign_key, чтобы не освободить
+        // chars, который теперь принадлежит сдвинутому соседу [idx+1].
+        new_pair.key.length = 0;
+        new_pair.key.chars.set_addr(0);
     }
-    // _assign_key может вызвать realloc: передаём ссылку, которая обновится внутри.
-    // После _assign_key re-resolve self и new_pair.
+
+    // _assign_key использует pstring::assign(), которая может вызвать realloc.
     {
-        uintptr_t pairs_slot_before = self->payload.object_val.pairs_slot;
+        uintptr_t data_addr_before = self->payload.object_val.data.addr();
         pjson_kv_entry& new_pair_ref =
-            AddressManager<pjson_kv_entry>::GetArrayElement(pairs_slot_before, idx);
+            AddressManager<pjson_kv_entry>::GetArrayElement(data_addr_before, idx);
         _assign_key(new_pair_ref, key);
     }
 
-    // После _assign_key (возможный realloc): re-resolve self.
+    // После _assign_key (возможный realloc через pstring::assign): re-resolve self.
     self = pam.Resolve<pjson>(self_offset);
     self->payload.object_val.size = new_size;
     // Re-resolve new_pair для возврата.
     return AddressManager<pjson_kv_entry>::GetArrayElement(
-               self->payload.object_val.pairs_slot, idx).value;
+               self->payload.object_val.data.addr(), idx).value;
 }
 
 inline bool pjson::obj_erase(const char* key)
 {
     if( type != pjson_type::object ) return false;
-    if( payload.object_val.pairs_slot == 0 ) return false;
+    if( payload.object_val.data.addr() == 0 ) return false;
     uintptr_t sz  = payload.object_val.size;
     uintptr_t idx = _obj_lower_bound(key);
     if( idx >= sz ) return false;
     pjson_kv_entry& pair =
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            payload.object_val.pairs_slot, idx);
-    const char* k = (pair.key_chars.addr() != 0) ? &pair.key_chars[0] : "";
-    if( std::strcmp(k, key) != 0 ) return false;
+            payload.object_val.data.addr(), idx);
+    // Используем pstring::c_str() для сравнения ключа.
+    if( std::strcmp(pair.key.c_str(), key) != 0 ) return false;
 
-    // Освобождаем ключ-строку и значение.
-    if( pair.key_chars.addr() != 0 )
-        pair.key_chars.DeleteArray();
+    // Используем pstring::clear() для освобождения ключа.
+    pair.key.clear();
+    // Рекурсивно освобождаем значение.
     pair.value._free_impl();
 
     // Сдвигаем оставшиеся элементы влево.
     for( uintptr_t i = idx; i + 1 < sz; i++ )
     {
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            payload.object_val.pairs_slot, i) =
+            payload.object_val.data.addr(), i) =
         AddressManager<pjson_kv_entry>::GetArrayElement(
-            payload.object_val.pairs_slot, i + 1);
+            payload.object_val.data.addr(), i + 1);
     }
     payload.object_val.size--;
     return true;

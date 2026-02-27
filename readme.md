@@ -35,6 +35,24 @@
 | Тр.15 | `fptr<T>` инициализируется строковым именем объекта через ПАМ |
 | Тр.16 | ПАМ хранит карту объектов и их имена |
 
+### Изменения Phase 6 (рефакторинг pjson, issue #60)
+
+`pjson` переработан для использования `pstring`, `pvector`, `pmap` и `pallocator`:
+
+| Поле | До (Phase 5) | После (Phase 6) |
+|------|-------------|----------------|
+| `payload.string_val` | `struct { uintptr_t length; uintptr_t chars_slot; }` | `pstring` |
+| `payload.array_val`  | `struct { uintptr_t size; uintptr_t data_slot; }` | pvector-совместимая раскладка (size + capacity + data) |
+| `payload.object_val` | `struct { uintptr_t size; uintptr_t pairs_slot; }` | pvector-совместимая раскладка (size + capacity + data) |
+| `pjson_kv_entry.key` | `uintptr_t key_length` + `fptr<char> key_chars` | `pstring key` |
+
+Ключевые изменения:
+- `string_val` теперь имеет тип `pstring` (идентичная раскладка, используются методы `pstring`)
+- `array_val` и `object_val` хранят поле `capacity` (pvector-стратегия роста через удвоение)
+- Ключи объекта хранятся как `pstring`, освобождение через `pstring::clear()`
+- Освобождение ресурсов использует `pstring::clear()` вместо ручного `DeleteArray`
+- `pallocator<T>` доступен для STL-совместимых контейнеров в персистном пространстве
+
 ### Изменения Phase 3
 
 Поля размера и смещений в контейнерах приведены к типу `uintptr_t` для полной совместимости
@@ -42,11 +60,11 @@
 
 | Тип | Поле | До (Phase 2) | После (Phase 3) |
 |-----|------|-------------|----------------|
-| `pstring_data` | `length` | `unsigned` | `uintptr_t` |
-| `pvector_data<T>` | `size`, `capacity` | `unsigned` | `uintptr_t` |
-| `pjson_data.payload` | `string_val.length`, `string_val.chars_slot` | `unsigned` | `uintptr_t` |
-| `pjson_data.payload` | `array_val.size`, `array_val.data_slot` | `unsigned` | `uintptr_t` |
-| `pjson_data.payload` | `object_val.size`, `object_val.pairs_slot` | `unsigned` | `uintptr_t` |
+| `pstring` | `length` | `unsigned` | `uintptr_t` |
+| `pvector<T>` | `size`, `capacity` | `unsigned` | `uintptr_t` |
+| `pjson.payload` | `string_val.length`, `string_val.chars` | `unsigned` | `uintptr_t` |
+| `pjson.payload` | `array_val.size`, `array_val.capacity`, `array_val.data` | `unsigned` | `uintptr_t` |
+| `pjson.payload` | `object_val.size`, `object_val.capacity`, `object_val.data` | `unsigned` | `uintptr_t` |
 
 ### Изменения Phase 5 (таблица имён, issue #58)
 
@@ -296,25 +314,36 @@ v.push_back(42);
 ### `pjson.h` — Персистный JSON
 
 Персистная дискриминантная структура — аналог `nlohmann::json`.
+Использует `pstring`, `pvector`, `pmap` и `pallocator` для хранения данных в ПАП.
 
 Поддерживаемые типы значений:
 - `null`, `boolean`, `integer`, `uinteger`, `real`
-- `string` — через `fptr<char>`
-- `array` — через `fptr<pjson_data>`
-- `object` — отсортированный массив `pjson_kv_pair`
+- `string` — через `pstring` (length + chars в ПАП)
+- `array` — через `pvector<pjson>`-совместимую раскладку (size + capacity + data в ПАП)
+- `object` — отсортированный `pvector<pjson_kv_entry>`, ключи хранятся как `pstring`
+
+Структура данных `pjson`:
+- `payload.string_val` — тип `pstring` (2 × `sizeof(void*)`)
+- `payload.array_val`  — pvector-совместимая раскладка (3 × `sizeof(void*)`)
+- `payload.object_val` — pvector-совместимая раскладка (3 × `sizeof(void*)`)
+
+Структура `pjson_kv_entry`:
+- `key`   — тип `pstring` (ключ как персистная строка)
+- `value` — тип `pjson` (значение)
 
 ```cpp
-pjson_data d{};
-pjson v(d);
+fptr<pjson> fv;
+fv.New();
 
-v.set_object();
-pjson(v.obj_insert("имя")).set_string("Alice");
-pjson(v.obj_insert("возраст")).set_int(30);
+fv->set_object();
+fv->obj_insert("имя").set_string("Alice");
+fv->obj_insert("возраст").set_int(30);
 
-pjson_data* name = v.obj_find("имя");
-std::cout << pjson(*name).get_string() << "\n";  // Alice
+pjson* name = fv->obj_find("имя");
+std::cout << name->get_string() << "\n";  // Alice
 
-v.free();
+fv->free();
+fv.Delete();
 ```
 
 ---
