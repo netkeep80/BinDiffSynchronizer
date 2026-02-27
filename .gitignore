@@ -2,7 +2,11 @@ main.exe
 *.extend
 *.persist
 *.pap
+*.pam
 ci-logs/
+dir-listing.txt
+issue.txt
+issue-comments.txt
 err.json
 .vscode/
 .DS_Store
