@@ -1,10 +1,10 @@
-// test_pjson_serial.cpp — Тесты сериализации/десериализации pjson (Фаза 7).
+// test_pjson_serial.cpp - Tests for pjson serialization/deserialization (Phase 7).
 //
-// Проверяет методы:
-//   pjson::to_string()     — сериализация pjson в строку JSON
-//   pjson::from_string()   — десериализация строки JSON в pjson
+// Tests methods:
+//   pjson::to_string()     - serialize pjson to JSON string
+//   pjson::from_string()   - deserialize JSON string into pjson
 //
-// Зависимости: nlohmann/json.hpp (через third_party/), Catch2
+// Dependencies: nlohmann/json.hpp (via third_party/), Catch2
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,21 +18,21 @@
 using json = nlohmann::json;
 
 // ---------------------------------------------------------------------------
-// Тесты to_string()
+// Tests for to_string()
 // ---------------------------------------------------------------------------
 
-TEST_CASE("pjson serial: to_string для null", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for null", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
-    // По умолчанию pjson = null.
+    // By default pjson = null.
     REQUIRE(fv->is_null());
     REQUIRE(fv->to_string() == "null");
     fv->free();
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для boolean true", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for boolean true", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -42,7 +42,7 @@ TEST_CASE("pjson serial: to_string для boolean true", "[pjson][serial][to_str
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для boolean false", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for boolean false", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -52,7 +52,7 @@ TEST_CASE("pjson serial: to_string для boolean false", "[pjson][serial][to_st
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для integer", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for integer", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -62,7 +62,7 @@ TEST_CASE("pjson serial: to_string для integer", "[pjson][serial][to_string]"
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для отрицательного integer", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for negative integer", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -72,33 +72,33 @@ TEST_CASE("pjson serial: to_string для отрицательного integer",
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для uinteger", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for uinteger", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
     fv->set_uint(12345678901ULL);
-    // nlohmann::json сериализует uint64_t как число без кавычек.
+    // nlohmann::json serializes uint64_t as number without quotes.
     std::string s = fv->to_string();
     REQUIRE(s == "12345678901");
     fv->free();
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для real", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for real", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
     fv->set_real(3.14);
     std::string s = fv->to_string();
-    // nlohmann::json сериализует 3.14 как "3.14".
-    // Проверяем, что строка парсируется обратно в то же значение.
+    // nlohmann::json serializes 3.14 as "3.14".
+    // Verify the string parses back to the same value.
     double v = json::parse(s).get<double>();
     REQUIRE(v == 3.14);
     fv->free();
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для string", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for string", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -108,7 +108,7 @@ TEST_CASE("pjson serial: to_string для string", "[pjson][serial][to_string]")
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для пустой строки", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for empty string", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -118,7 +118,7 @@ TEST_CASE("pjson serial: to_string для пустой строки", "[pjson][s
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для array", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for array", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -127,7 +127,7 @@ TEST_CASE("pjson serial: to_string для array", "[pjson][serial][to_string]")
     fv->push_back().set_int(2);
     fv->push_back().set_int(3);
     std::string s = fv->to_string();
-    // nlohmann::json dump() с разделителями по умолчанию (без пробелов).
+    // nlohmann::json dump() with default separators (no spaces).
     json parsed = json::parse(s);
     REQUIRE(parsed.is_array());
     REQUIRE(parsed.size() == 3u);
@@ -138,7 +138,7 @@ TEST_CASE("pjson serial: to_string для array", "[pjson][serial][to_string]")
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для пустого массива", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for empty array", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -148,7 +148,7 @@ TEST_CASE("pjson serial: to_string для пустого массива", "[pjso
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для object", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for object", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -164,7 +164,7 @@ TEST_CASE("pjson serial: to_string для object", "[pjson][serial][to_string]")
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для пустого объекта", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for empty object", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -174,7 +174,7 @@ TEST_CASE("pjson serial: to_string для пустого объекта", "[pjso
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: to_string для вложенной структуры", "[pjson][serial][to_string]")
+TEST_CASE("pjson serial: to_string for nested structure", "[pjson][serial][to_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -195,10 +195,10 @@ TEST_CASE("pjson serial: to_string для вложенной структуры"
 }
 
 // ---------------------------------------------------------------------------
-// Тесты from_string()
+// Tests for from_string()
 // ---------------------------------------------------------------------------
 
-TEST_CASE("pjson serial: from_string для null", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for null", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -208,7 +208,7 @@ TEST_CASE("pjson serial: from_string для null", "[pjson][serial][from_string]
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для boolean true", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for boolean true", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -219,7 +219,7 @@ TEST_CASE("pjson serial: from_string для boolean true", "[pjson][serial][from
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для boolean false", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for boolean false", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -230,12 +230,12 @@ TEST_CASE("pjson serial: from_string для boolean false", "[pjson][serial][fro
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для integer", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for integer", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
-    // nlohmann::json парсит неотрицательное целое как number_unsigned,
-    // поэтому ожидаем pjson_type::uinteger для "42".
+    // nlohmann::json parses non-negative integer as number_unsigned,
+    // so we expect pjson_type::uinteger for "42".
     pjson::from_string("42", fv.addr());
     REQUIRE(fv->is_uinteger());
     REQUIRE(fv->get_uint() == 42u);
@@ -243,7 +243,7 @@ TEST_CASE("pjson serial: from_string для integer", "[pjson][serial][from_stri
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для отрицательного integer", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for negative integer", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -254,7 +254,7 @@ TEST_CASE("pjson serial: from_string для отрицательного integer
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для real", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for real", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -265,7 +265,7 @@ TEST_CASE("pjson serial: from_string для real", "[pjson][serial][from_string]
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для string", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for string", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -276,7 +276,7 @@ TEST_CASE("pjson serial: from_string для string", "[pjson][serial][from_strin
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для пустой строки", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for empty string", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -287,7 +287,7 @@ TEST_CASE("pjson serial: from_string для пустой строки", "[pjson]
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для array", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for array", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -301,7 +301,7 @@ TEST_CASE("pjson serial: from_string для array", "[pjson][serial][from_string
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для пустого массива", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for empty array", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -312,7 +312,7 @@ TEST_CASE("pjson serial: from_string для пустого массива", "[pj
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для object", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for object", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -329,7 +329,7 @@ TEST_CASE("pjson serial: from_string для object", "[pjson][serial][from_strin
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string для пустого объекта", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string for empty object", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
@@ -340,24 +340,24 @@ TEST_CASE("pjson serial: from_string для пустого объекта", "[pj
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: from_string игнорирует невалидный JSON", "[pjson][serial][from_string]")
+TEST_CASE("pjson serial: from_string ignores invalid JSON", "[pjson][serial][from_string]")
 {
     fptr<pjson> fv;
     fv.New();
-    // До from_string pjson = null.
-    // При невалидном JSON ничего не должно меняться (is_discarded → return).
+    // Before from_string pjson = null.
+    // With invalid JSON nothing should change (is_discarded -> return).
     pjson::from_string("not valid json", fv.addr());
-    // Тип должен остаться null (from_string не применился).
+    // Type should remain null (from_string was not applied).
     REQUIRE(fv->is_null());
     fv->free();
     fv.Delete();
 }
 
 // ---------------------------------------------------------------------------
-// Тесты round-trip (from_string → to_string)
+// Round-trip tests (from_string -> to_string)
 // ---------------------------------------------------------------------------
 
-TEST_CASE("pjson serial: round-trip простого объекта", "[pjson][serial][roundtrip]")
+TEST_CASE("pjson serial: round-trip simple object", "[pjson][serial][roundtrip]")
 {
     const std::string original = "{\"key\":\"value\",\"num\":42}";
     json original_parsed = json::parse(original);
@@ -369,14 +369,14 @@ TEST_CASE("pjson serial: round-trip простого объекта", "[pjson][s
     std::string restored = fv->to_string();
     json restored_parsed = json::parse(restored);
 
-    // Сравниваем через dump() для нормализации порядка ключей.
+    // Compare via dump() to normalize key order.
     REQUIRE(original_parsed.dump() == restored_parsed.dump());
 
     fv->free();
     fv.Delete();
 }
 
-TEST_CASE("pjson serial: round-trip вложенной структуры", "[pjson][serial][roundtrip]")
+TEST_CASE("pjson serial: round-trip nested structure", "[pjson][serial][roundtrip]")
 {
     const std::string original = "{\"arr\":[1,true,null,\"str\"],\"obj\":{\"x\":3.14}}";
     json original_parsed = json::parse(original);
@@ -398,31 +398,31 @@ TEST_CASE("pjson serial: round-trip вложенной структуры", "[pj
 #define TEST_JSON_PATH "tests/test.json"
 #endif
 
-TEST_CASE("pjson serial: round-trip test.json через from_string и to_string",
+TEST_CASE("pjson serial: round-trip test.json via from_string and to_string",
           "[pjson][serial][roundtrip][large]")
 {
-    // Загружаем test.json как строку.
+    // Load test.json as string.
     std::ifstream fin(TEST_JSON_PATH);
     REQUIRE(fin.is_open());
     std::string json_text((std::istreambuf_iterator<char>(fin)),
                            std::istreambuf_iterator<char>());
     fin.close();
 
-    // Парсируем оригинал через nlohmann для последующего сравнения.
+    // Parse original via nlohmann for subsequent comparison.
     json original = json::parse(json_text);
 
-    // Загружаем в pjson через from_string.
+    // Load into pjson via from_string.
     fptr<pjson> fv;
     fv.New();
     pjson::from_string(json_text.c_str(), fv.addr());
 
     REQUIRE(!fv->is_null());
 
-    // Сериализуем обратно в строку.
+    // Serialize back to string.
     std::string restored_str = fv->to_string();
     json restored = json::parse(restored_str);
 
-    // Сравниваем оригинал и восстановленный JSON.
+    // Compare original and restored JSON.
     REQUIRE(original.dump() == restored.dump());
 
     fv->free();
