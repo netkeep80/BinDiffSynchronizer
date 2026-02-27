@@ -14,6 +14,7 @@ set(TEST_SOURCES
     test_pstring.cpp
     test_pvector.cpp
     test_pmap.cpp
+    test_pam_perf.cpp
     test_pallocator.cpp
     test_pjson.cpp
     test_pjson_large.cpp

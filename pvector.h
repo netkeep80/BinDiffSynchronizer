@@ -34,28 +34,47 @@ template <typename T> class pvector
     fptr<T> data_; ///< Смещение в ПАП для массива элементов; 0 = не выделено
 
     // grow: обеспечить ёмкость >= needed, при необходимости перевыделить память.
-    void grow( uintptr_t needed )
+    //
+    // Внимание: new_data.NewArray() может вызвать realloc буфера данных ПАМ,
+    // после чего указатель this становится недействительным. Сохраняем смещение
+    // this в ПАМ до вызова NewArray() и переприводим указатель к валидному после
+    // возможного перемещения буфера (аналогично pstring::assign()).
+    //
+    // Возвращает указатель на актуальный (возможно переместившийся) pvector<T>.
+    pvector<T>* grow( uintptr_t needed )
     {
         if ( needed <= capacity_ )
-            return;
+            return this;
 
         uintptr_t new_cap = ( capacity_ == 0 ) ? 4 : capacity_ * 2;
         while ( new_cap < needed )
             new_cap *= 2;
 
+        auto& pam = PersistentAddressSpace::Get();
+
+        // Запоминаем смещение data_ и собственное смещение this перед выделением памяти.
+        uintptr_t old_data_addr = data_.addr();
+        uintptr_t self_offset   = pam.PtrToOffset( this );
+
         fptr<T> new_data;
         new_data.NewArray( static_cast<unsigned>( new_cap ) );
 
-        // Копируем существующие элементы в новый буфер.
-        for ( uintptr_t i = 0; i < size_; i++ )
-            new_data[static_cast<unsigned>( i )] = data_[static_cast<unsigned>( i )];
+        // После NewArray() буфер ПАМ мог переместиться — переприводим this и data_.
+        pvector<T>* self = ( self_offset != 0 ) ? pam.Resolve<pvector<T>>( self_offset ) : this;
+
+        // Копируем существующие элементы в новый буфер (используем сохранённое смещение).
+        fptr<T> old_data;
+        old_data.set_addr( old_data_addr );
+        for ( uintptr_t i = 0; i < self->size_; i++ )
+            new_data[static_cast<unsigned>( i )] = old_data[static_cast<unsigned>( i )];
 
         // Освобождаем старый буфер.
-        if ( data_.addr() != 0 )
-            data_.DeleteArray();
+        if ( old_data_addr != 0 )
+            old_data.DeleteArray();
 
-        data_     = new_data;
-        capacity_ = new_cap;
+        self->data_     = new_data;
+        self->capacity_ = new_cap;
+        return self;
     }
 
   public:
@@ -65,9 +84,10 @@ template <typename T> class pvector
 
     void push_back( const T& val )
     {
-        grow( size_ + 1 );
-        data_[static_cast<unsigned>( size_ )] = val;
-        size_++;
+        // grow() возвращает валидный self* после возможного realloc буфера ПАМ.
+        pvector<T>* self                                  = grow( size_ + 1 );
+        self->data_[static_cast<unsigned>( self->size_ )] = val;
+        self->size_++;
     }
 
     void pop_back()

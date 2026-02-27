@@ -68,26 +68,47 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     }
 
     // grow: обеспечить ёмкость >= needed, при необходимости перевыделить память.
-    void grow( uintptr_t needed )
+    //
+    // Внимание: new_data.NewArray() может вызвать realloc буфера данных ПАМ,
+    // после чего указатель this становится недействительным. Сохраняем смещение
+    // this в ПАМ до вызова NewArray() и переприводим указатель к валидному после
+    // возможного перемещения буфера (аналогично pstring::assign()).
+    //
+    // Возвращает указатель на актуальный (возможно переместившийся) pmap<K,V>.
+    pmap<K, V>* grow( uintptr_t needed )
     {
         if ( needed <= capacity_ )
-            return;
+            return this;
 
         uintptr_t new_cap = ( capacity_ == 0 ) ? 4 : capacity_ * 2;
         while ( new_cap < needed )
             new_cap *= 2;
 
+        auto& pam = PersistentAddressSpace::Get();
+
+        // Запоминаем смещения до вызова NewArray() (возможен realloc буфера ПАМ).
+        uintptr_t old_data_addr = data_.addr();
+        uintptr_t self_offset   = pam.PtrToOffset( this );
+
         fptr<Entry> new_data;
         new_data.NewArray( static_cast<unsigned>( new_cap ) );
 
-        for ( uintptr_t i = 0; i < size_; i++ )
-            new_data[static_cast<unsigned>( i )] = data_[static_cast<unsigned>( i )];
+        // После NewArray() буфер ПАМ мог переместиться — переприводим this и data_.
+        pmap<K, V>* self = ( self_offset != 0 ) ? pam.Resolve<pmap<K, V>>( self_offset ) : this;
 
-        if ( data_.addr() != 0 )
-            data_.DeleteArray();
+        // Копируем существующие записи в новый буфер (используем сохранённое смещение).
+        fptr<Entry> old_data;
+        old_data.set_addr( old_data_addr );
+        for ( uintptr_t i = 0; i < self->size_; i++ )
+            new_data[static_cast<unsigned>( i )] = old_data[static_cast<unsigned>( i )];
 
-        data_     = new_data;
-        capacity_ = new_cap;
+        // Освобождаем старый буфер.
+        if ( old_data_addr != 0 )
+            old_data.DeleteArray();
+
+        self->data_     = new_data;
+        self->capacity_ = new_cap;
+        return self;
     }
 
   public:
@@ -96,6 +117,10 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
 
     // insert: добавить или заменить ключ k со значением v.
     // Поддерживает отсортированный порядок.
+    //
+    // Внимание: grow() может вызвать realloc буфера ПАМ, после чего this
+    // становится недействительным. grow() возвращает актуальный self*, который
+    // используется для всех последующих обращений к полям.
     void insert( const K& k, const V& v )
     {
         uintptr_t idx = lower_bound( k );
@@ -107,12 +132,13 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
             return;
         }
         // Вставляем в позицию idx, сдвигая элементы вправо.
-        grow( size_ + 1 ); // обеспечиваем ёмкость
+        // grow() возвращает актуальный self* после возможного realloc буфера ПАМ.
+        pmap<K, V>* self = grow( size_ + 1 );
         // Сдвигаем элементы вправо.
-        for ( uintptr_t i = size_; i > idx; i-- )
-            data_[static_cast<unsigned>( i )] = data_[static_cast<unsigned>( i - 1 )];
-        data_[static_cast<unsigned>( idx )] = Entry{ k, v };
-        size_++;
+        for ( uintptr_t i = self->size_; i > idx; i-- )
+            self->data_[static_cast<unsigned>( i )] = self->data_[static_cast<unsigned>( i - 1 )];
+        self->data_[static_cast<unsigned>( idx )] = Entry{ k, v };
+        self->size_++;
     }
 
     // find: вернуть указатель на значение по ключу k или nullptr, если не найдено.
