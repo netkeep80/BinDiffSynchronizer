@@ -139,8 +139,9 @@ jobs:
           lcov --capture --directory build --output-file coverage.info \
             --ignore-errors mismatch,source
           lcov --remove coverage.info \
-            '/usr/*' '*/third_party/*' '*/Catch2/*' '*/catch2-build/*' \
-            --output-file coverage.info
+            '/usr/*' '*/third_party/*' '*/catch2-build/*' \
+            --output-file coverage.info \
+            --ignore-errors unused
           lcov --list coverage.info
 
       - name: Upload coverage to Codecov
