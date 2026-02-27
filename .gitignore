@@ -15,6 +15,7 @@ build_test/
 build_clean/
 build_test2/
 build_asan/
+experiments/
 docs
 Testing
 build
