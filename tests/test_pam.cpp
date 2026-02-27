@@ -339,3 +339,128 @@ TEST_CASE("PersistentAddressSpace: multiple arrays do not overlap",
     pam.Delete(off1);
     pam.Delete(off2);
 }
+
+// ---------------------------------------------------------------------------
+// type_info_entry — тривиально копируемый
+// ---------------------------------------------------------------------------
+TEST_CASE("type_info_entry: is trivially copyable", "[pam][layout][type_registry]")
+{
+    REQUIRE(std::is_trivially_copyable<type_info_entry>::value);
+}
+
+// ---------------------------------------------------------------------------
+// Таблица типов: один тип не дублируется в таблице (задача #58)
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: same type not duplicated in type registry",
+          "[pam][type_registry]")
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    // Создаём несколько объектов одного типа.
+    uintptr_t off1 = pam.Create<int>("pam_type_reg_a");
+    uintptr_t off2 = pam.Create<int>("pam_type_reg_b");
+    uintptr_t off3 = pam.Create<int>("pam_type_reg_c");
+
+    REQUIRE(off1 != 0u);
+    REQUIRE(off2 != 0u);
+    REQUIRE(off3 != 0u);
+
+    // GetElemSize должен вернуть sizeof(int) для всех трёх.
+    REQUIRE(pam.GetElemSize(off1) == sizeof(int));
+    REQUIRE(pam.GetElemSize(off2) == sizeof(int));
+    REQUIRE(pam.GetElemSize(off3) == sizeof(int));
+
+    pam.Delete(off1);
+    pam.Delete(off2);
+    pam.Delete(off3);
+}
+
+// ---------------------------------------------------------------------------
+// Таблица типов: разные типы имеют разные записи
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: different types have different registry entries",
+          "[pam][type_registry]")
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    uintptr_t off_i = pam.Create<int>("pam_type_reg_int");
+    uintptr_t off_d = pam.Create<double>("pam_type_reg_double");
+
+    REQUIRE(off_i != 0u);
+    REQUIRE(off_d != 0u);
+
+    // Размеры элементов должны соответствовать реальным размерам типов.
+    REQUIRE(pam.GetElemSize(off_i) == sizeof(int));
+    REQUIRE(pam.GetElemSize(off_d) == sizeof(double));
+
+    pam.Delete(off_i);
+    pam.Delete(off_d);
+}
+
+// ---------------------------------------------------------------------------
+// GetElemSize: массив возвращает размер одного элемента
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: GetElemSize returns element size for arrays",
+          "[pam][type_registry][array]")
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    uintptr_t off = pam.CreateArray<double>(5);
+    REQUIRE(off != 0u);
+
+    // GetElemSize должен вернуть sizeof(double), а не sizeof(double)*5.
+    REQUIRE(pam.GetElemSize(off) == sizeof(double));
+    REQUIRE(pam.GetCount(off) == 5u);
+
+    pam.Delete(off);
+}
+
+// ---------------------------------------------------------------------------
+// Save и повторная загрузка: таблица типов восстанавливается
+// ---------------------------------------------------------------------------
+TEST_CASE("PersistentAddressSpace: Save and Init -- type registry is restored",
+          "[pam][type_registry][save_reload]")
+{
+    const char* fname = "./test_pam_type_registry.pam";
+    rm_file(fname);
+
+    uintptr_t saved_int_off = 0;
+    uintptr_t saved_dbl_off = 0;
+
+    {
+        PersistentAddressSpace::Init(fname);
+        auto& pam = PersistentAddressSpace::Get();
+
+        saved_int_off = pam.Create<int>("type_reg_int_obj");
+        saved_dbl_off = pam.Create<double>("type_reg_dbl_obj");
+        REQUIRE(saved_int_off != 0u);
+        REQUIRE(saved_dbl_off != 0u);
+
+        *pam.Resolve<int>(saved_int_off)    = 777;
+        *pam.Resolve<double>(saved_dbl_off) = 3.14;
+
+        pam.Save();
+    }
+
+    // Перезагружаем ПАМ.
+    PersistentAddressSpace::Init(fname);
+    {
+        auto& pam = PersistentAddressSpace::Get();
+
+        uintptr_t off_i = pam.Find("type_reg_int_obj");
+        uintptr_t off_d = pam.Find("type_reg_dbl_obj");
+        REQUIRE(off_i == saved_int_off);
+        REQUIRE(off_d == saved_dbl_off);
+
+        // Тип и данные восстановлены.
+        REQUIRE(pam.GetElemSize(off_i) == sizeof(int));
+        REQUIRE(pam.GetElemSize(off_d) == sizeof(double));
+        REQUIRE(*pam.Resolve<int>(off_i)    == 777);
+        REQUIRE(*pam.Resolve<double>(off_d) == 3.14);
+
+        pam.Delete(off_i);
+        pam.Delete(off_d);
+    }
+
+    rm_file(fname);
+}
