@@ -7,10 +7,6 @@
 #include <cstdint>
 #include <string>
 #include <type_traits>
-// nlohmann/json.hpp сохранён для совместимости с тестами, использующими
-// nlohmann::json напрямую. Прямая сериализация pjson реализована в
-// pjson_serializer.h без зависимости от nlohmann (требование F6, задача #84).
-#include "nlohmann/json.hpp"
 
 // pjson — персистная дискриминантная объединяющая структура (персистный аналог nlohmann::json).
 //
@@ -184,9 +180,6 @@ struct pjson
     uintptr_t   _obj_lower_bound( const char* s ) const;
     // Вспомогательные методы для прямой сериализации (требование F6, задача #84).
     void _serialize_to( std::string& out ) const;
-    // Вспомогательные методы для совместимости с тестами, использующими nlohmann.
-    nlohmann::json _to_nlohmann() const;
-    static void    _from_nlohmann( const nlohmann::json& src, uintptr_t dst_offset );
 };
 
 // Проверяем размеры раскладки payload.
@@ -664,8 +657,7 @@ inline bool pjson::obj_erase( const char* key )
 // Реализация методов сериализации (задача #84: F6 — прямая сериализация)
 // ---------------------------------------------------------------------------
 
-// Прямая рекурсивная сериализация pjson в std::string без nlohmann::json.
-// Заменяет _to_nlohmann().dump() более эффективной реализацией.
+// Прямая рекурсивная сериализация pjson в std::string (F6).
 inline void pjson::_serialize_to( std::string& out ) const
 {
     using namespace pjson_serial_detail;
@@ -735,53 +727,6 @@ inline std::string pjson::to_string() const
     return out;
 }
 
-// Вспомогательный метод для совместимости с тестами (использует nlohmann).
-inline nlohmann::json pjson::_to_nlohmann() const
-{
-    switch ( type )
-    {
-    case pjson_type::null:
-        return nlohmann::json( nullptr );
-    case pjson_type::boolean:
-        return nlohmann::json( get_bool() );
-    case pjson_type::integer:
-        return nlohmann::json( get_int() );
-    case pjson_type::uinteger:
-        return nlohmann::json( get_uint() );
-    case pjson_type::real:
-        return nlohmann::json( get_real() );
-    case pjson_type::string:
-        return nlohmann::json( std::string( get_string() ) );
-    case pjson_type::array:
-    {
-        nlohmann::json arr       = nlohmann::json::array();
-        uintptr_t      sz        = payload.array_val.size;
-        uintptr_t      data_addr = payload.array_val.data.addr();
-        for ( uintptr_t i = 0; i < sz; i++ )
-        {
-            const pjson& elem = AddressManager<pjson>::GetArrayElement( data_addr, i );
-            arr.push_back( elem._to_nlohmann() );
-        }
-        return arr;
-    }
-    case pjson_type::object:
-    {
-        nlohmann::json obj       = nlohmann::json::object();
-        uintptr_t      sz        = payload.object_val.size;
-        uintptr_t      data_addr = payload.object_val.data.addr();
-        for ( uintptr_t i = 0; i < sz; i++ )
-        {
-            const pjson_kv_entry& pair = AddressManager<pjson_kv_entry>::GetArrayElement( data_addr, i );
-            const char*           key  = pair.key.c_str();
-            obj[key]                   = pair.value._to_nlohmann();
-        }
-        return obj;
-    }
-    default:
-        return nlohmann::json( nullptr );
-    }
-}
-
 // Десериализовать строку JSON в pjson по смещению dst_offset в ПАМ.
 // Прямая реализация без nlohmann::json (требование F6, задача #84).
 inline void pjson::from_string( const char* s, uintptr_t dst_offset )
@@ -799,64 +744,6 @@ inline void pjson::from_string( const char* s, uintptr_t dst_offset )
     {
         // Некорректный JSON: сбрасываем в null.
         PersistentAddressSpace::Get().Resolve<pjson>( dst_offset )->set_null();
-    }
-}
-
-// Вспомогательный метод для совместимости с тестами (использует nlohmann).
-inline void pjson::_from_nlohmann( const nlohmann::json& src, uintptr_t dst_offset )
-{
-    auto&  pam = PersistentAddressSpace::Get();
-    pjson* dst = pam.Resolve<pjson>( dst_offset );
-    if ( dst == nullptr )
-        return;
-
-    switch ( src.type() )
-    {
-    case nlohmann::json::value_t::null:
-        pam.Resolve<pjson>( dst_offset )->set_null();
-        break;
-    case nlohmann::json::value_t::boolean:
-        pam.Resolve<pjson>( dst_offset )->set_bool( src.get<bool>() );
-        break;
-    case nlohmann::json::value_t::number_integer:
-        pam.Resolve<pjson>( dst_offset )->set_int( src.get<int64_t>() );
-        break;
-    case nlohmann::json::value_t::number_unsigned:
-        pam.Resolve<pjson>( dst_offset )->set_uint( src.get<uint64_t>() );
-        break;
-    case nlohmann::json::value_t::number_float:
-        pam.Resolve<pjson>( dst_offset )->set_real( src.get<double>() );
-        break;
-    case nlohmann::json::value_t::string:
-        pam.Resolve<pjson>( dst_offset )->set_string( src.get<std::string>().c_str() );
-        break;
-    case nlohmann::json::value_t::array:
-    {
-        pam.Resolve<pjson>( dst_offset )->set_array();
-        for ( const auto& elem : src )
-        {
-            pjson*    d            = pam.Resolve<pjson>( dst_offset );
-            pjson&    new_elem     = d->push_back();
-            uintptr_t new_elem_off = pam.PtrToOffset( &new_elem );
-            _from_nlohmann( elem, new_elem_off );
-        }
-        break;
-    }
-    case nlohmann::json::value_t::object:
-    {
-        pam.Resolve<pjson>( dst_offset )->set_object();
-        for ( const auto& [key, val] : src.items() )
-        {
-            pjson*    d       = pam.Resolve<pjson>( dst_offset );
-            pjson&    new_val = d->obj_insert( key.c_str() );
-            uintptr_t val_off = pam.PtrToOffset( &new_val );
-            _from_nlohmann( val, val_off );
-        }
-        break;
-    }
-    default:
-        pam.Resolve<pjson>( dst_offset )->set_null();
-        break;
     }
 }
 

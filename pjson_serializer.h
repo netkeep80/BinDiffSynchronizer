@@ -1,15 +1,15 @@
 #pragma once
-// pjson_serializer.h — Прямая сериализация и десериализация pjson без nlohmann::json.
+// pjson_serializer.h — Прямая сериализация и десериализация pjson.
 //
 // Реализует требование F6 из задачи #84:
 //   «Реализовать прямую сериализацию без nlohmann::json».
 //
 // Включает:
-//   pjson_writer  — рекурсивная запись pjson в std::string (замена _to_nlohmann().dump())
-//   pjson_parser  — рекурсивный нисходящий парсер JSON → pjson (замена nlohmann::json::parse + _from_nlohmann)
+//   pjson_writer  — рекурсивная запись pjson в std::string
+//   pjson_parser  — рекурсивный нисходящий парсер JSON → pjson
 //
-// Для форматирования вещественных чисел использует алгоритм Grisu2 из nlohmann/json.hpp
-// (через nlohmann::detail::to_chars), что обеспечивает идентичный вывод с nlohmann::json::dump().
+// Для форматирования вещественных чисел используется std::to_chars (C++17),
+// с добавлением суффикса ".0" для целых double (например, 100.0 → "100.0").
 //
 // Все комментарии — на русском языке (Тр.6).
 
@@ -19,8 +19,7 @@
 #include <cmath>
 #include <string>
 #include <stdexcept>
-// Используем алгоритм Grisu2 из nlohmann для форматирования double.
-#include "nlohmann/json.hpp"
+#include <charconv>
 
 // Предварительные объявления — pjson.h подключается ПОСЛЕ этого файла.
 struct pjson;
@@ -108,9 +107,8 @@ inline void append_uint64( std::string& out, uint64_t v )
 }
 
 /// Добавить представление double в out.
-/// Использует алгоритм Grisu2 из nlohmann/json.hpp через nlohmann::detail::to_chars,
-/// что обеспечивает идентичный вывод с nlohmann::json::dump().
-/// Например: 100.0 → "100.0", 3.14 → "3.14", 1e100 → "1e+100".
+/// Использует std::to_chars (C++17) для кратчайшего представления.
+/// Гарантирует наличие десятичной точки: 100.0 → "100.0", 3.14 → "3.14", 1e100 → "1e+100".
 inline void append_double( std::string& out, double v )
 {
     if ( !std::isfinite( v ) )
@@ -119,11 +117,27 @@ inline void append_double( std::string& out, double v )
         out += "null";
         return;
     }
-    // Используем nlohmann::detail::to_chars (алгоритм Grisu2) для кратчайшего представления.
+    // Используем std::to_chars для кратчайшего представления double.
     // Размер буфера: достаточно для максимального представления double (64 символа).
-    char  buf[64];
-    char* end = ::nlohmann::detail::to_chars( buf, buf + sizeof( buf ), v );
-    out.append( buf, static_cast<std::size_t>( end - buf ) );
+    char                  buf[64];
+    std::to_chars_result  res = std::to_chars( buf, buf + sizeof( buf ), v );
+    std::size_t           len = static_cast<std::size_t>( res.ptr - buf );
+
+    // Проверяем наличие десятичной точки или экспоненты.
+    // Если нет — добавляем ".0", чтобы тип значения (float) был очевиден в JSON.
+    bool has_dot_or_exp = false;
+    for ( std::size_t i = 0; i < len; ++i )
+    {
+        char c = buf[i];
+        if ( c == '.' || c == 'e' || c == 'E' )
+        {
+            has_dot_or_exp = true;
+            break;
+        }
+    }
+    out.append( buf, len );
+    if ( !has_dot_or_exp )
+        out += ".0";
 }
 
 } // namespace pjson_serial_detail
