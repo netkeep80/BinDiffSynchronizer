@@ -23,13 +23,12 @@
 #include "nlohmann/json.hpp"
 #include "pjson.h"
 
-using json       = nlohmann::json;
-using bench_clk  = std::chrono::high_resolution_clock;
-using bench_ms   = std::chrono::milliseconds;
+using json      = nlohmann::json;
+using bench_clk = std::chrono::high_resolution_clock;
+using bench_ms  = std::chrono::milliseconds;
 
 // Вспомогательная функция: вычислить прошедшие миллисекунды.
-template <typename T>
-static long long bench_elapsed_ms( const T& start )
+template <typename T> static long long bench_elapsed_ms( const T& start )
 {
     return std::chrono::duration_cast<bench_ms>( bench_clk::now() - start ).count();
 }
@@ -39,12 +38,18 @@ static json bench_pjson_to_nlohmann( const pjson& src )
 {
     switch ( src.type_tag() )
     {
-    case pjson_type::null:    return json( nullptr );
-    case pjson_type::boolean: return json( src.get_bool() );
-    case pjson_type::integer: return json( src.get_int() );
-    case pjson_type::uinteger:return json( src.get_uint() );
-    case pjson_type::real:    return json( src.get_real() );
-    case pjson_type::string:  return json( std::string( src.get_string() ) );
+    case pjson_type::null:
+        return json( nullptr );
+    case pjson_type::boolean:
+        return json( src.get_bool() );
+    case pjson_type::integer:
+        return json( src.get_int() );
+    case pjson_type::uinteger:
+        return json( src.get_uint() );
+    case pjson_type::real:
+        return json( src.get_real() );
+    case pjson_type::string:
+        return json( std::string( src.get_string() ) );
     case pjson_type::array:
     {
         json arr = json::array();
@@ -64,31 +69,45 @@ static json bench_pjson_to_nlohmann( const pjson& src )
         }
         return obj;
     }
-    default: return json( nullptr );
+    default:
+        return json( nullptr );
     }
 }
 
 // Вспомогательная функция: конвертировать nlohmann::json → pjson (тест-копия из test_pjson_large.cpp).
 static void bench_nlohmann_to_pjson( const json& src, uintptr_t dst_offset )
 {
-    auto& pam = PersistentAddressSpace::Get();
+    auto&  pam = PersistentAddressSpace::Get();
     pjson* dst = pam.Resolve<pjson>( dst_offset );
-    if ( dst == nullptr ) return;
+    if ( dst == nullptr )
+        return;
 
     switch ( src.type() )
     {
-    case json::value_t::null:             pam.Resolve<pjson>( dst_offset )->set_null();                           break;
-    case json::value_t::boolean:          pam.Resolve<pjson>( dst_offset )->set_bool( src.get<bool>() );          break;
-    case json::value_t::number_integer:   pam.Resolve<pjson>( dst_offset )->set_int( src.get<int64_t>() );        break;
-    case json::value_t::number_unsigned:  pam.Resolve<pjson>( dst_offset )->set_uint( src.get<uint64_t>() );      break;
-    case json::value_t::number_float:     pam.Resolve<pjson>( dst_offset )->set_real( src.get<double>() );        break;
-    case json::value_t::string:           pam.Resolve<pjson>( dst_offset )->set_string( src.get<std::string>().c_str() ); break;
+    case json::value_t::null:
+        pam.Resolve<pjson>( dst_offset )->set_null();
+        break;
+    case json::value_t::boolean:
+        pam.Resolve<pjson>( dst_offset )->set_bool( src.get<bool>() );
+        break;
+    case json::value_t::number_integer:
+        pam.Resolve<pjson>( dst_offset )->set_int( src.get<int64_t>() );
+        break;
+    case json::value_t::number_unsigned:
+        pam.Resolve<pjson>( dst_offset )->set_uint( src.get<uint64_t>() );
+        break;
+    case json::value_t::number_float:
+        pam.Resolve<pjson>( dst_offset )->set_real( src.get<double>() );
+        break;
+    case json::value_t::string:
+        pam.Resolve<pjson>( dst_offset )->set_string( src.get<std::string>().c_str() );
+        break;
     case json::value_t::array:
     {
         pam.Resolve<pjson>( dst_offset )->set_array();
         for ( const auto& elem : src )
         {
-            pjson& new_elem = pam.Resolve<pjson>( dst_offset )->push_back();
+            pjson&    new_elem = pam.Resolve<pjson>( dst_offset )->push_back();
             uintptr_t elem_off = pam.PtrToOffset( &new_elem );
             bench_nlohmann_to_pjson( elem, elem_off );
         }
@@ -99,13 +118,15 @@ static void bench_nlohmann_to_pjson( const json& src, uintptr_t dst_offset )
         pam.Resolve<pjson>( dst_offset )->set_object();
         for ( const auto& [key, val] : src.items() )
         {
-            pjson& new_val = pam.Resolve<pjson>( dst_offset )->obj_insert( key.c_str() );
+            pjson&    new_val = pam.Resolve<pjson>( dst_offset )->obj_insert( key.c_str() );
             uintptr_t val_off = pam.PtrToOffset( &new_val );
             bench_nlohmann_to_pjson( val, val_off );
         }
         break;
     }
-    default: pam.Resolve<pjson>( dst_offset )->set_null(); break;
+    default:
+        pam.Resolve<pjson>( dst_offset )->set_null();
+        break;
     }
 }
 
@@ -159,14 +180,14 @@ TEST_CASE( "pjson bench: to_string direct vs nlohmann dump", "[pjson][bench][ser
     auto t2 = bench_clk::now();
     for ( int n = 0; n < ITERATIONS; n++ )
     {
-        json j = bench_pjson_to_nlohmann( *froot );
+        json        j = bench_pjson_to_nlohmann( *froot );
         std::string s = j.dump();
         (void)s;
     }
     long long nlohmann_ms = bench_elapsed_ms( t2 );
 
-    std::printf( "[bench] to_string %d iter: direct=%lld ms, via_nlohmann=%lld ms\n",
-                 ITERATIONS, direct_ms, nlohmann_ms );
+    std::printf( "[bench] to_string %d iter: direct=%lld ms, via_nlohmann=%lld ms\n", ITERATIONS, direct_ms,
+                 nlohmann_ms );
 
     froot->free();
     froot.Delete();
@@ -181,11 +202,10 @@ TEST_CASE( "pjson bench: to_string direct vs nlohmann dump", "[pjson][bench][ser
 
 TEST_CASE( "pjson bench: from_string direct vs nlohmann parse", "[pjson][bench][parse]" )
 {
-    const std::string test_json =
-        "{\"name\":\"Alice\",\"age\":30,\"scores\":[95,87,92,88,100],"
-        "\"address\":{\"city\":\"Moscow\",\"zip\":\"123456\"},"
-        "\"tags\":[\"developer\",\"architect\",\"speaker\"],"
-        "\"active\":true,\"balance\":12345.67}";
+    const std::string test_json = "{\"name\":\"Alice\",\"age\":30,\"scores\":[95,87,92,88,100],"
+                                  "\"address\":{\"city\":\"Moscow\",\"zip\":\"123456\"},"
+                                  "\"tags\":[\"developer\",\"architect\",\"speaker\"],"
+                                  "\"active\":true,\"balance\":12345.67}";
 
     constexpr int ITERATIONS = 1000;
 
@@ -205,7 +225,7 @@ TEST_CASE( "pjson bench: from_string direct vs nlohmann parse", "[pjson][bench][
     auto t2 = bench_clk::now();
     for ( int n = 0; n < ITERATIONS; n++ )
     {
-        json j = json::parse( test_json );
+        json        j = json::parse( test_json );
         fptr<pjson> fv;
         fv.New();
         bench_nlohmann_to_pjson( j, fv.addr() );
@@ -214,8 +234,8 @@ TEST_CASE( "pjson bench: from_string direct vs nlohmann parse", "[pjson][bench][
     }
     long long nlohmann_ms = bench_elapsed_ms( t2 );
 
-    std::printf( "[bench] from_string %d iter: direct=%lld ms, via_nlohmann=%lld ms\n",
-                 ITERATIONS, direct_ms, nlohmann_ms );
+    std::printf( "[bench] from_string %d iter: direct=%lld ms, via_nlohmann=%lld ms\n", ITERATIONS, direct_ms,
+                 nlohmann_ms );
 
     REQUIRE( true );
 }
@@ -226,8 +246,7 @@ TEST_CASE( "pjson bench: from_string direct vs nlohmann parse", "[pjson][bench][
 
 TEST_CASE( "pjson bench: set_string vs set_string_interned", "[pjson][bench][interning]" )
 {
-    const char* keys[] = { "name", "age", "city", "country", "email",
-                           "phone", "address", "zip", "active", "score" };
+    const char*   keys[] = { "name", "age", "city", "country", "email", "phone", "address", "zip", "active", "score" };
     constexpr int N_KEYS = 10;
     constexpr int REPEAT = 100;
     constexpr int TOTAL  = N_KEYS * REPEAT;
@@ -236,7 +255,7 @@ TEST_CASE( "pjson bench: set_string vs set_string_interned", "[pjson][bench][int
 
     // Бенчмарк set_string (обычный).
     {
-        auto t1 = bench_clk::now();
+        auto                   t1 = bench_clk::now();
         std::vector<uintptr_t> offsets;
         offsets.reserve( TOTAL );
         for ( int i = 0; i < TOTAL; i++ )
@@ -264,7 +283,7 @@ TEST_CASE( "pjson bench: set_string vs set_string_interned", "[pjson][bench][int
         tbl.New();
         uintptr_t tbl_off = tbl.addr();
 
-        auto t2 = bench_clk::now();
+        auto                   t2 = bench_clk::now();
         std::vector<uintptr_t> offsets;
         offsets.reserve( TOTAL );
         for ( int i = 0; i < TOTAL; i++ )
@@ -302,7 +321,7 @@ TEST_CASE( "pjson bench: pool alloc vs fptr New", "[pjson][bench][pool]" )
 
     // Бенчмарк fptr<pjson>::New (обычная аллокация через ПАМ).
     {
-        auto t1 = bench_clk::now();
+        auto                   t1 = bench_clk::now();
         std::vector<uintptr_t> offsets;
         offsets.reserve( N );
         for ( int i = 0; i < N; i++ )
@@ -327,7 +346,7 @@ TEST_CASE( "pjson bench: pool alloc vs fptr New", "[pjson][bench][pool]" )
         fptr<pjson_node_pool> pool;
         pool.New();
 
-        auto t2 = bench_clk::now();
+        auto                   t2 = bench_clk::now();
         std::vector<uintptr_t> offsets;
         offsets.reserve( N );
         for ( int i = 0; i < N; i++ )
@@ -371,7 +390,7 @@ TEST_CASE( "pjson bench: round-trip test.json direct", "[pjson][bench][roundtrip
 
     // Прямой парсер + прямой сериализатор (F6).
     {
-        auto t1 = bench_clk::now();
+        auto        t1 = bench_clk::now();
         fptr<pjson> fv;
         fv.New();
         pjson::from_string( json_text.c_str(), fv.addr() );
@@ -383,14 +402,14 @@ TEST_CASE( "pjson bench: round-trip test.json direct", "[pjson][bench][roundtrip
 
         fv->free();
         fv.Delete();
-        std::printf( "[bench] direct F6: parse=%lld ms, serialize=%lld ms, output_size=%zu\n",
-                     parse_ms, ser_ms, s_out.size() );
+        std::printf( "[bench] direct F6: parse=%lld ms, serialize=%lld ms, output_size=%zu\n", parse_ms, ser_ms,
+                     s_out.size() );
     }
 
     // Nlohmann-based: parse + copy into pjson + dump via pjson_to_nlohmann.
     {
-        auto t1 = bench_clk::now();
-        json nlohmann_doc = json::parse( json_text );
+        auto      t1                = bench_clk::now();
+        json      nlohmann_doc      = json::parse( json_text );
         long long nlohmann_parse_ms = bench_elapsed_ms( t1 );
 
         fptr<pjson> fv;
@@ -400,9 +419,9 @@ TEST_CASE( "pjson bench: round-trip test.json direct", "[pjson][bench][roundtrip
         bench_nlohmann_to_pjson( nlohmann_doc, fv.addr() );
         long long copy_ms = bench_elapsed_ms( t2 );
 
-        auto        t3     = bench_clk::now();
-        json        jout   = bench_pjson_to_nlohmann( *fv );
-        std::string s_out2 = jout.dump();
+        auto        t3      = bench_clk::now();
+        json        jout    = bench_pjson_to_nlohmann( *fv );
+        std::string s_out2  = jout.dump();
         long long   dump_ms = bench_elapsed_ms( t3 );
 
         fv->free();

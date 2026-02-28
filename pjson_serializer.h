@@ -121,7 +121,7 @@ inline void append_double( std::string& out, double v )
     }
     // Используем nlohmann::detail::to_chars (алгоритм Grisu2) для кратчайшего представления.
     // Размер буфера: достаточно для максимального представления double (64 символа).
-    char buf[64];
+    char  buf[64];
     char* end = ::nlohmann::detail::to_chars( buf, buf + sizeof( buf ), v );
     out.append( buf, static_cast<std::size_t>( end - buf ) );
 }
@@ -188,7 +188,7 @@ inline int parse_hex4( ParseState& st )
     unsigned val = 0;
     for ( int i = 0; i < 4; i++ )
     {
-        char c = *st.pos++;
+        char     c = *st.pos++;
         unsigned digit;
         if ( c >= '0' && c <= '9' )
             digit = static_cast<unsigned>( c - '0' );
@@ -396,8 +396,8 @@ inline bool parse_array( ParseState& st, uintptr_t dst_offset )
     {
         skip_ws( st );
         // Добавляем новый элемент в конец.
-        pjson* d         = pam.Resolve<pjson>( dst_offset );
-        pjson& new_elem  = d->push_back();
+        pjson*    d        = pam.Resolve<pjson>( dst_offset );
+        pjson&    new_elem = d->push_back();
         uintptr_t elem_off = pam.PtrToOffset( &new_elem );
 
         if ( !parse_value( st, elem_off ) )
@@ -445,8 +445,8 @@ inline bool parse_object( ParseState& st, uintptr_t dst_offset )
         skip_ws( st );
 
         // Вставляем ключ в объект и рекурсивно разбираем значение.
-        pjson* d       = pam.Resolve<pjson>( dst_offset );
-        pjson& new_val = d->obj_insert( key_buf.c_str() );
+        pjson*    d       = pam.Resolve<pjson>( dst_offset );
+        pjson&    new_val = d->obj_insert( key_buf.c_str() );
         uintptr_t val_off = pam.PtrToOffset( &new_val );
 
         if ( !parse_value( st, val_off ) )
@@ -469,7 +469,7 @@ inline bool parse_object( ParseState& st, uintptr_t dst_offset )
 inline bool parse_value( ParseState& st, uintptr_t dst_offset )
 {
     skip_ws( st );
-    char c = peek( st );
+    char  c   = peek( st );
     auto& pam = PersistentAddressSpace::Get();
 
     if ( c == 'n' )

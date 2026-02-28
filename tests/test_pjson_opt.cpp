@@ -327,7 +327,7 @@ TEST_CASE( "pjson opt F6: round-trip null", "[pjson][opt][f6][roundtrip]" )
 TEST_CASE( "pjson opt F6: round-trip complex object", "[pjson][opt][f6][roundtrip]" )
 {
     const std::string original = "{\"arr\":[1,true,null,\"str\"],\"num\":3.14,\"obj\":{\"x\":42}}";
-    fptr<pjson> fv;
+    fptr<pjson>       fv;
     fv.New();
     pjson::from_string( original.c_str(), fv.addr() );
     std::string restored = fv->to_string();
@@ -377,8 +377,8 @@ TEST_CASE( "pjson opt F3: string table get returns correct string", "[pjson][opt
     fptr<pjson_string_table> tbl;
     tbl.New();
 
-    uintptr_t off = tbl->intern( "test_string" );
-    const char* s = pjson_string_table::get( off );
+    uintptr_t   off = tbl->intern( "test_string" );
+    const char* s   = pjson_string_table::get( off );
     REQUIRE( std::strcmp( s, "test_string" ) == 0 );
 
     tbl.Delete();
@@ -390,12 +390,11 @@ TEST_CASE( "pjson opt F3: string table intern many strings", "[pjson][opt][f3][i
     tbl.New();
 
     // Интернируем 20 разных строк.
-    const char* strings[] = { "alpha", "beta", "gamma", "delta", "epsilon",
-                               "zeta",  "eta",  "theta", "iota",  "kappa",
-                               "lambda","mu",   "nu",    "xi",    "omicron",
-                               "pi",    "rho",  "sigma", "tau",   "upsilon" };
-    constexpr int N = 20;
-    uintptr_t offsets[N];
+    const char*   strings[] = { "alpha",   "beta", "gamma", "delta",  "epsilon", "zeta",   "eta",
+                                "theta",   "iota", "kappa", "lambda", "mu",      "nu",     "xi",
+                                "omicron", "pi",   "rho",   "sigma",  "tau",     "upsilon" };
+    constexpr int N         = 20;
+    uintptr_t     offsets[N];
     for ( int i = 0; i < N; i++ )
         offsets[i] = tbl->intern( strings[i] );
 
@@ -458,8 +457,7 @@ TEST_CASE( "pjson opt F3: set_string_interned deduplicates strings", "[pjson][op
     tbl.Delete();
 }
 
-TEST_CASE( "pjson opt F3: set_string_interned with null table falls back to set_string",
-           "[pjson][opt][f3][interning]" )
+TEST_CASE( "pjson opt F3: set_string_interned with null table falls back to set_string", "[pjson][opt][f3][interning]" )
 {
     fptr<pjson> fv;
     fv.New();
@@ -483,7 +481,7 @@ TEST_CASE( "pjson opt F2: pool alloc returns valid node offset", "[pjson][opt][f
     uintptr_t node_off = pool->alloc();
     REQUIRE( node_off != 0u );
 
-    auto& pam = PersistentAddressSpace::Get();
+    auto&  pam  = PersistentAddressSpace::Get();
     pjson* node = pam.Resolve<pjson>( node_off );
     REQUIRE( node != nullptr );
     // Новый узел должен быть нулевым (null).
@@ -531,7 +529,7 @@ TEST_CASE( "pjson opt F2: pool alloc multiple nodes", "[pjson][opt][f2][pool]" )
 
     // Выделяем 10 узлов.
     constexpr int N = 10;
-    uintptr_t offsets[N];
+    uintptr_t     offsets[N];
     for ( int i = 0; i < N; i++ )
     {
         offsets[i] = pool->alloc();

@@ -51,9 +51,9 @@ static_assert( std::is_trivially_copyable<pjson_intern_entry>::value,
 /// Хранит хэш-таблицу с открытой адресацией и linear probing.
 struct pjson_string_table
 {
-    uintptr_t                 count_;    ///< Число занятых ячеек
-    uintptr_t                 capacity_; ///< Ёмкость таблицы (число ячеек)
-    fptr<pjson_intern_entry>  buckets_;  ///< Массив ячеек в ПАП
+    uintptr_t                count_;    ///< Число занятых ячеек
+    uintptr_t                capacity_; ///< Ёмкость таблицы (число ячеек)
+    fptr<pjson_intern_entry> buckets_;  ///< Массив ячеек в ПАП
 
     // Вычислить FNV-1a хэш строки.
     static uint64_t fnv1a( const char* s )
@@ -93,16 +93,16 @@ struct pjson_string_table
         }
 
         // Ищем ячейку.
-        pjson_string_table* self     = pam.Resolve<pjson_string_table>( self_off );
-        uintptr_t           cap      = self->capacity_;
-        uintptr_t           idx      = static_cast<uintptr_t>( hash % cap );
+        pjson_string_table* self      = pam.Resolve<pjson_string_table>( self_off );
+        uintptr_t           cap       = self->capacity_;
+        uintptr_t           idx       = static_cast<uintptr_t>( hash % cap );
         uintptr_t           first_del = static_cast<uintptr_t>( -1 );
 
         for ( uintptr_t probe = 0; probe < cap; probe++ )
         {
             // Переразрешаем self после каждой итерации (вставка pstring могла вызвать realloc).
-            self = pam.Resolve<pjson_string_table>( self_off );
-            cap  = self->capacity_;
+            self                     = pam.Resolve<pjson_string_table>( self_off );
+            cap                      = self->capacity_;
             pjson_intern_entry& cell = self->_bucket( idx );
 
             if ( cell.str_offset == PJSON_INTERNING_EMPTY )
@@ -113,7 +113,7 @@ struct pjson_string_table
                 self = pam.Resolve<pjson_string_table>( self_off );
                 cap  = self->capacity_;
                 // Пересчитываем idx для нашего хэша (capacity могла вырасти).
-                idx                      = static_cast<uintptr_t>( hash % cap );
+                idx = static_cast<uintptr_t>( hash % cap );
                 // Повторно ищем нужную пустую ячейку (новая capacity → другая позиция).
                 // Поскольку _rehash был вызван ДО вставки, просто линейно ищем.
                 uintptr_t ins_idx = idx;
@@ -175,7 +175,7 @@ struct pjson_string_table
     /// Инициализировать массив ячеек нулями (initial_cap ячеек).
     void _init_buckets( uintptr_t self_off, uintptr_t initial_cap )
     {
-        auto& pam = PersistentAddressSpace::Get();
+        auto&                    pam = PersistentAddressSpace::Get();
         fptr<pjson_intern_entry> arr;
         arr.NewArray( static_cast<unsigned>( initial_cap ) );
         // Инициализируем нулями (EMPTY).
@@ -194,7 +194,7 @@ struct pjson_string_table
     /// Создать новую pstring в ПАП со строкой s. Возвращает смещение.
     static uintptr_t _create_pstring( uintptr_t /*self_off*/, const char* s )
     {
-        auto& pam = PersistentAddressSpace::Get();
+        auto&         pam = PersistentAddressSpace::Get();
         fptr<pstring> fp;
         fp.New();
         uintptr_t off = fp.addr();
@@ -227,8 +227,7 @@ struct pjson_string_table
         auto* old_raw = pam.Resolve<pjson_intern_entry>( old_bkt );
         for ( uintptr_t i = 0; i < old_cap; i++ )
         {
-            if ( old_raw[i].str_offset == PJSON_INTERNING_EMPTY ||
-                 old_raw[i].str_offset == PJSON_INTERNING_DELETED )
+            if ( old_raw[i].str_offset == PJSON_INTERNING_EMPTY || old_raw[i].str_offset == PJSON_INTERNING_DELETED )
                 continue;
             uint64_t  h   = old_raw[i].hash;
             uintptr_t idx = static_cast<uintptr_t>( h % new_cap );
@@ -256,7 +255,7 @@ struct pjson_string_table
         }
 
         // Обновляем self.
-        self            = pam.Resolve<pjson_string_table>( self_off );
+        self = pam.Resolve<pjson_string_table>( self_off );
         self->buckets_.set_addr( new_arr.addr() );
         self->capacity_ = new_cap;
         // count_ не изменяется (deleted записи выброшены).

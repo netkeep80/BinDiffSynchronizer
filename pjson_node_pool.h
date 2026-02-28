@@ -186,8 +186,8 @@ struct pjson_node_pool
         // chain теперь указывает на node[1], а node[N-1] указывает на prev_head.
         // Обновляем self (после Resolve пересчитываем, т.к. pjson_pool_free_node::next_free
         // записи могли вызвать realloc).
-        self              = pam.Resolve<pjson_node_pool>( self_offset );
-        self->free_head_  = chain;
+        self             = pam.Resolve<pjson_node_pool>( self_offset );
+        self->free_head_ = chain;
         self->free_count_ += ( PJSON_POOL_BLOCK_SIZE - 1 );
 
         // Возвращаем узел [0] — он уже инициализирован нулями (null pjson).

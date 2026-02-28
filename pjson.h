@@ -788,7 +788,7 @@ inline void pjson::from_string( const char* s, uintptr_t dst_offset )
 {
     if ( s == nullptr || dst_offset == 0 )
         return;
-    uintptr_t len = static_cast<uintptr_t>( std::strlen( s ) );
+    uintptr_t                       len = static_cast<uintptr_t>( std::strlen( s ) );
     pjson_parser_detail::ParseState st{ s, s + len };
     pjson_parser_detail::skip_ws( st );
     if ( st.pos >= st.end )
@@ -805,7 +805,7 @@ inline void pjson::from_string( const char* s, uintptr_t dst_offset )
 // Вспомогательный метод для совместимости с тестами (использует nlohmann).
 inline void pjson::_from_nlohmann( const nlohmann::json& src, uintptr_t dst_offset )
 {
-    auto& pam = PersistentAddressSpace::Get();
+    auto&  pam = PersistentAddressSpace::Get();
     pjson* dst = pam.Resolve<pjson>( dst_offset );
     if ( dst == nullptr )
         return;
@@ -835,8 +835,8 @@ inline void pjson::_from_nlohmann( const nlohmann::json& src, uintptr_t dst_offs
         pam.Resolve<pjson>( dst_offset )->set_array();
         for ( const auto& elem : src )
         {
-            pjson* d              = pam.Resolve<pjson>( dst_offset );
-            pjson& new_elem       = d->push_back();
+            pjson*    d            = pam.Resolve<pjson>( dst_offset );
+            pjson&    new_elem     = d->push_back();
             uintptr_t new_elem_off = pam.PtrToOffset( &new_elem );
             _from_nlohmann( elem, new_elem_off );
         }
@@ -847,9 +847,9 @@ inline void pjson::_from_nlohmann( const nlohmann::json& src, uintptr_t dst_offs
         pam.Resolve<pjson>( dst_offset )->set_object();
         for ( const auto& [key, val] : src.items() )
         {
-            pjson* d           = pam.Resolve<pjson>( dst_offset );
-            pjson& new_val     = d->obj_insert( key.c_str() );
-            uintptr_t val_off  = pam.PtrToOffset( &new_val );
+            pjson*    d       = pam.Resolve<pjson>( dst_offset );
+            pjson&    new_val = d->obj_insert( key.c_str() );
+            uintptr_t val_off = pam.PtrToOffset( &new_val );
             _from_nlohmann( val, val_off );
         }
         break;
@@ -886,9 +886,9 @@ inline void pjson::set_string_interned( const char* s, uintptr_t string_table_of
     // Освобождаем предыдущее значение.
     _free_impl();
     // Повторно разрешаем self (realloc возможен внутри _free_impl у string/array/object).
-    pjson* self = pam.Resolve<pjson>( self_offset );
-    self->type                         = pjson_type::string;
-    self->payload.string_val.length    = 0;
+    pjson* self                     = pam.Resolve<pjson>( self_offset );
+    self->type                      = pjson_type::string;
+    self->payload.string_val.length = 0;
     self->payload.string_val.chars.set_addr( 0 );
 
     // Интернируем строку — intern() может вызвать realloc через pstring::assign.
