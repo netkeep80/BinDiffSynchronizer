@@ -62,7 +62,7 @@ TEST_CASE( "pmem_array_push_back: appends elements and increases size", "[pmem_a
     pmem_array_push_back<int>( hdr_off ) = 20;
     pmem_array_push_back<int>( hdr_off ) = 30;
 
-    auto& pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
 
     REQUIRE( hdr->size == 3u );
@@ -89,7 +89,7 @@ TEST_CASE( "pmem_array_reserve: capacity grows to accommodate elements", "[pmem_
 
     pmem_array_reserve<int>( hdr_off, 100 );
 
-    auto& pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
 
     REQUIRE( hdr->capacity >= 100u );
@@ -228,8 +228,8 @@ TEST_CASE( "pmem_array_insert_sorted: updates existing key without growing", "[p
     REQUIRE( pmem_array_size( hdr_off ) == 2u );
 
     // Значение должно обновиться.
-    TestEntry* found = pmem_array_find_sorted<TestEntry, int, TestKeyOf, TestLess>(
-        hdr_off, 10, TestKeyOf{}, TestLess{} );
+    TestEntry* found =
+        pmem_array_find_sorted<TestEntry, int, TestKeyOf, TestLess>( hdr_off, 10, TestKeyOf{}, TestLess{} );
     REQUIRE( found != nullptr );
     REQUIRE( found->value == 999 );
 
@@ -251,8 +251,8 @@ TEST_CASE( "pmem_array_find_sorted: finds existing element", "[pmem_array][sorte
     pmem_array_insert_sorted<TestEntry, TestKeyOf, TestLess>( hdr_off, { 20, 200 }, TestKeyOf{}, TestLess{} );
     pmem_array_insert_sorted<TestEntry, TestKeyOf, TestLess>( hdr_off, { 30, 300 }, TestKeyOf{}, TestLess{} );
 
-    TestEntry* found = pmem_array_find_sorted<TestEntry, int, TestKeyOf, TestLess>(
-        hdr_off, 20, TestKeyOf{}, TestLess{} );
+    TestEntry* found =
+        pmem_array_find_sorted<TestEntry, int, TestKeyOf, TestLess>( hdr_off, 20, TestKeyOf{}, TestLess{} );
     REQUIRE( found != nullptr );
     REQUIRE( found->key == 20 );
     REQUIRE( found->value == 200 );
@@ -274,8 +274,8 @@ TEST_CASE( "pmem_array_find_sorted: returns nullptr for missing element", "[pmem
     pmem_array_insert_sorted<TestEntry, TestKeyOf, TestLess>( hdr_off, { 10, 100 }, TestKeyOf{}, TestLess{} );
     pmem_array_insert_sorted<TestEntry, TestKeyOf, TestLess>( hdr_off, { 30, 300 }, TestKeyOf{}, TestLess{} );
 
-    TestEntry* found = pmem_array_find_sorted<TestEntry, int, TestKeyOf, TestLess>(
-        hdr_off, 20, TestKeyOf{}, TestLess{} );
+    TestEntry* found =
+        pmem_array_find_sorted<TestEntry, int, TestKeyOf, TestLess>( hdr_off, 20, TestKeyOf{}, TestLess{} );
     REQUIRE( found == nullptr );
 
     pmem_array_free<TestEntry>( hdr_off );
@@ -325,7 +325,7 @@ TEST_CASE( "pmem_array_free: releases allocation and resets all fields", "[pmem_
 
     pmem_array_free<int>( hdr_off );
 
-    auto& pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
 
     REQUIRE( hdr->size == 0u );

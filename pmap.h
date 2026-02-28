@@ -59,10 +59,7 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     pmem_array_hdr hdr_; ///< Заголовок персистного массива (size, capacity, data_off)
 
     // Получить смещение заголовка в ПАП (realloc-безопасно).
-    uintptr_t _hdr_off() const
-    {
-        return PersistentAddressSpace::Get().PtrToOffset( &hdr_ );
-    }
+    uintptr_t _hdr_off() const { return PersistentAddressSpace::Get().PtrToOffset( &hdr_ ); }
 
     // Вспомогательные функторы для pmem_array_insert_sorted / pmem_array_find_sorted.
     struct KeyOf
@@ -84,8 +81,8 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     void insert( const K& k, const V& v )
     {
         Entry e;
-        e.key   = k;
-        e.value = v;
+        e.key             = k;
+        e.value           = v;
         uintptr_t hdr_off = _hdr_off();
         pmem_array_insert_sorted<Entry, KeyOf, Less>( hdr_off, e, KeyOf{}, Less{} );
     }
@@ -94,14 +91,14 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     V* find( const K& k )
     {
         uintptr_t hdr_off = _hdr_off();
-        Entry* e = pmem_array_find_sorted<Entry, K, KeyOf, Less>( hdr_off, k, KeyOf{}, Less{} );
+        Entry*    e       = pmem_array_find_sorted<Entry, K, KeyOf, Less>( hdr_off, k, KeyOf{}, Less{} );
         return ( e != nullptr ) ? &e->value : nullptr;
     }
 
     const V* find( const K& k ) const
     {
-        uintptr_t hdr_off = _hdr_off();
-        const Entry* e = pmem_array_find_sorted_const<Entry, K, KeyOf, Less>( hdr_off, k, KeyOf{}, Less{} );
+        uintptr_t    hdr_off = _hdr_off();
+        const Entry* e       = pmem_array_find_sorted_const<Entry, K, KeyOf, Less>( hdr_off, k, KeyOf{}, Less{} );
         return ( e != nullptr ) ? &e->value : nullptr;
     }
 
@@ -110,13 +107,13 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     {
         uintptr_t hdr_off = _hdr_off();
         // Бинарный поиск для нахождения индекса.
-        auto& pam = PersistentAddressSpace::Get();
+        auto&           pam = PersistentAddressSpace::Get();
         pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
         if ( hdr == nullptr || hdr->size == 0 || hdr->data_off == 0 )
             return false;
 
         Entry*    raw = pam.Resolve<Entry>( hdr->data_off );
-        uintptr_t lo  = 0, hi = hdr->size;
+        uintptr_t lo = 0, hi = hdr->size;
         while ( lo < hi )
         {
             uintptr_t mid = ( lo + hi ) / 2;
@@ -144,7 +141,7 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
         }
         // Вставляем значение по умолчанию.
         Entry def;
-        def.key   = k;
+        def.key = k;
         std::memset( &def.value, 0, sizeof( V ) );
         pmem_array_insert_sorted<Entry, KeyOf, Less>( hdr_off, def, KeyOf{}, Less{} );
         // После insert возможен realloc — обновляем hdr_off и ищем снова.
@@ -173,13 +170,13 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
         iterator( pmap<K, V>* pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
         Entry& operator*()
         {
-            auto& pam = PersistentAddressSpace::Get();
+            auto&  pam = PersistentAddressSpace::Get();
             Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
             return raw[_idx];
         }
         Entry* operator->()
         {
-            auto& pam = PersistentAddressSpace::Get();
+            auto&  pam = PersistentAddressSpace::Get();
             Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
             return &raw[_idx];
         }
@@ -207,13 +204,13 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
         const_iterator( const pmap<K, V>* pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
         const Entry& operator*() const
         {
-            const auto& pam = PersistentAddressSpace::Get();
+            const auto&  pam = PersistentAddressSpace::Get();
             const Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
             return raw[_idx];
         }
         const Entry* operator->() const
         {
-            const auto& pam = PersistentAddressSpace::Get();
+            const auto&  pam = PersistentAddressSpace::Get();
             const Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
             return &raw[_idx];
         }

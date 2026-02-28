@@ -37,8 +37,7 @@ struct pmem_array_hdr
     uintptr_t data_off; ///< Смещение массива данных в ПАП; 0 = не выделено
 };
 
-static_assert( std::is_trivially_copyable<pmem_array_hdr>::value,
-               "pmem_array_hdr должен быть тривиально копируемым" );
+static_assert( std::is_trivially_copyable<pmem_array_hdr>::value, "pmem_array_hdr должен быть тривиально копируемым" );
 static_assert( sizeof( pmem_array_hdr ) == 3 * sizeof( void* ),
                "pmem_array_hdr должен занимать 3 * sizeof(void*) байт" );
 
@@ -58,14 +57,12 @@ static_assert( sizeof( pmem_array_hdr ) == 3 * sizeof( void* ),
 //
 // Устанавливает size=0, capacity=0, data_off=0.
 // Вызывается при создании нового массива через fptr<pvector<T>>::New() или аналог.
-template <typename T>
-inline void pmem_array_init( uintptr_t hdr_off )
+template <typename T> inline void pmem_array_init( uintptr_t hdr_off )
 {
-    static_assert( std::is_trivially_copyable<T>::value,
-                   "pmem_array<T> требует, чтобы T был тривиально копируемым" );
+    static_assert( std::is_trivially_copyable<T>::value, "pmem_array<T> требует, чтобы T был тривиально копируемым" );
     if ( hdr_off == 0 )
         return;
-    auto&          pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     if ( hdr != nullptr )
     {
@@ -84,11 +81,9 @@ inline void pmem_array_init( uintptr_t hdr_off )
 // При неудаче — выделяет новый блок и копирует данные.
 //
 // Возвращает hdr_off (смещение заголовка не меняется, только data_off внутри).
-template <typename T>
-inline void pmem_array_reserve( uintptr_t hdr_off, uintptr_t min_cap )
+template <typename T> inline void pmem_array_reserve( uintptr_t hdr_off, uintptr_t min_cap )
 {
-    static_assert( std::is_trivially_copyable<T>::value,
-                   "pmem_array<T> требует, чтобы T был тривиально копируемым" );
+    static_assert( std::is_trivially_copyable<T>::value, "pmem_array<T> требует, чтобы T был тривиально копируемым" );
     if ( hdr_off == 0 )
         return;
 
@@ -166,11 +161,9 @@ inline void pmem_array_reserve( uintptr_t hdr_off, uintptr_t min_cap )
 // При необходимости расширяет массив через pmem_array_reserve.
 //
 // ВАЖНО: возвращаемая ссылка действительна только до следующей аллокации.
-template <typename T>
-inline T& pmem_array_push_back( uintptr_t hdr_off )
+template <typename T> inline T& pmem_array_push_back( uintptr_t hdr_off )
 {
-    static_assert( std::is_trivially_copyable<T>::value,
-                   "pmem_array<T> требует, чтобы T был тривиально копируемым" );
+    static_assert( std::is_trivially_copyable<T>::value, "pmem_array<T> требует, чтобы T был тривиально копируемым" );
 
     auto& pam = PersistentAddressSpace::Get();
 
@@ -186,7 +179,7 @@ inline T& pmem_array_push_back( uintptr_t hdr_off )
 
     // Обновляем размер и возвращаем ссылку на новый элемент.
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
-    T* raw              = pam.Resolve<T>( hdr->data_off );
+    T*              raw = pam.Resolve<T>( hdr->data_off );
     // Инициализируем новый слот нулями.
     std::memset( raw + hdr->size, 0, sizeof( T ) );
     hdr->size++;
@@ -199,12 +192,11 @@ inline T& pmem_array_push_back( uintptr_t hdr_off )
 //
 // Уменьшает size на 1. Не освобождает память (capacity остаётся).
 // Ничего не делает, если массив пуст.
-template <typename T>
-inline void pmem_array_pop_back( uintptr_t hdr_off )
+template <typename T> inline void pmem_array_pop_back( uintptr_t hdr_off )
 {
     if ( hdr_off == 0 )
         return;
-    auto&          pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     if ( hdr != nullptr && hdr->size > 0 )
         hdr->size--;
@@ -218,21 +210,19 @@ inline void pmem_array_pop_back( uintptr_t hdr_off )
 // Не проверяет границы (undefined behavior при idx >= size).
 //
 // ВАЖНО: ссылка действительна только до следующей аллокации.
-template <typename T>
-inline T& pmem_array_at( uintptr_t hdr_off, uintptr_t idx )
+template <typename T> inline T& pmem_array_at( uintptr_t hdr_off, uintptr_t idx )
 {
-    auto& pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
-    T* raw              = pam.Resolve<T>( hdr->data_off );
+    T*              raw = pam.Resolve<T>( hdr->data_off );
     return raw[idx];
 }
 
-template <typename T>
-inline const T& pmem_array_at_const( uintptr_t hdr_off, uintptr_t idx )
+template <typename T> inline const T& pmem_array_at_const( uintptr_t hdr_off, uintptr_t idx )
 {
-    const auto& pam      = PersistentAddressSpace::Get();
+    const auto&           pam = PersistentAddressSpace::Get();
     const pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
-    const T* raw              = pam.Resolve<T>( hdr->data_off );
+    const T*              raw = pam.Resolve<T>( hdr->data_off );
     return raw[idx];
 }
 
@@ -242,12 +232,11 @@ inline const T& pmem_array_at_const( uintptr_t hdr_off, uintptr_t idx )
 //
 // Сдвигает элементы [idx+1..size-1] влево на одну позицию.
 // Уменьшает size на 1. Не освобождает память.
-template <typename T>
-inline void pmem_array_erase_at( uintptr_t hdr_off, uintptr_t idx )
+template <typename T> inline void pmem_array_erase_at( uintptr_t hdr_off, uintptr_t idx )
 {
     if ( hdr_off == 0 )
         return;
-    auto&          pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     if ( hdr == nullptr || idx >= hdr->size )
         return;
@@ -273,8 +262,7 @@ inline void pmem_array_erase_at( uintptr_t hdr_off, uintptr_t idx )
 template <typename T, typename KeyOf, typename Less>
 inline T* pmem_array_insert_sorted( uintptr_t hdr_off, const T& value, KeyOf key_of, Less less )
 {
-    static_assert( std::is_trivially_copyable<T>::value,
-                   "pmem_array<T> требует, чтобы T был тривиально копируемым" );
+    static_assert( std::is_trivially_copyable<T>::value, "pmem_array<T> требует, чтобы T был тривиально копируемым" );
     if ( hdr_off == 0 )
         return nullptr;
 
@@ -283,7 +271,7 @@ inline T* pmem_array_insert_sorted( uintptr_t hdr_off, const T& value, KeyOf key
     // Бинарный поиск (lower_bound).
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     uintptr_t       sz  = hdr->size;
-    uintptr_t       lo  = 0, hi = sz;
+    uintptr_t       lo = 0, hi = sz;
 
     {
         T* raw = pam.Resolve<T>( hdr->data_off );
@@ -315,8 +303,8 @@ inline T* pmem_array_insert_sorted( uintptr_t hdr_off, const T& value, KeyOf key
     pmem_array_reserve<T>( hdr_off, sz + 1 );
 
     // После reserve заголовок и данные могли переместиться.
-    hdr      = pam.Resolve<pmem_array_hdr>( hdr_off );
-    T* raw   = pam.Resolve<T>( hdr->data_off );
+    hdr    = pam.Resolve<pmem_array_hdr>( hdr_off );
+    T* raw = pam.Resolve<T>( hdr->data_off );
 
     // Сдвигаем элементы [idx..sz-1] вправо.
     if ( raw != nullptr && sz > idx )
@@ -350,13 +338,13 @@ inline T* pmem_array_find_sorted( uintptr_t hdr_off, const KeyType& key, KeyOf k
     if ( hdr_off == 0 )
         return nullptr;
 
-    auto& pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     if ( hdr == nullptr || hdr->size == 0 || hdr->data_off == 0 )
         return nullptr;
 
     T*        raw = pam.Resolve<T>( hdr->data_off );
-    uintptr_t lo  = 0, hi = hdr->size;
+    uintptr_t lo = 0, hi = hdr->size;
     while ( lo < hi )
     {
         uintptr_t mid = ( lo + hi ) / 2;
@@ -378,13 +366,13 @@ inline const T* pmem_array_find_sorted_const( uintptr_t hdr_off, const KeyType& 
     if ( hdr_off == 0 )
         return nullptr;
 
-    const auto& pam      = PersistentAddressSpace::Get();
+    const auto&           pam = PersistentAddressSpace::Get();
     const pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     if ( hdr == nullptr || hdr->size == 0 || hdr->data_off == 0 )
         return nullptr;
 
     const T*  raw = pam.Resolve<T>( hdr->data_off );
-    uintptr_t lo  = 0, hi = hdr->size;
+    uintptr_t lo = 0, hi = hdr->size;
     while ( lo < hi )
     {
         uintptr_t mid = ( lo + hi ) / 2;
@@ -406,12 +394,11 @@ inline const T* pmem_array_find_sorted_const( uintptr_t hdr_off, const KeyType& 
 //
 // Освобождает data_off и обнуляет size/capacity/data_off.
 // После вызова заголовок снова пустой (как после pmem_array_init).
-template <typename T>
-inline void pmem_array_free( uintptr_t hdr_off )
+template <typename T> inline void pmem_array_free( uintptr_t hdr_off )
 {
     if ( hdr_off == 0 )
         return;
-    auto&          pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     if ( hdr == nullptr )
         return;
@@ -434,12 +421,11 @@ inline void pmem_array_free( uintptr_t hdr_off )
 // ---------------------------------------------------------------------------
 // pmem_array_clear<T> — обнулить размер без освобождения буфера
 // ---------------------------------------------------------------------------
-template <typename T>
-inline void pmem_array_clear( uintptr_t hdr_off )
+template <typename T> inline void pmem_array_clear( uintptr_t hdr_off )
 {
     if ( hdr_off == 0 )
         return;
-    auto&          pam = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     if ( hdr != nullptr )
         hdr->size = 0;
@@ -452,7 +438,7 @@ inline uintptr_t pmem_array_size( uintptr_t hdr_off )
 {
     if ( hdr_off == 0 )
         return 0;
-    auto& pam           = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     return ( hdr != nullptr ) ? hdr->size : 0;
 }
@@ -461,7 +447,7 @@ inline uintptr_t pmem_array_capacity( uintptr_t hdr_off )
 {
     if ( hdr_off == 0 )
         return 0;
-    auto& pam           = PersistentAddressSpace::Get();
+    auto&           pam = PersistentAddressSpace::Get();
     pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
     return ( hdr != nullptr ) ? hdr->capacity : 0;
 }

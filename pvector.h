@@ -41,10 +41,7 @@ template <typename T> class pvector
 
     // Вспомогательный метод: получить смещение заголовка в ПАП.
     // Используется для realloc-безопасного доступа к полям через pmem_array_*.
-    uintptr_t _hdr_off() const
-    {
-        return PersistentAddressSpace::Get().PtrToOffset( &hdr_ );
-    }
+    uintptr_t _hdr_off() const { return PersistentAddressSpace::Get().PtrToOffset( &hdr_ ); }
 
   public:
     uintptr_t size() const { return hdr_.size; }
@@ -55,15 +52,15 @@ template <typename T> class pvector
     // Делегирует grow/alloc в pmem_array_reserve, затем записывает значение.
     void push_back( const T& val )
     {
-        auto& pam         = PersistentAddressSpace::Get();
+        auto&     pam     = PersistentAddressSpace::Get();
         uintptr_t hdr_off = pam.PtrToOffset( &hdr_ );
 
         // Резервируем место для нового элемента (может вызвать realloc).
         pmem_array_reserve<T>( hdr_off, hdr_.size + 1 );
 
         // После reserve this мог переместиться — повторно разрешаем.
-        pvector<T>* self = ( hdr_off != 0 ) ? pam.Resolve<pvector<T>>( hdr_off ) : this;
-        T* raw           = pam.Resolve<T>( self->hdr_.data_off );
+        pvector<T>* self     = ( hdr_off != 0 ) ? pam.Resolve<pvector<T>>( hdr_off ) : this;
+        T*          raw      = pam.Resolve<T>( self->hdr_.data_off );
         raw[self->hdr_.size] = val;
         self->hdr_.size++;
     }
@@ -77,42 +74,42 @@ template <typename T> class pvector
     T& operator[]( uintptr_t idx )
     {
         auto& pam = PersistentAddressSpace::Get();
-        T* raw    = pam.Resolve<T>( hdr_.data_off );
+        T*    raw = pam.Resolve<T>( hdr_.data_off );
         return raw[idx];
     }
 
     const T& operator[]( uintptr_t idx ) const
     {
         const auto& pam = PersistentAddressSpace::Get();
-        const T* raw    = pam.Resolve<T>( hdr_.data_off );
+        const T*    raw = pam.Resolve<T>( hdr_.data_off );
         return raw[idx];
     }
 
     T& front()
     {
         auto& pam = PersistentAddressSpace::Get();
-        T* raw    = pam.Resolve<T>( hdr_.data_off );
+        T*    raw = pam.Resolve<T>( hdr_.data_off );
         return raw[0];
     }
 
     const T& front() const
     {
         const auto& pam = PersistentAddressSpace::Get();
-        const T* raw    = pam.Resolve<T>( hdr_.data_off );
+        const T*    raw = pam.Resolve<T>( hdr_.data_off );
         return raw[0];
     }
 
     T& back()
     {
         auto& pam = PersistentAddressSpace::Get();
-        T* raw    = pam.Resolve<T>( hdr_.data_off );
+        T*    raw = pam.Resolve<T>( hdr_.data_off );
         return raw[hdr_.size - 1];
     }
 
     const T& back() const
     {
         const auto& pam = PersistentAddressSpace::Get();
-        const T* raw    = pam.Resolve<T>( hdr_.data_off );
+        const T*    raw = pam.Resolve<T>( hdr_.data_off );
         return raw[hdr_.size - 1];
     }
 

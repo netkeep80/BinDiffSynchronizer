@@ -225,8 +225,7 @@ struct pam_array_hdr
     uintptr_t data_off; ///< Смещение массива данных в ПАП; 0 = не выделено
 };
 
-static_assert( std::is_trivially_copyable<pam_array_hdr>::value,
-               "pam_array_hdr должен быть тривиально копируемым" );
+static_assert( std::is_trivially_copyable<pam_array_hdr>::value, "pam_array_hdr должен быть тривиально копируемым" );
 static_assert( sizeof( pam_array_hdr ) == 3 * sizeof( uintptr_t ),
                "pam_array_hdr должен занимать 3 * sizeof(uintptr_t) байт" );
 
@@ -920,9 +919,7 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     PersistentAddressSpace()
-        : _data( nullptr ),
-          _type_vec_offset( 0 ), _slot_map_offset( 0 ),
-          _name_map_offset( 0 ), _free_list_offset( 0 ),
+        : _data( nullptr ), _type_vec_offset( 0 ), _slot_map_offset( 0 ), _name_map_offset( 0 ), _free_list_offset( 0 ),
           _bump( sizeof( pam_header ) )
     {
         _filename[0] = '\0';
@@ -984,11 +981,9 @@ class PersistentAddressSpace
     //
     // Возвращает true при успехе, false при ошибке выделения памяти.
 
-    template <typename T>
-    bool _raw_grow_array( uintptr_t hdr_off, uintptr_t new_cap )
+    template <typename T> bool _raw_grow_array( uintptr_t hdr_off, uintptr_t new_cap )
     {
-        static_assert( std::is_trivially_copyable<T>::value,
-                       "_raw_grow_array<T> требует тривиально копируемый T" );
+        static_assert( std::is_trivially_copyable<T>::value, "_raw_grow_array<T> требует тривиально копируемый T" );
         if ( hdr_off == 0 )
             return false;
 
@@ -1064,10 +1059,10 @@ class PersistentAddressSpace
     {
         if ( sz == 0 || !_ensure_free_list_capacity() )
             return;
-        pam_array_hdr* hdr             = _arr_hdr( _free_list_offset );
-        free_entry*    fe              = _free_entries();
-        fe[hdr->size].offset           = off;
-        fe[hdr->size].size             = sz;
+        pam_array_hdr* hdr   = _arr_hdr( _free_list_offset );
+        free_entry*    fe    = _free_entries();
+        fe[hdr->size].offset = off;
+        fe[hdr->size].size   = sz;
         hdr->size++;
     }
 
@@ -1366,7 +1361,7 @@ class PersistentAddressSpace
     unsigned _find_or_register_type( const char* type_name, uintptr_t elem_size )
     {
         // Ищем существующий тип (O(n) линейный поиск).
-        TypeInfo* te = _type_entries();
+        TypeInfo* te      = _type_entries();
         uintptr_t tv_size = _type_vec_size();
         for ( unsigned i = 0; i < static_cast<unsigned>( tv_size ); i++ )
         {
