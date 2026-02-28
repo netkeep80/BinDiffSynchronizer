@@ -108,18 +108,11 @@ struct name_key
 {
     char name[PAM_NAME_SIZE]; ///< Имя объекта (нуль-терминированная строка)
 
-    bool operator<( const name_key& other ) const
-    {
-        return std::strncmp( name, other.name, PAM_NAME_SIZE ) < 0;
-    }
-    bool operator==( const name_key& other ) const
-    {
-        return std::strncmp( name, other.name, PAM_NAME_SIZE ) == 0;
-    }
+    bool operator<( const name_key& other ) const { return std::strncmp( name, other.name, PAM_NAME_SIZE ) < 0; }
+    bool operator==( const name_key& other ) const { return std::strncmp( name, other.name, PAM_NAME_SIZE ) == 0; }
 };
 
-static_assert( std::is_trivially_copyable<name_key>::value,
-               "name_key должен быть тривиально копируемым" );
+static_assert( std::is_trivially_copyable<name_key>::value, "name_key должен быть тривиально копируемым" );
 
 // ---------------------------------------------------------------------------
 // name_entry — запись в отсортированном массиве карты имён (внутри ПАП)
@@ -133,8 +126,7 @@ struct name_entry
     uintptr_t slot_offset; ///< Смещение объекта в ПАП (значение)
 };
 
-static_assert( std::is_trivially_copyable<name_entry>::value,
-               "name_entry должен быть тривиально копируемым" );
+static_assert( std::is_trivially_copyable<name_entry>::value, "name_entry должен быть тривиально копируемым" );
 
 // ---------------------------------------------------------------------------
 // name_info_entry — запись таблицы имён ПАМ (для совместимости с тестами)
@@ -211,11 +203,11 @@ static_assert( std::is_trivially_copyable<slot_entry>::value, "slot_entry дол
 /// Добавлены slot_map_offset и name_map_offset для восстановления из файла.
 struct pam_header
 {
-    uint32_t  magic;           ///< PAM_MAGIC — признак файла ПАМ
-    uint32_t  version;         ///< PAM_VERSION — версия формата
-    uintptr_t data_area_size;  ///< Размер области данных в байтах
-    unsigned  type_count;      ///< Число записей в таблице типов
-    unsigned  type_capacity;   ///< Ёмкость таблицы типов (число записей в файле)
+    uint32_t  magic;          ///< PAM_MAGIC — признак файла ПАМ
+    uint32_t  version;        ///< PAM_VERSION — версия формата
+    uintptr_t data_area_size; ///< Размер области данных в байтах
+    unsigned  type_count;     ///< Число записей в таблице типов
+    unsigned  type_capacity;  ///< Ёмкость таблицы типов (число записей в файле)
     uintptr_t slot_map_offset; ///< Смещение объекта карты слотов в области данных
     uintptr_t name_map_offset; ///< Смещение объекта карты имён в области данных (фаза 8.3)
 };
@@ -568,7 +560,7 @@ class PersistentAddressSpace
         // Обновляем смещения карт в заголовке перед сохранением.
         _header().slot_map_offset = _slot_map_offset;
         _header().name_map_offset = _name_map_offset;
-        std::FILE* f = std::fopen( _filename, "wb" );
+        std::FILE* f              = std::fopen( _filename, "wb" );
         if ( f == nullptr )
             return;
         std::fwrite( &_header(), sizeof( pam_header ), 1, f );
@@ -611,16 +603,16 @@ class PersistentAddressSpace
     uintptr_t _slot_map_offset;   ///< Смещение объекта карты слотов в _data
     uintptr_t _slot_map_size;     ///< Текущее число слотов (зеркало size_ в _data)
     uintptr_t _slot_map_capacity; ///< Текущая ёмкость карты (зеркало capacity_ в _data)
-    uintptr_t _slot_entries_off;  ///< Смещение массива slot_entry[] в _data (зеркало entries_offset)
+    uintptr_t _slot_entries_off; ///< Смещение массива slot_entry[] в _data (зеркало entries_offset)
 
     /// Карта имён хранится ВНУТРИ _data по смещению _name_map_offset (фаза 8.3).
     /// Раскладка совместима с pmap<name_key, uintptr_t>:
     ///   [uintptr_t size][uintptr_t capacity][uintptr_t entries_offset]
     /// Массив записей name_entry[] расположен по entries_offset в _data.
-    uintptr_t _name_map_offset;   ///< Смещение объекта карты имён в _data
-    uintptr_t _name_map_size;     ///< Текущее число записей имён (зеркало size_ в _data)
+    uintptr_t _name_map_offset; ///< Смещение объекта карты имён в _data
+    uintptr_t _name_map_size;   ///< Текущее число записей имён (зеркало size_ в _data)
     uintptr_t _name_map_capacity; ///< Текущая ёмкость карты имён (зеркало capacity_ в _data)
-    uintptr_t _name_entries_off;  ///< Смещение массива name_entry[] в _data (зеркало entries_offset)
+    uintptr_t _name_entries_off; ///< Смещение массива name_entry[] в _data (зеркало entries_offset)
 
     type_info_entry* _types;         ///< Динамическая таблица типов
     unsigned         _type_capacity; ///< Текущая ёмкость таблицы типов
@@ -729,11 +721,9 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     PersistentAddressSpace()
-        : _data( nullptr ),
-          _slot_map_offset( 0 ), _slot_map_size( 0 ), _slot_map_capacity( 0 ), _slot_entries_off( 0 ),
+        : _data( nullptr ), _slot_map_offset( 0 ), _slot_map_size( 0 ), _slot_map_capacity( 0 ), _slot_entries_off( 0 ),
           _name_map_offset( 0 ), _name_map_size( 0 ), _name_map_capacity( 0 ), _name_entries_off( 0 ),
-          _types( nullptr ), _type_capacity( 0 ),
-          _bump( sizeof( pam_header ) )
+          _types( nullptr ), _type_capacity( 0 ), _bump( sizeof( pam_header ) )
     {
         _filename[0] = '\0';
     }
@@ -1210,12 +1200,12 @@ class PersistentAddressSpace
         std::memset( _data, 0, static_cast<std::size_t>( data_size ) );
 
         // Записываем заголовок в начало буфера данных.
-        pam_header& hdr    = _header();
-        hdr.magic          = PAM_MAGIC;
-        hdr.version        = PAM_VERSION;
-        hdr.data_area_size = data_size;
-        hdr.type_count     = 0;
-        hdr.type_capacity  = _type_capacity;
+        pam_header& hdr     = _header();
+        hdr.magic           = PAM_MAGIC;
+        hdr.version         = PAM_VERSION;
+        hdr.data_area_size  = data_size;
+        hdr.type_count      = 0;
+        hdr.type_capacity   = _type_capacity;
         hdr.slot_map_offset = 0;
         hdr.name_map_offset = 0;
 

@@ -772,8 +772,7 @@ TEST_CASE( "name_entry: has correct fields", "[pam][layout][phase83]" )
 // ---------------------------------------------------------------------------
 // Карта имён — Find работает через карту внутри ПАП (O(log n))
 // ---------------------------------------------------------------------------
-TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- Find returns correct offset",
-           "[pam][phase83]" )
+TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- Find returns correct offset", "[pam][phase83]" )
 {
     auto& pam = PersistentAddressSpace::Get();
 
@@ -793,8 +792,7 @@ TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- Find returns correct o
 // ---------------------------------------------------------------------------
 // Карта имён — GetName возвращает имя через карту внутри ПАП
 // ---------------------------------------------------------------------------
-TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- GetName returns name",
-           "[pam][phase83]" )
+TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- GetName returns name", "[pam][phase83]" )
 {
     auto& pam = PersistentAddressSpace::Get();
 
@@ -811,8 +809,7 @@ TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- GetName returns name",
 // ---------------------------------------------------------------------------
 // Карта имён — уникальность имён гарантируется
 // ---------------------------------------------------------------------------
-TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- duplicate name returns 0",
-           "[pam][phase83]" )
+TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- duplicate name returns 0", "[pam][phase83]" )
 {
     auto& pam = PersistentAddressSpace::Get();
 
@@ -835,7 +832,7 @@ TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- grows correctly with m
     auto& pam = PersistentAddressSpace::Get();
 
     // Создаём больше объектов, чем начальная ёмкость карты имён (PAM_INITIAL_NAME_CAPACITY).
-    const unsigned N = PAM_INITIAL_NAME_CAPACITY * 4;
+    const unsigned         N = PAM_INITIAL_NAME_CAPACITY * 4;
     std::vector<uintptr_t> offsets;
     offsets.reserve( N );
 
