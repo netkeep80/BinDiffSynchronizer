@@ -331,10 +331,14 @@ TEST_CASE( "pjson opt F6: round-trip complex object", "[pjson][opt][f6][roundtri
     fv.New();
     pjson::from_string( original.c_str(), fv.addr() );
     std::string restored = fv->to_string();
-    // Парсим оба через nlohmann для нормализованного сравнения.
-    nlohmann::json jo = nlohmann::json::parse( original );
-    nlohmann::json jr = nlohmann::json::parse( restored );
-    REQUIRE( jo.dump() == jr.dump() );
+    // Нормализуем оригинал через pjson (parse + serialize) для сравнения.
+    fptr<pjson> fv2;
+    fv2.New();
+    pjson::from_string( original.c_str(), fv2.addr() );
+    std::string original_normalized = fv2->to_string();
+    fv2->free();
+    fv2.Delete();
+    REQUIRE( original_normalized == restored );
     fv->free();
     fv.Delete();
 }

@@ -6,6 +6,7 @@
 #include <new>
 #include <stdexcept>
 #include <type_traits>
+#include <typeinfo>
 
 // pam_core.h — Ядро персистного адресного менеджера (ПАМ).
 // Содержит PersistentAddressSpace с вектором типов (type_vec), картой слотов
