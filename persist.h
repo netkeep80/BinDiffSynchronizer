@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
-#include "pam.h"
+#include "pam_core.h"
 
 /*
  * persist.h — Персистная инфраструктура фазы 2.
