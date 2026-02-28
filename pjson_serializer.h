@@ -119,9 +119,9 @@ inline void append_double( std::string& out, double v )
     }
     // Используем std::to_chars для кратчайшего представления double.
     // Размер буфера: достаточно для максимального представления double (64 символа).
-    char                  buf[64];
-    std::to_chars_result  res = std::to_chars( buf, buf + sizeof( buf ), v );
-    std::size_t           len = static_cast<std::size_t>( res.ptr - buf );
+    char                 buf[64];
+    std::to_chars_result res = std::to_chars( buf, buf + sizeof( buf ), v );
+    std::size_t          len = static_cast<std::size_t>( res.ptr - buf );
 
     // Проверяем наличие десятичной точки или экспоненты.
     // Если нет — добавляем ".0", чтобы тип значения (float) был очевиден в JSON.
