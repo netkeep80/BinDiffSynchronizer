@@ -137,6 +137,9 @@ static void bench_nlohmann_to_pjson( const json& src, uintptr_t dst_offset )
 TEST_CASE( "pjson bench: to_string direct vs nlohmann dump", "[pjson][bench][serial]" )
 {
     // Создаём достаточно сложный JSON-документ.
+    // Важно: после каждой операции аллокации в ПАМ указатели могут инвалидироваться.
+    // Поэтому сохраняем смещение и каждый раз переразрешаем через obj_find.
+    auto&       pam = PersistentAddressSpace::Get();
     fptr<pjson> froot;
     froot.New();
     froot->set_object();
@@ -144,24 +147,30 @@ TEST_CASE( "pjson bench: to_string direct vs nlohmann dump", "[pjson][bench][ser
     {
         char key[16];
         std::snprintf( key, sizeof( key ), "key_%03d", i );
-        pjson& val = froot->obj_insert( key );
+        froot->obj_insert( key );
+        // Переразрешаем указатель после возможной реаллокации ПАМ.
+        pjson* val = pam.Resolve<pjson>( froot.addr() )->obj_find( key );
         if ( i % 5 == 0 )
         {
-            val.set_array();
+            uintptr_t val_off = pam.PtrToOffset( val );
+            pam.Resolve<pjson>( val_off )->set_array();
             for ( int j = 0; j < 10; j++ )
-                val.push_back().set_int( j );
+            {
+                // Переразрешаем val_off после каждого push_back.
+                pam.Resolve<pjson>( val_off )->push_back().set_int( j );
+            }
         }
         else if ( i % 3 == 0 )
         {
-            val.set_string( "hello world string value" );
+            val->set_string( "hello world string value" );
         }
         else if ( i % 2 == 0 )
         {
-            val.set_real( 3.14159 * i );
+            val->set_real( 3.14159 * i );
         }
         else
         {
-            val.set_int( i * 42 );
+            val->set_int( i * 42 );
         }
     }
 
