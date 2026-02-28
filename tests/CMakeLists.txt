@@ -19,6 +19,8 @@ set(TEST_SOURCES
     test_pjson.cpp
     test_pjson_large.cpp
     test_pjson_serial.cpp
+    test_pjson_opt.cpp
+    test_pjson_bench.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
