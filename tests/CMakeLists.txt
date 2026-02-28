@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(Catch2)
 set(TEST_SOURCES
     test_pam.cpp
     test_pam_dynamic.cpp
+    test_pam_metrics.cpp
     test_persist.cpp
     test_pstring.cpp
     test_pvector.cpp

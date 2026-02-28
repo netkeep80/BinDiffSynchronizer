@@ -75,12 +75,6 @@ struct TypeInfo
 static_assert( std::is_trivially_copyable<TypeInfo>::value, "TypeInfo должен быть тривиально копируемым" );
 
 // ---------------------------------------------------------------------------
-// type_entry — запись в массиве вектора типов (совместима с pvector<TypeInfo>)
-// ---------------------------------------------------------------------------
-// Используется только для static_assert совместимости в pam.h.
-// Сам массив TypeInfo[] хранится как elements pvector<TypeInfo>.
-
-// ---------------------------------------------------------------------------
 // type_info_entry — запись таблицы типов ПАМ (для совместимости с тестами)
 // ---------------------------------------------------------------------------
 
@@ -243,8 +237,7 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     /**
-     * Инициализировать ПАМ из файла filename.
-     * Если файл не существует — создаётся пустой образ.
+     * Инициализировать ПАМ из файла. Если не существует — создаётся пустой образ.
      * Конструкторы объектов при загрузке НЕ вызываются (Тр.10).
      */
     static void Init( const char* filename ) { _instance()._load( filename ); }
@@ -299,11 +292,9 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     /**
-     * Попытаться расширить последний аллоцированный блок в ПАП на месте.
-     * Если old_offset + old_count * elem_size == _bump (блок последний),
-     * расширяет до new_count * elem_size, обнуляет новые байты и возвращает
-     * old_offset. Иначе возвращает 0 (caller должен выделить новый блок).
-     * Слот в карте слотов при этом НЕ обновляется — caller обновляет сам.
+     * Расширить последний блок ПАП на месте (только если он последний в bump).
+     * Возвращает old_offset при успехе или 0 (caller выделяет новый блок).
+     * Слот в карте слотов НЕ обновляется — caller делает это сам.
      */
     uintptr_t Realloc( uintptr_t old_offset, uintptr_t old_count, uintptr_t new_count, uintptr_t elem_size )
     {
@@ -540,15 +531,68 @@ class PersistentAddressSpace
         return static_cast<uintptr_t>( ptr - _data );
     }
 
+    // ─── Метрики ПАМ ─────────────────────────────────────────────────────────
+
+    uintptr_t GetSlotCount() const { return _slot_map_size; }        ///< Аллоцированных слотов.
+    uintptr_t GetSlotCapacity() const { return _slot_map_capacity; } ///< Ёмкость карты слотов.
+    uintptr_t GetNamedCount() const { return _name_map_size; }       ///< Именованных объектов.
+    uintptr_t GetTypeCount() const { return _type_vec_size; }        ///< Уникальных типов.
+    uintptr_t GetFreeListSize() const { return _free_list_size; }    ///< Свободных блоков.
+    uintptr_t GetBump() const { return _bump; }                      ///< Позиция bump-указателя.
+
+    uintptr_t GetDataSize() const
+    {
+        if ( _data == nullptr )
+            return 0;
+        return _header_const().data_area_size;
+    }
+
+    /// Полная самодиагностика ПАП: заголовок, структуры, согласованность карт.
+    /// Возвращает false при любом нарушении инварианта.
+    bool Validate() const
+    {
+        if ( _data == nullptr )
+            return false;
+        const pam_header& h = _header_const();
+        if ( h.magic != PAM_MAGIC || h.version != PAM_VERSION )
+            return false;
+        uintptr_t ds = h.data_area_size;
+        if ( _bump > ds )
+            return false;
+        auto in_range = [&]( uintptr_t o, uintptr_t s ) { return o == 0 || o + s <= ds; };
+        if ( !in_range( _type_vec_offset, 3 * sizeof( uintptr_t ) ) ||
+             !in_range( _slot_map_offset, 3 * sizeof( uintptr_t ) ) ||
+             !in_range( _name_map_offset, 3 * sizeof( uintptr_t ) ) ||
+             !in_range( _free_list_offset, 3 * sizeof( uintptr_t ) ) )
+            return false;
+        if ( _type_vec_size > _type_vec_capacity || _slot_map_size > _slot_map_capacity ||
+             _name_map_size > _name_map_capacity )
+            return false;
+        if ( _type_vec_capacity > 0 && !in_range( _type_entries_off, _type_vec_capacity * sizeof( TypeInfo ) ) )
+            return false;
+        if ( _slot_map_capacity > 0 && !in_range( _slot_entries_off, _slot_map_capacity * sizeof( slot_entry ) ) )
+            return false;
+        if ( _name_map_capacity > 0 && !in_range( _name_entries_off, _name_map_capacity * sizeof( name_entry ) ) )
+            return false;
+        const name_entry* ne = _name_entries_const();
+        const slot_entry* se = _slot_entries_const();
+        if ( ne && se )
+        {
+            for ( uintptr_t ni = 0; ni < _name_map_size; ni++ )
+            {
+                uintptr_t si = _slot_lower_bound( ne[ni].slot_offset );
+                if ( si >= _slot_map_size || se[si].key != ne[ni].slot_offset || se[si].value.name_idx != ni )
+                    return false;
+            }
+        }
+        return true;
+    }
+
     // -----------------------------------------------------------------------
     // Разыменование адреса
     // -----------------------------------------------------------------------
 
-    /**
-     * Преобразовать смещение в указатель типа T*.
-     * @return Указатель на объект T в ПАП или nullptr.
-     * Конструкторы НЕ вызываются (Тр.10).
-     */
+    /// Преобразовать смещение в T* (конструкторы НЕ вызываются). nullptr при ошибке.
     template <class T> T* Resolve( uintptr_t offset )
     {
         if ( offset == 0 )
@@ -569,11 +613,7 @@ class PersistentAddressSpace
         return reinterpret_cast<const T*>( _data + offset );
     }
 
-    /**
-     * Получить элемент массива по смещению и индексу.
-     * Проверяет границы массива через таблицу слотов.
-     * @return Ссылка на элемент.
-     */
+    /// Получить элемент массива T по смещению и индексу. Проверяет границы.
     template <class T> T& ResolveElement( uintptr_t offset, uintptr_t index )
     {
         uintptr_t data_size   = _header_const().data_area_size;
@@ -603,10 +643,7 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     /**
-     * Сохранить весь образ ПАМ в файл (фаза 8.4).
-     * Записывает: заголовок, область данных.
-     * Вектор типов, карта слотов и карта имён сохраняются как часть области данных (внутри ПАП).
-     * Смещения структур записываются в заголовок перед сохранением.
+     * Сохранить образ ПАМ в файл. Заголовок и область данных (включая карты) записываются вместе.
      */
     void Save()
     {
@@ -824,12 +861,7 @@ class PersistentAddressSpace
     // Низкоуровневое выделение памяти в области данных (без регистрации слота)
     // -----------------------------------------------------------------------
 
-    /**
-     * Выделить size байт в области данных ПАМ без регистрации слота.
-     * Используется для внутренней аллокации (карта слотов, карта имён, их записи).
-     * Возвращает смещение в _data или 0 при ошибке.
-     * После вызова _data может переместиться (realloc).
-     */
+    /// Выделить size байт в области данных ПАМ без регистрации слота. 0 при ошибке.
     uintptr_t _raw_alloc( uintptr_t size, uintptr_t align )
     {
         if ( size == 0 )
@@ -1165,12 +1197,7 @@ class PersistentAddressSpace
         return true;
     }
 
-    /**
-     * Вставить новое имя в карту имён (отсортированный массив по имени).
-     * Сохраняет сортировку для O(log n) поиска.
-     * Проверяет уникальность: если имя уже есть, возвращает PAM_INVALID_IDX.
-     * @return Индекс вставленной записи или PAM_INVALID_IDX при ошибке/дубликате.
-     */
+    /// Вставить имя в карту имён (отсортировано). PAM_INVALID_IDX при ошибке/дубликате.
     uintptr_t _name_insert( const name_key& nk, uintptr_t slot_offset )
     {
         if ( !_ensure_name_map_capacity() )
@@ -1200,10 +1227,7 @@ class PersistentAddressSpace
         return idx;
     }
 
-    /**
-     * После удаления записи карты имён по индексу del_idx сдвинуть name_idx
-     * во всех слотах, ссылающихся на индексы > del_idx, уменьшив их на 1.
-     */
+    /// Скорректировать name_idx в слотах (уменьшить на 1 для индексов > del_idx).
     void _shift_name_indices_after_delete( uintptr_t del_idx )
     {
         slot_entry* entries = _slot_entries();
@@ -1217,11 +1241,7 @@ class PersistentAddressSpace
         }
     }
 
-    /**
-     * После вставки записи карты имён по индексу ins_idx сдвинуть name_idx
-     * во всех слотах, ссылающихся на индексы >= ins_idx, увеличив их на 1.
-     * Вызывается ДО вставки новой записи.
-     */
+    /// Скорректировать name_idx в слотах (увеличить на 1 для индексов >= ins_idx).
     void _shift_name_indices_after_insert( uintptr_t ins_idx )
     {
         slot_entry* entries = _slot_entries();
@@ -1359,12 +1379,7 @@ class PersistentAddressSpace
     // Поиск или регистрация типа в таблице типов
     // -----------------------------------------------------------------------
 
-    /**
-     * Найти или зарегистрировать тип в векторе типов внутри ПАП (фаза 8.4).
-     * Если тип с таким именем и размером уже есть — возвращает его индекс.
-     * Если нет — добавляет новую запись в конец вектора и возвращает её индекс.
-     * @return Индекс в векторе типов или PAM_INVALID_IDX при ошибке.
-     */
+    /// Найти или зарегистрировать тип в векторе типов. PAM_INVALID_IDX при ошибке.
     unsigned _find_or_register_type( const char* type_name, uintptr_t elem_size )
     {
         // Ищем существующий тип (O(n) линейный поиск).
@@ -1403,16 +1418,7 @@ class PersistentAddressSpace
     // Аллокатор области данных
     // -----------------------------------------------------------------------
 
-    /**
-     * Выделить size*count байт в области данных ПАМ.
-     * Всегда создаётся запись в карте слотов (внутри ПАП, фаза 8.2).
-     * Тип регистрируется в таблице типов (один раз на уникальный тип).
-     * Если name задано — регистрируется запись в карте имён (фаза 8.3) и
-     * устанавливается двусторонняя связь: name_entry.slot_offset = offset,
-     *                                      SlotInfo.name_idx = индекс в карте имён.
-     * Если name задано, но уже занято — возвращает 0 (уникальность нарушена).
-     * Возвращает смещение или 0 при ошибке.
-     */
+    /// Выделить elem_size*count байт, зарегистрировать слот и (опционально) имя. 0 при ошибке.
     uintptr_t _alloc( uintptr_t elem_size, uintptr_t count, const char* type_id, const char* name )
     {
         uintptr_t total_size = elem_size * count;
