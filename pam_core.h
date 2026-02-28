@@ -541,6 +541,155 @@ class PersistentAddressSpace
     }
 
     // -----------------------------------------------------------------------
+    // Метрики менеджера ПАМ (для мониторинга и профилирования)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Получить число аллоцированных слотов (активных объектов в ПАП).
+     * @return Число записей в карте слотов.
+     */
+    uintptr_t GetSlotCount() const { return _slot_map_size; }
+
+    /**
+     * Получить ёмкость карты слотов (максимальное число без перевыделения).
+     * @return Текущая ёмкость карты слотов.
+     */
+    uintptr_t GetSlotCapacity() const { return _slot_map_capacity; }
+
+    /**
+     * Получить число именованных объектов в карте имён.
+     * @return Число записей в карте имён.
+     */
+    uintptr_t GetNamedCount() const { return _name_map_size; }
+
+    /**
+     * Получить число уникальных типов в векторе типов.
+     * @return Число записей в векторе типов.
+     */
+    uintptr_t GetTypeCount() const { return _type_vec_size; }
+
+    /**
+     * Получить размер области данных ПАП в байтах.
+     * @return Размер области данных (включая заголовок и все структуры).
+     */
+    uintptr_t GetDataSize() const
+    {
+        if ( _data == nullptr )
+            return 0;
+        return _header_const().data_area_size;
+    }
+
+    /**
+     * Получить число записей в списке свободных областей.
+     * @return Число освобождённых, но ещё не перевыделённых блоков.
+     */
+    uintptr_t GetFreeListSize() const { return _free_list_size; }
+
+    /**
+     * Получить позицию bump-указателя (следующего свободного смещения).
+     * @return Смещение следующего свободного байта в области данных.
+     */
+    uintptr_t GetBump() const { return _bump; }
+
+    /**
+     * Проверить корректность структур ПАП (самодиагностика).
+     *
+     * Проверяет:
+     *   1. Буфер данных (_data) выделен.
+     *   2. Заголовок имеет правильное магическое число и версию.
+     *   3. Вектор типов: смещение, размер и ёмкость согласованы.
+     *   4. Карта слотов: смещение, размер и ёмкость согласованы.
+     *   5. Карта имён: смещение, размер и ёмкость согласованы.
+     *   6. bump-указатель не выходит за пределы области данных.
+     *   7. Все смещения структур лежат внутри области данных.
+     *   8. Для каждой записи карты имён: соответствующий слот существует
+     *      и обратная ссылка name_idx указывает на ту же запись.
+     *
+     * @return true, если все проверки пройдены; false при любом нарушении.
+     */
+    bool Validate() const
+    {
+        // 1. Буфер данных выделен.
+        if ( _data == nullptr )
+            return false;
+
+        // 2. Заголовок: магическое число и версия.
+        const pam_header& hdr = _header_const();
+        if ( hdr.magic != PAM_MAGIC || hdr.version != PAM_VERSION )
+            return false;
+
+        uintptr_t data_size = hdr.data_area_size;
+
+        // 6. bump-указатель в пределах области данных.
+        if ( _bump > data_size )
+            return false;
+
+        // 7. Смещения структур внутри области данных.
+        auto in_range = [&]( uintptr_t off, uintptr_t sz ) -> bool
+        {
+            if ( off == 0 )
+                return true; // 0 = не инициализировано, допустимо
+            return off + sz <= data_size;
+        };
+
+        if ( !in_range( _type_vec_offset, 3 * sizeof( uintptr_t ) ) )
+            return false;
+        if ( !in_range( _slot_map_offset, 3 * sizeof( uintptr_t ) ) )
+            return false;
+        if ( !in_range( _name_map_offset, 3 * sizeof( uintptr_t ) ) )
+            return false;
+        if ( !in_range( _free_list_offset, 3 * sizeof( uintptr_t ) ) )
+            return false;
+
+        // 3. Вектор типов: ёмкость >= размер.
+        if ( _type_vec_size > _type_vec_capacity )
+            return false;
+        if ( _type_vec_capacity > 0 )
+        {
+            if ( !in_range( _type_entries_off, _type_vec_capacity * sizeof( TypeInfo ) ) )
+                return false;
+        }
+
+        // 4. Карта слотов: ёмкость >= размер.
+        if ( _slot_map_size > _slot_map_capacity )
+            return false;
+        if ( _slot_map_capacity > 0 )
+        {
+            if ( !in_range( _slot_entries_off, _slot_map_capacity * sizeof( slot_entry ) ) )
+                return false;
+        }
+
+        // 5. Карта имён: ёмкость >= размер.
+        if ( _name_map_size > _name_map_capacity )
+            return false;
+        if ( _name_map_capacity > 0 )
+        {
+            if ( !in_range( _name_entries_off, _name_map_capacity * sizeof( name_entry ) ) )
+                return false;
+        }
+
+        // 8. Согласованность карты имён с картой слотов.
+        const name_entry* nentries = _name_entries_const();
+        const slot_entry* sentries = _slot_entries_const();
+        if ( nentries != nullptr && sentries != nullptr )
+        {
+            for ( uintptr_t ni = 0; ni < _name_map_size; ni++ )
+            {
+                uintptr_t slot_off = nentries[ni].slot_offset;
+                // Каждый слот в карте имён должен существовать в карте слотов.
+                uintptr_t si = _slot_lower_bound( slot_off );
+                if ( si >= _slot_map_size || sentries[si].key != slot_off )
+                    return false;
+                // Обратная ссылка name_idx должна указывать на ту же запись карты имён.
+                if ( sentries[si].value.name_idx != ni )
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    // -----------------------------------------------------------------------
     // Разыменование адреса
     // -----------------------------------------------------------------------
 

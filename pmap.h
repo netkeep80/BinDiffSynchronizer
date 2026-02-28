@@ -55,11 +55,17 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     // lower_bound: найти индекс первой записи с ключом >= k.
     uintptr_t lower_bound( const K& k ) const
     {
+        if ( size_ == 0 )
+            return 0;
+        // Получаем сырой указатель один раз для быстрого доступа без накладных расходов fptr.
+        const Entry* raw = PersistentAddressSpace::Get().Resolve<Entry>( data_.addr() );
+        if ( raw == nullptr )
+            return 0;
         uintptr_t lo = 0, hi = size_;
         while ( lo < hi )
         {
             uintptr_t mid = ( lo + hi ) / 2;
-            if ( data_[static_cast<unsigned>( mid )].key < k )
+            if ( raw[mid].key < k )
                 lo = mid + 1;
             else
                 hi = mid;
@@ -141,10 +147,16 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
         // Вставляем в позицию idx, сдвигая элементы вправо.
         // grow() возвращает актуальный self* после возможного realloc буфера ПАМ.
         pmap<K, V>* self = grow( size_ + 1 );
-        // Сдвигаем элементы вправо.
-        for ( uintptr_t i = self->size_; i > idx; i-- )
-            self->data_[static_cast<unsigned>( i )] = self->data_[static_cast<unsigned>( i - 1 )];
-        self->data_[static_cast<unsigned>( idx )] = Entry{ k, v };
+        // Сдвигаем элементы вправо через memmove (быстрее поэлементного сдвига).
+        auto&  pam = PersistentAddressSpace::Get();
+        Entry* raw = pam.Resolve<Entry>( self->data_.addr() );
+        if ( raw != nullptr && self->size_ > idx )
+            std::memmove( raw + idx + 1, raw + idx, ( self->size_ - idx ) * sizeof( Entry ) );
+        Entry new_entry{ k, v };
+        if ( raw != nullptr )
+            raw[idx] = new_entry;
+        else
+            self->data_[static_cast<unsigned>( idx )] = new_entry;
         self->size_++;
     }
 
@@ -152,18 +164,18 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     V* find( const K& k )
     {
         uintptr_t idx = lower_bound( k );
-        if ( idx < size_ && !( k < data_[static_cast<unsigned>( idx )].key ) &&
-             !( data_[static_cast<unsigned>( idx )].key < k ) )
-            return &data_[static_cast<unsigned>( idx )].value;
+        Entry*    raw = PersistentAddressSpace::Get().Resolve<Entry>( data_.addr() );
+        if ( raw != nullptr && idx < size_ && !( k < raw[idx].key ) && !( raw[idx].key < k ) )
+            return &raw[idx].value;
         return nullptr;
     }
 
     const V* find( const K& k ) const
     {
-        uintptr_t idx = lower_bound( k );
-        if ( idx < size_ && !( k < data_[static_cast<unsigned>( idx )].key ) &&
-             !( data_[static_cast<unsigned>( idx )].key < k ) )
-            return &data_[static_cast<unsigned>( idx )].value;
+        uintptr_t    idx = lower_bound( k );
+        const Entry* raw = PersistentAddressSpace::Get().Resolve<Entry>( data_.addr() );
+        if ( raw != nullptr && idx < size_ && !( k < raw[idx].key ) && !( raw[idx].key < k ) )
+            return &raw[idx].value;
         return nullptr;
     }
 
@@ -174,9 +186,11 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
         if ( idx >= size_ || ( k < data_[static_cast<unsigned>( idx )].key ) ||
              ( data_[static_cast<unsigned>( idx )].key < k ) )
             return false;
-        // Сдвигаем элементы влево.
-        for ( uintptr_t i = idx; i + 1 < size_; i++ )
-            data_[static_cast<unsigned>( i )] = data_[static_cast<unsigned>( i + 1 )];
+        // Сдвигаем элементы влево через memmove (быстрее поэлементного сдвига).
+        auto&  pam = PersistentAddressSpace::Get();
+        Entry* raw = pam.Resolve<Entry>( data_.addr() );
+        if ( raw != nullptr && idx + 1 < size_ )
+            std::memmove( raw + idx, raw + idx + 1, ( size_ - idx - 1 ) * sizeof( Entry ) );
         size_--;
         return true;
     }
