@@ -55,11 +55,11 @@
 
 ---
 
-## Фаза 1. Общий примитив персистного массива (`pmem_array`)
+## Фаза 1. Общий примитив персистного массива (`pmem_array`) ✅ ЗАВЕРШЕНА (частично)
 
 **Цель:** Ликвидировать дублирование кода для массивов в ПАП. Сейчас похожие паттерны `grow/copy/sync` повторяются в `pvector`, `pmap`, и во внутренних структурах ПАМ (`type_vec`, `slot_map`, `name_map`, `free_list`).
 
-### Задача 1.1. Определить заголовок `pmem_array_hdr`
+### Задача 1.1. Определить заголовок `pmem_array_hdr` ✅ ВЫПОЛНЕНО
 
 ```cpp
 // pmem_array.h
@@ -70,7 +70,7 @@ struct pmem_array_hdr {
 };
 ```
 
-### Задача 1.2. Реализовать шаблонные функции работы с массивом
+### Задача 1.2. Реализовать шаблонные функции работы с массивом ✅ ВЫПОЛНЕНО
 
 - `pmem_array_init<T>(hdr_off, init_cap)` — инициализация
 - `pmem_array_reserve<T>(hdr_off, min_cap)` — предварительное резервирование
@@ -81,13 +81,15 @@ struct pmem_array_hdr {
 - `pmem_array_find_sorted<T, KeyOf, Less>(hdr_off, key) -> T*` — бинарный поиск
 - `pmem_array_erase_at<T>(hdr_off, idx)` — удаление по индексу
 
-### Задача 1.3. Переписать `pvector` через `pmem_array`
+Реализовано в `pmem_array.h`. Тесты в `tests/test_pmem_array.cpp` (273 тестов, все проходят).
+
+### Задача 1.3. Переписать `pvector` через `pmem_array` ✅ ВЫПОЛНЕНО
 
 - `pvector<T>` становится тонкой обёрткой над `pmem_array_hdr`.
 - Сохранить совместимый layout (size, capacity, data_off).
 - Все тесты `test_pvector.cpp` должны пройти.
 
-### Задача 1.4. Переписать `pmap` через `pmem_array`
+### Задача 1.4. Переписать `pmap` через `pmem_array` ✅ ВЫПОЛНЕНО
 
 - `pmap<K,V>` — sorted array пар `{K, V}`, поиск бинарным поиском.
 - Использует `pmem_array_insert_sorted` и `pmem_array_find_sorted`.
