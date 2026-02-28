@@ -188,20 +188,30 @@ template <class _T> class fptr
     /**
      * Удалить объект из ПАП. Сбрасывает указатель в 0.
      * Конструкторы/деструкторы не вызываются (Тр.10).
+     * Безопасен, когда fptr находится внутри ПАП: Delete может вызвать
+     * realloc буфера ПАМ; __addr обнуляется через переприведённый указатель.
      */
     void Delete()
     {
-        PersistentAddressSpace::Get().Delete( __addr );
-        __addr = 0;
+        auto&     pam      = PersistentAddressSpace::Get();
+        uintptr_t self_off = pam.PtrToOffset( this );
+        pam.Delete( __addr );
+        fptr<_T>* self = ( self_off != 0 ) ? pam.Resolve<fptr<_T>>( self_off ) : this;
+        self->__addr   = 0;
     }
 
     /**
      * Удалить массив из ПАП. Сбрасывает указатель в 0.
+     * Безопасен, когда fptr находится внутри ПАП: Delete может вызвать
+     * realloc буфера ПАМ; __addr обнуляется через переприведённый указатель.
      */
     void DeleteArray()
     {
-        PersistentAddressSpace::Get().Delete( __addr );
-        __addr = 0;
+        auto&     pam      = PersistentAddressSpace::Get();
+        uintptr_t self_off = pam.PtrToOffset( this );
+        pam.Delete( __addr );
+        fptr<_T>* self = ( self_off != 0 ) ? pam.Resolve<fptr<_T>>( self_off ) : this;
+        self->__addr   = 0;
     }
 
     // -----------------------------------------------------------------------

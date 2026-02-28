@@ -37,26 +37,34 @@ struct pstring
     // после чего указатель this становится недействительным. Чтобы этого избежать,
     // сохраняем смещение this в ПАМ до вызова NewArray() и переприводим указатель
     // к валидному после возможного перемещения буфера.
+    // assign: сохранить C-строку в ПАП.
+    // Сохраняем self_offset и old_chars_addr ДО Delete/New, так как любое из них
+    // может вызвать realloc буфера ПАМ и сделать this недействительным.
+    // Используем pam.Delete() вместо chars.DeleteArray(), чтобы избежать записи
+    // __addr = 0 по устаревшему (освобождённому realloc'ом) адресу.
     void assign( const char* s )
     {
         auto& pam = PersistentAddressSpace::Get();
 
-        if ( chars.addr() != 0 )
-            chars.DeleteArray();
+        // Сохраняем смещение до любых операций с памятью.
+        uintptr_t self_offset = pam.PtrToOffset( this );
+        uintptr_t old_chars   = chars.addr();
+
+        if ( old_chars != 0 )
+        {
+            pam.Delete( old_chars ); // не пишем в chars после возможного realloc
+        }
 
         if ( s == nullptr || s[0] == '\0' )
         {
-            length = 0;
+            // Обнуляем поля через переприведённый указатель.
+            pstring* self = ( self_offset != 0 ) ? pam.Resolve<pstring>( self_offset ) : this;
+            self->chars   = fptr<char>{};
+            self->length  = 0;
             return;
         }
 
         uintptr_t len = static_cast<uintptr_t>( std::strlen( s ) );
-        length        = len;
-
-        // Запоминаем собственное смещение в ПАМ перед выделением памяти.
-        // После возможного realloc в NewArray() this может стать недействительным,
-        // поэтому переприводим указатель через смещение.
-        uintptr_t self_offset = pam.PtrToOffset( this );
 
         // Выделяем len+1 символов (включая нулевой терминатор).
         fptr<char> new_chars;
@@ -86,13 +94,26 @@ struct pstring
     bool      empty() const { return length == 0; }
 
     // clear: освободить символьные данные и обнулить длину.
+    // Запоминаем собственное смещение и адрес chars ДО Delete(), так как
+    // удаление может вызвать realloc буфера ПАМ и сделать this недействительным.
+    // Используем pam.Delete() вместо chars.DeleteArray(), чтобы избежать
+    // записи __addr = 0 в устаревший (освобождённый realloc'ом) указатель.
     void clear()
     {
         if ( chars.addr() != 0 )
         {
-            chars.DeleteArray();
+            auto&     pam         = PersistentAddressSpace::Get();
+            uintptr_t self_offset = pam.PtrToOffset( this );
+            uintptr_t chars_addr  = chars.addr();
+            pam.Delete( chars_addr ); // не пишем в chars после realloc
+            pstring* self = ( self_offset != 0 ) ? pam.Resolve<pstring>( self_offset ) : this;
+            self->chars   = fptr<char>{};
+            self->length  = 0;
         }
-        length = 0;
+        else
+        {
+            length = 0;
+        }
     }
 
     // operator[]: доступ к символу по индексу (без проверки границ).

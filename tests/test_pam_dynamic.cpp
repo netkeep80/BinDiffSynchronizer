@@ -327,3 +327,74 @@ TEST_CASE( "PAM dynamic stress: create and verify 1 million named pstrings", "[p
 
     rm_pam_dyn_file( fname );
 }
+
+// ---------------------------------------------------------------------------
+// Тест: ПАМ повторно использует память после удаления объектов (задача #82.3).
+//
+// Методология:
+//   1. Инициализируем ПАМ в файл.
+//   2. Выполняем 100 циклов: в каждом добавляем 1000 уникальных pstring и
+//      удаляем их все.
+//   3. Сохраняем ПАМ после каждого цикла и проверяем размер файла.
+//   4. После первого цикла размер файла НЕ должен расти — это подтверждает,
+//      что ПАМ повторно использует освобождённые области.
+// ---------------------------------------------------------------------------
+TEST_CASE( "PAM reuse: file does not grow after first cycle of 1000 pstrings x 100 cycles", "[pam][reuse][dynamic]" )
+{
+    const char* fname = "./test_pam_reuse.pam";
+    rm_pam_dyn_file( fname );
+    PersistentAddressSpace::Init( fname );
+
+    auto& pam = PersistentAddressSpace::Get();
+
+    constexpr unsigned COUNT  = 1000u;
+    constexpr unsigned CYCLES = 100u;
+
+    std::uintmax_t size_after_first_cycle = 0;
+
+    char name_buf[8];
+    for ( unsigned cycle = 0; cycle < CYCLES; cycle++ )
+    {
+        // Создаём 1000 именованных pstring.
+        std::vector<uintptr_t> offsets;
+        offsets.reserve( COUNT );
+        for ( unsigned i = 0; i < COUNT; i++ )
+        {
+            make_pam_name( name_buf, i );
+            uintptr_t offset = pam.Create<pstring>( name_buf );
+            REQUIRE( offset != 0u );
+            pstring* ps = pam.Resolve<pstring>( offset );
+            REQUIRE( ps != nullptr );
+            ps->assign( name_buf );
+            offsets.push_back( offset );
+        }
+
+        // Удаляем все 1000 pstring.
+        for ( uintptr_t offset : offsets )
+        {
+            pstring* ps = pam.Resolve<pstring>( offset );
+            if ( ps != nullptr )
+                ps->clear();
+            pam.Delete( offset );
+        }
+
+        // Сохраняем ПАМ в файл и замеряем его размер.
+        pam.Save();
+        std::error_code ec;
+        std::uintmax_t  fsize = std::filesystem::file_size( fname, ec );
+        REQUIRE( ec.value() == 0 );
+
+        if ( cycle == 0 )
+        {
+            // Запоминаем размер после первого цикла.
+            size_after_first_cycle = fsize;
+        }
+        else
+        {
+            // Начиная со второго цикла размер файла не должен расти.
+            REQUIRE( fsize <= size_after_first_cycle );
+        }
+    }
+
+    rm_pam_dyn_file( fname );
+}

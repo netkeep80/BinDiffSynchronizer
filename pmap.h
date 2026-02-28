@@ -69,12 +69,9 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
 
     // grow: обеспечить ёмкость >= needed, при необходимости перевыделить память.
     //
-    // Внимание: new_data.NewArray() может вызвать realloc буфера данных ПАМ,
-    // после чего указатель this становится недействительным. Сохраняем смещение
-    // this в ПАМ до вызова NewArray() и переприводим указатель к валидному после
-    // возможного перемещения буфера (аналогично pstring::assign()).
-    //
-    // Возвращает указатель на актуальный (возможно переместившийся) pmap<K,V>.
+    // Использует PersistentAddressSpace::Realloc() для расширения на месте,
+    // если data_ — последний аллоцированный блок (O(1) без копирования).
+    // При невозможности расширить на месте — выделяет новый блок и копирует.
     pmap<K, V>* grow( uintptr_t needed )
     {
         if ( needed <= capacity_ )
@@ -86,23 +83,33 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
 
         auto& pam = PersistentAddressSpace::Get();
 
-        // Запоминаем смещения до вызова NewArray() (возможен realloc буфера ПАМ).
         uintptr_t old_data_addr = data_.addr();
         uintptr_t self_offset   = pam.PtrToOffset( this );
 
+        // Попытка расширить блок на месте через realloc (если это последний блок).
+        if ( old_data_addr != 0 )
+        {
+            uintptr_t res = pam.Realloc( old_data_addr, capacity_, new_cap, sizeof( Entry ) );
+            if ( res != 0 )
+            {
+                // Расширено на месте — буфер ПАМ мог переместиться, переприводим this.
+                pmap<K, V>* self = ( self_offset != 0 ) ? pam.Resolve<pmap<K, V>>( self_offset ) : this;
+                self->capacity_  = new_cap;
+                return self;
+            }
+        }
+
+        // Не удалось расширить на месте — выделяем новый блок и копируем.
         fptr<Entry> new_data;
         new_data.NewArray( static_cast<unsigned>( new_cap ) );
 
-        // После NewArray() буфер ПАМ мог переместиться — переприводим this и data_.
         pmap<K, V>* self = ( self_offset != 0 ) ? pam.Resolve<pmap<K, V>>( self_offset ) : this;
 
-        // Копируем существующие записи в новый буфер (используем сохранённое смещение).
         fptr<Entry> old_data;
         old_data.set_addr( old_data_addr );
         for ( uintptr_t i = 0; i < self->size_; i++ )
             new_data[static_cast<unsigned>( i )] = old_data[static_cast<unsigned>( i )];
 
-        // Освобождаем старый буфер.
         if ( old_data_addr != 0 )
             old_data.DeleteArray();
 

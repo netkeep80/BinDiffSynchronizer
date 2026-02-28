@@ -41,6 +41,11 @@ template <typename T> class pvector
     // возможного перемещения буфера (аналогично pstring::assign()).
     //
     // Возвращает указатель на актуальный (возможно переместившийся) pvector<T>.
+    // grow: обеспечить ёмкость >= needed, при необходимости перевыделить память.
+    //
+    // Использует PersistentAddressSpace::Realloc() для расширения на месте,
+    // если data_ — последний аллоцированный блок (O(1) без копирования).
+    // При невозможности расширить на месте — выделяет новый блок и копирует.
     pvector<T>* grow( uintptr_t needed )
     {
         if ( needed <= capacity_ )
@@ -52,23 +57,33 @@ template <typename T> class pvector
 
         auto& pam = PersistentAddressSpace::Get();
 
-        // Запоминаем смещение data_ и собственное смещение this перед выделением памяти.
         uintptr_t old_data_addr = data_.addr();
         uintptr_t self_offset   = pam.PtrToOffset( this );
 
+        // Попытка расширить блок на месте через realloc (если это последний блок).
+        if ( old_data_addr != 0 )
+        {
+            uintptr_t res = pam.Realloc( old_data_addr, capacity_, new_cap, sizeof( T ) );
+            if ( res != 0 )
+            {
+                // Расширено на месте — буфер ПАМ мог переместиться, переприводим this.
+                pvector<T>* self = ( self_offset != 0 ) ? pam.Resolve<pvector<T>>( self_offset ) : this;
+                self->capacity_  = new_cap;
+                return self;
+            }
+        }
+
+        // Не удалось расширить на месте — выделяем новый блок и копируем.
         fptr<T> new_data;
         new_data.NewArray( static_cast<unsigned>( new_cap ) );
 
-        // После NewArray() буфер ПАМ мог переместиться — переприводим this и data_.
         pvector<T>* self = ( self_offset != 0 ) ? pam.Resolve<pvector<T>>( self_offset ) : this;
 
-        // Копируем существующие элементы в новый буфер (используем сохранённое смещение).
         fptr<T> old_data;
         old_data.set_addr( old_data_addr );
         for ( uintptr_t i = 0; i < self->size_; i++ )
             new_data[static_cast<unsigned>( i )] = old_data[static_cast<unsigned>( i )];
 
-        // Освобождаем старый буфер.
         if ( old_data_addr != 0 )
             old_data.DeleteArray();
 
