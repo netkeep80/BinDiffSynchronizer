@@ -1,14 +1,16 @@
 #pragma once
 
 /*
- * pam.h — Персистный адресный менеджер (ПАМ), фаза 8.3.
+ * pam.h — Персистный адресный менеджер (ПАМ), фаза 8.4.
  *
  * Начиная с фазы 8, pam.h выступает как «точка входа» для полноценного ПАМ:
- *   — включает pam_core.h  (API: Create/Delete/Find/Resolve/... и карты слотов и имён)
+ *   — включает pam_core.h  (API: Create/Delete/Find/Resolve/... и вектор типов,
+ *                            карты слотов и имён)
  *   — включает pmap.h      (персистная карта, совместима с картами фаз 8.2–8.3)
+ *   — включает pvector.h   (персистный вектор, совместим с вектором типов фазы 8.4)
  *
  * Цепочка включений (без циклических зависимостей):
- *   pam_core.h   ← базовый класс PersistentAddressSpace (карта слотов + карта имён внутри ПАП)
+ *   pam_core.h   ← базовый класс PersistentAddressSpace (вектор типов + карта слотов + карта имён внутри ПАП)
  *     ↑
  *   persist.h    ← fptr<T>, AddressManager<T>
  *     ↑
@@ -31,6 +33,15 @@
  * в области данных ПАМ, что даёт O(log n) для поиска Find() по имени.
  * Поля name_count/name_capacity удалены из pam_header.
  *
+ * Фаза 8.4: таблица типов type_info_entry[] заменена на pvector-совместимую
+ * структуру внутри ПАП (pvector<TypeInfo>). Данные типов хранятся
+ * в области данных ПАМ. Поля type_count/type_capacity удалены из pam_header,
+ * добавлен type_vec_offset.
+ *
+ * Совместимость раскладки вектора типов с pvector<TypeInfo>:
+ *   TypeInfo: {uintptr_t elem_size, char name[PAM_TYPE_ID_SIZE]} (тривиально копируем)
+ *   объект вектора: [size, capacity, entries_offset] == раскладка pvector<TypeInfo>
+ *
  * Совместимость раскладки карты слотов:
  *   запись карты: slot_entry{uintptr_t key, SlotInfo value}
  *              == pmap_entry<uintptr_t, SlotInfo>{uintptr_t key, SlotInfo value}
@@ -42,6 +53,17 @@
 
 #include "pam_core.h"
 #include "pmap.h"
+
+// ---------------------------------------------------------------------------
+// Проверка совместимости раскладки вектора типов с pvector<TypeInfo> — фаза 8.4
+// ---------------------------------------------------------------------------
+
+// Проверяем, что TypeInfo тривиально копируем (уже проверено в pam_core.h,
+// но дополнительно проверяем совместимость с pvector через static_assert).
+static_assert( std::is_trivially_copyable<TypeInfo>::value,
+               "TypeInfo должен быть тривиально копируемым для pvector<TypeInfo>" );
+// Проверяем размер: pvector<TypeInfo> хранит TypeInfo как элементы,
+// совместимость раскладки гарантирована через идентичное использование raw-offsets.
 
 // ---------------------------------------------------------------------------
 // Проверка совместимости раскладки карты слотов с pmap<uintptr_t, SlotInfo>

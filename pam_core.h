@@ -8,11 +8,12 @@
 #include <type_traits>
 
 /*
- * pam_core.h — Ядро персистного адресного менеджера (ПАМ), фаза 8.3.
+ * pam_core.h — Ядро персистного адресного менеджера (ПАМ), фаза 8.4.
  *
  * Содержит полный публичный API PersistentAddressSpace (Create, Delete, Find,
- * Resolve, PtrToOffset, Save, ...) с реализацией таблицы слотов и карты имён
- * внутри ПАП в виде персистных отсортированных массивов (фазы 8.2–8.3).
+ * Resolve, PtrToOffset, Save, ...) с реализацией таблицы типов (фаза 8.4),
+ * карты слотов (фаза 8.2) и карты имён (фаза 8.3) внутри ПАП в виде
+ * персистных отсортированных/векторных структур.
  *
  * Разделение pam.h → pam_core.h + pam.h устраняет циклическую зависимость:
  *
@@ -23,19 +24,23 @@
  *     pam_core.h ← persist.h ← pvector.h ← pmap.h ← pam.h (включает оба)
  *
  * Типы top-level (используются в тестах и коде):
- *   type_info_entry, name_info_entry, slot_descriptor, SlotInfo,
- *   name_key, name_entry, pam_header
+ *   TypeInfo, type_entry, type_info_entry, name_info_entry, slot_descriptor,
+ *   SlotInfo, slot_entry, name_key, name_entry, pam_header
  *
  * Константы top-level:
  *   PAM_MAGIC, PAM_VERSION, PAM_INVALID_IDX, PAM_INITIAL_DATA_SIZE,
  *   PAM_INITIAL_SLOT_CAPACITY, PAM_INITIAL_TYPE_CAPACITY,
  *   PAM_INITIAL_NAME_CAPACITY, PAM_TYPE_ID_SIZE, PAM_NAME_SIZE
  *
- * Структура файла ПАМ (фаза 8.3, версия 6):
- *   [pam_header]                  — заголовок (убраны name_count/name_capacity,
- *                                   добавлены slot_map_offset и name_map_offset)
- *   [type_info_entry * type_cap]  — таблица типов
- *   [байты объектов]              — область данных (включает карту слотов и карту имён)
+ * Структура файла ПАМ (фаза 8.4, версия 7):
+ *   [pam_header]   — заголовок (добавлен type_vec_offset, удалены type_count/type_capacity)
+ *   [байты объектов] — область данных (включает вектор типов, карту слотов и карту имён)
+ *
+ * Вектор типов (type_vec) хранится ВНУТРИ области данных ПАП (фаза 8.4):
+ *   — раскладка совместима с pvector<TypeInfo>
+ *   — объект вектора: [size, capacity, entries_offset] по type_vec_offset в заголовке
+ *   — записи вектора: массив TypeInfo{elem_size, name[PAM_TYPE_ID_SIZE]}
+ *   — поиск O(n) линейным поиском
  *
  * Карта слотов (slot_map) хранится ВНУТРИ области данных ПАП:
  *   — раскладка совместима с pmap<uintptr_t, SlotInfo> (фаза 8.2)
@@ -58,8 +63,8 @@
 /// Магическое число для идентификации файла ПАМ.
 constexpr uint32_t PAM_MAGIC = 0x50414D00u; // 'PAM\0'
 
-/// Версия формата файла ПАМ (фаза 8.3: карта имён внутри ПАП).
-constexpr uint32_t PAM_VERSION = 6u;
+/// Версия формата файла ПАМ (фаза 8.4: вектор типов внутри ПАП).
+constexpr uint32_t PAM_VERSION = 7u;
 
 /// Максимальная длина идентификатора типа в таблице типов (хранится один раз).
 constexpr unsigned PAM_TYPE_ID_SIZE = 64u;
@@ -83,11 +88,32 @@ constexpr unsigned PAM_INITIAL_TYPE_CAPACITY = 16u;
 constexpr unsigned PAM_INITIAL_NAME_CAPACITY = 16u;
 
 // ---------------------------------------------------------------------------
-// type_info_entry — запись таблицы типов ПАМ
+// TypeInfo — запись вектора типов ПАМ (хранится внутри ПАП, фаза 8.4)
 // ---------------------------------------------------------------------------
 
-/// Запись таблицы типов — хранит имя типа и размер элемента один раз для всех
-/// слотов этого типа. Все поля фиксированного размера, тривиально копируемы.
+/// Информация о типе — элемент вектора типов внутри ПАП.
+/// Хранит имя типа и размер элемента один раз для всех слотов этого типа.
+/// Все поля фиксированного размера, тривиально копируемы.
+struct TypeInfo
+{
+    uintptr_t elem_size;              ///< Размер одного элемента типа в байтах
+    char      name[PAM_TYPE_ID_SIZE]; ///< Имя типа (из typeid(T).name())
+};
+
+static_assert( std::is_trivially_copyable<TypeInfo>::value, "TypeInfo должен быть тривиально копируемым" );
+
+// ---------------------------------------------------------------------------
+// type_entry — запись в массиве вектора типов (совместима с pvector<TypeInfo>)
+// ---------------------------------------------------------------------------
+// Используется только для static_assert совместимости в pam.h.
+// Сам массив TypeInfo[] хранится как elements pvector<TypeInfo>.
+
+// ---------------------------------------------------------------------------
+// type_info_entry — запись таблицы типов ПАМ (для совместимости с тестами)
+// ---------------------------------------------------------------------------
+
+/// Запись таблицы типов — сохранена для совместимости с тестами фаз 4–8.3.
+/// В фазе 8.4 типы хранятся в векторе TypeInfo внутри ПАП.
 struct type_info_entry
 {
     bool      used;                   ///< Запись занята
@@ -197,17 +223,16 @@ static_assert( std::is_trivially_copyable<slot_entry>::value, "slot_entry дол
 // pam_header — заголовок файла ПАМ
 // ---------------------------------------------------------------------------
 
-/// Заголовок файла персистного адресного пространства (фаза 8.3, версия 6).
-/// Карта слотов и карта имён хранятся внутри области данных ПАП.
-/// Поля name_count/name_capacity удалены (карта имён теперь внутри ПАП).
-/// Добавлены slot_map_offset и name_map_offset для восстановления из файла.
+/// Заголовок файла персистного адресного пространства (фаза 8.4, версия 7).
+/// Вектор типов, карта слотов и карта имён хранятся внутри области данных ПАП.
+/// Поля type_count/type_capacity удалены (вектор типов теперь внутри ПАП).
+/// Добавлен type_vec_offset для восстановления вектора типов из файла.
 struct pam_header
 {
-    uint32_t  magic;          ///< PAM_MAGIC — признак файла ПАМ
-    uint32_t  version;        ///< PAM_VERSION — версия формата
-    uintptr_t data_area_size; ///< Размер области данных в байтах
-    unsigned  type_count;     ///< Число записей в таблице типов
-    unsigned  type_capacity;  ///< Ёмкость таблицы типов (число записей в файле)
+    uint32_t  magic;           ///< PAM_MAGIC — признак файла ПАМ
+    uint32_t  version;         ///< PAM_VERSION — версия формата
+    uintptr_t data_area_size;  ///< Размер области данных в байтах
+    uintptr_t type_vec_offset; ///< Смещение объекта вектора типов в области данных (фаза 8.4)
     uintptr_t slot_map_offset; ///< Смещение объекта карты слотов в области данных
     uintptr_t name_map_offset; ///< Смещение объекта карты имён в области данных (фаза 8.3)
 };
@@ -222,12 +247,12 @@ static_assert( std::is_trivially_copyable<pam_header>::value, "pam_header дол
  * Единый менеджер персистного адресного пространства (ПАМ).
  *
  * Управляет плоским байтовым буфером (_data), загружаемым из файла без вызова
- * конструкторов. Хранит карту слотов (_slot_map) ВНУТРИ ПАП — отсортированный
+ * конструкторов. Хранит вектор типов (_type_vec) ВНУТРИ ПАП — массив TypeInfo,
+ * раскладка совместима с pvector<TypeInfo> (фаза 8.4).
+ * Хранит карту слотов (_slot_map) ВНУТРИ ПАП — отсортированный
  * массив slot_entry, раскладка совместима с pmap<uintptr_t, SlotInfo> (фаза 8.2).
  * Хранит карту имён (_name_map) ВНУТРИ ПАП — отсортированный массив name_entry,
  * раскладка совместима с pmap<name_key, uintptr_t> (фаза 8.3).
- * Хранит динамическую таблицу типов (_types) — по одной записи на каждый
- * уникальный тип.
  *
  * Использование:
  *   PersistentAddressSpace::Init("myapp.pam");
@@ -382,11 +407,14 @@ class PersistentAddressSpace
         uintptr_t sidx = _slot_lower_bound( slot_off );
         if ( sidx >= _slot_map_size || _slot_entries_const()[sidx].key != slot_off )
             return 0;
-        // Проверяем тип через таблицу типов.
+        // Проверяем тип через вектор типов (фаза 8.4).
         uintptr_t tidx = _slot_entries_const()[sidx].value.type_idx;
-        if ( tidx < _type_capacity && _types[tidx].used &&
-             std::strncmp( _types[tidx].name, tname, PAM_TYPE_ID_SIZE ) == 0 )
-            return slot_off;
+        if ( tidx < _type_vec_size )
+        {
+            const TypeInfo* te = _type_entries_const();
+            if ( te != nullptr && std::strncmp( te[tidx].name, tname, PAM_TYPE_ID_SIZE ) == 0 )
+                return slot_off;
+        }
         return 0;
     }
 
@@ -463,8 +491,12 @@ class PersistentAddressSpace
         if ( idx >= _slot_map_size || _slot_entries_const()[idx].key != offset )
             return 0;
         uintptr_t tidx = _slot_entries_const()[idx].value.type_idx;
-        if ( tidx < _type_capacity && _types[tidx].used )
-            return _types[tidx].elem_size;
+        if ( tidx < _type_vec_size )
+        {
+            const TypeInfo* te = _type_entries_const();
+            if ( te != nullptr )
+                return te[tidx].elem_size;
+        }
         return 0;
     }
 
@@ -548,23 +580,23 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     /**
-     * Сохранить весь образ ПАМ в файл (фаза 8.3).
-     * Записывает: заголовок, таблицу типов, область данных.
-     * Карта слотов и карта имён сохраняются как часть области данных (внутри ПАП).
-     * Смещения карт записываются в заголовок перед сохранением.
+     * Сохранить весь образ ПАМ в файл (фаза 8.4).
+     * Записывает: заголовок, область данных.
+     * Вектор типов, карта слотов и карта имён сохраняются как часть области данных (внутри ПАП).
+     * Смещения структур записываются в заголовок перед сохранением.
      */
     void Save()
     {
         if ( _filename[0] == '\0' )
             return;
-        // Обновляем смещения карт в заголовке перед сохранением.
+        // Обновляем смещения структур в заголовке перед сохранением.
+        _header().type_vec_offset = _type_vec_offset;
         _header().slot_map_offset = _slot_map_offset;
         _header().name_map_offset = _name_map_offset;
         std::FILE* f              = std::fopen( _filename, "wb" );
         if ( f == nullptr )
             return;
         std::fwrite( &_header(), sizeof( pam_header ), 1, f );
-        std::fwrite( _types, sizeof( type_info_entry ), _type_capacity, f );
         std::fwrite( _data, 1, static_cast<std::size_t>( _header().data_area_size ), f );
         std::fclose( f );
     }
@@ -581,11 +613,6 @@ class PersistentAddressSpace
             std::free( _data );
             _data = nullptr;
         }
-        if ( _types != nullptr )
-        {
-            std::free( _types );
-            _types = nullptr;
-        }
     }
 
   private:
@@ -594,7 +621,16 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     char _filename[256]; ///< Путь к файлу ПАМ
-    char* _data; ///< Буфер области данных (включает заголовок, карту слотов и карту имён)
+    char* _data; ///< Буфер области данных (включает заголовок, вектор типов, карту слотов и карту имён)
+
+    /// Вектор типов хранится ВНУТРИ _data по смещению _type_vec_offset (фаза 8.4).
+    /// Раскладка совместима с pvector<TypeInfo>:
+    ///   [uintptr_t size][uintptr_t capacity][uintptr_t entries_offset]
+    /// Массив записей TypeInfo[] расположен по entries_offset в _data.
+    uintptr_t _type_vec_offset;   ///< Смещение объекта вектора типов в _data
+    uintptr_t _type_vec_size;     ///< Текущее число типов (зеркало size_ в _data)
+    uintptr_t _type_vec_capacity; ///< Текущая ёмкость вектора (зеркало capacity_ в _data)
+    uintptr_t _type_entries_off;  ///< Смещение массива TypeInfo[] в _data (зеркало entries_offset)
 
     /// Карта слотов хранится ВНУТРИ _data по смещению _slot_map_offset.
     /// Раскладка (фаза 8.2, совместима с pmap<uintptr_t, SlotInfo>):
@@ -614,9 +650,6 @@ class PersistentAddressSpace
     uintptr_t _name_map_capacity; ///< Текущая ёмкость карты имён (зеркало capacity_ в _data)
     uintptr_t _name_entries_off; ///< Смещение массива name_entry[] в _data (зеркало entries_offset)
 
-    type_info_entry* _types;         ///< Динамическая таблица типов
-    unsigned         _type_capacity; ///< Текущая ёмкость таблицы типов
-
     // Заголовок хранится в начале буфера _data как pam_header.
     // _data[0..sizeof(pam_header)-1] — заголовок.
     // Область данных начинается после заголовка.
@@ -631,6 +664,26 @@ class PersistentAddressSpace
     pam_header& _header() { return *reinterpret_cast<pam_header*>( _data ); }
 
     const pam_header& _header_const() const { return *reinterpret_cast<const pam_header*>( _data ); }
+
+    // -----------------------------------------------------------------------
+    // Доступ к массиву записей вектора типов (внутри _data) — фаза 8.4
+    // -----------------------------------------------------------------------
+
+    /// Получить указатель на массив TypeInfo в _data (изменяемый).
+    TypeInfo* _type_entries()
+    {
+        if ( _type_entries_off == 0 )
+            return nullptr;
+        return reinterpret_cast<TypeInfo*>( _data + _type_entries_off );
+    }
+
+    /// Получить указатель на массив TypeInfo в _data (константный).
+    const TypeInfo* _type_entries_const() const
+    {
+        if ( _type_entries_off == 0 )
+            return nullptr;
+        return reinterpret_cast<const TypeInfo*>( _data + _type_entries_off );
+    }
 
     // -----------------------------------------------------------------------
     // Доступ к массиву записей карты слотов (внутри _data)
@@ -721,9 +774,11 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     PersistentAddressSpace()
-        : _data( nullptr ), _slot_map_offset( 0 ), _slot_map_size( 0 ), _slot_map_capacity( 0 ), _slot_entries_off( 0 ),
+        : _data( nullptr ),
+          _type_vec_offset( 0 ), _type_vec_size( 0 ), _type_vec_capacity( 0 ), _type_entries_off( 0 ),
+          _slot_map_offset( 0 ), _slot_map_size( 0 ), _slot_map_capacity( 0 ), _slot_entries_off( 0 ),
           _name_map_offset( 0 ), _name_map_size( 0 ), _name_map_capacity( 0 ), _name_entries_off( 0 ),
-          _types( nullptr ), _type_capacity( 0 ), _bump( sizeof( pam_header ) )
+          _bump( sizeof( pam_header ) )
     {
         _filename[0] = '\0';
     }
@@ -770,6 +825,108 @@ class PersistentAddressSpace
         uintptr_t offset = aligned_bump;
         _bump            = aligned_bump + size;
         return offset;
+    }
+
+    // -----------------------------------------------------------------------
+    // Управление вектором типов (внутри ПАП) — фаза 8.4
+    // -----------------------------------------------------------------------
+
+    /**
+     * Синхронизировать зеркальные поля вектора типов из _data.
+     * Вызывается после realloc (когда _data мог переместиться).
+     */
+    void _sync_type_vec_mirrors()
+    {
+        if ( _type_vec_offset == 0 )
+            return;
+        uintptr_t* tv     = reinterpret_cast<uintptr_t*>( _data + _type_vec_offset );
+        _type_vec_size     = tv[0];
+        _type_vec_capacity = tv[1];
+        _type_entries_off  = tv[2];
+    }
+
+    /**
+     * Сохранить зеркальные поля вектора типов в _data.
+     */
+    void _flush_type_vec_mirrors()
+    {
+        if ( _type_vec_offset == 0 )
+            return;
+        uintptr_t* tv = reinterpret_cast<uintptr_t*>( _data + _type_vec_offset );
+        tv[0]         = _type_vec_size;
+        tv[1]         = _type_vec_capacity;
+        tv[2]         = _type_entries_off;
+    }
+
+    /**
+     * Инициализировать вектор типов: выделить объект и начальный массив внутри ПАП.
+     * Вызывается при создании пустого образа (фаза 8.4).
+     */
+    void _init_type_vec()
+    {
+        // Выделяем объект вектора (3 × uintptr_t: size, capacity, entries_offset).
+        uintptr_t tv_obj_align = alignof( uintptr_t );
+        _type_vec_offset       = _raw_alloc( 3 * sizeof( uintptr_t ), tv_obj_align );
+        if ( _type_vec_offset == 0 )
+            throw std::bad_alloc{};
+
+        // Выделяем начальный массив записей.
+        uintptr_t init_cap    = PAM_INITIAL_TYPE_CAPACITY;
+        uintptr_t entries_off = _raw_alloc( init_cap * sizeof( TypeInfo ), alignof( TypeInfo ) );
+        if ( entries_off == 0 )
+            throw std::bad_alloc{};
+
+        std::memset( _data + entries_off, 0, init_cap * sizeof( TypeInfo ) );
+
+        _type_vec_size     = 0;
+        _type_vec_capacity = init_cap;
+        _type_entries_off  = entries_off;
+        _flush_type_vec_mirrors();
+
+        // Записываем смещение вектора типов в заголовок для последующего восстановления.
+        _header().type_vec_offset = _type_vec_offset;
+    }
+
+    /**
+     * Убедиться, что вектор типов имеет достаточную ёмкость для ещё одной записи.
+     * При необходимости расширяет массив записей (с копированием).
+     * Возвращает false при ошибке выделения памяти.
+     */
+    bool _ensure_type_vec_capacity()
+    {
+        if ( _type_vec_size < _type_vec_capacity )
+            return true;
+
+        uintptr_t new_cap = _type_vec_capacity * 2;
+        if ( new_cap < PAM_INITIAL_TYPE_CAPACITY )
+            new_cap = PAM_INITIAL_TYPE_CAPACITY;
+
+        // Копируем старые записи перед realloc (они в _data, который может переместиться).
+        uintptr_t old_size_bytes = _type_vec_size * sizeof( TypeInfo );
+        TypeInfo* tmp = static_cast<TypeInfo*>( std::malloc( static_cast<std::size_t>( old_size_bytes ) ) );
+        if ( tmp == nullptr )
+            return false;
+        if ( _type_entries_off != 0 && _type_vec_size > 0 )
+            std::memcpy( tmp, _data + _type_entries_off, old_size_bytes );
+
+        // Выделяем новый массив в ПАП (raw_alloc — без регистрации слота).
+        uintptr_t new_off = _raw_alloc( new_cap * sizeof( TypeInfo ), alignof( TypeInfo ) );
+        if ( new_off == 0 )
+        {
+            std::free( tmp );
+            return false;
+        }
+        std::memset( _data + new_off, 0, new_cap * sizeof( TypeInfo ) );
+
+        // Копируем старые записи в новый массив.
+        if ( _type_vec_size > 0 )
+            std::memcpy( _data + new_off, tmp, old_size_bytes );
+        std::free( tmp );
+
+        _type_entries_off  = new_off;
+        _type_vec_capacity = new_cap;
+        _flush_type_vec_mirrors();
+        return true;
     }
 
     // -----------------------------------------------------------------------
@@ -1083,12 +1240,10 @@ class PersistentAddressSpace
             std::free( _data );
             _data = nullptr;
         }
-        if ( _types != nullptr )
-        {
-            std::free( _types );
-            _types         = nullptr;
-            _type_capacity = 0;
-        }
+        _type_vec_offset   = 0;
+        _type_vec_size     = 0;
+        _type_vec_capacity = 0;
+        _type_entries_off  = 0;
         _slot_map_offset   = 0;
         _slot_map_size     = 0;
         _slot_map_capacity = 0;
@@ -1116,31 +1271,7 @@ class PersistentAddressSpace
             return;
         }
 
-        // ---- Таблица типов ----
-        unsigned tcap = hdr.type_capacity;
-        if ( tcap < PAM_INITIAL_TYPE_CAPACITY )
-            tcap = PAM_INITIAL_TYPE_CAPACITY;
-
-        _types = static_cast<type_info_entry*>( std::malloc( sizeof( type_info_entry ) * tcap ) );
-        if ( _types == nullptr )
-        {
-            std::fclose( f );
-            throw std::bad_alloc{};
-        }
-        std::memset( _types, 0, sizeof( type_info_entry ) * tcap );
-        _type_capacity = tcap;
-
-        if ( hdr.type_capacity > 0 )
-        {
-            if ( std::fread( _types, sizeof( type_info_entry ), hdr.type_capacity, f ) != hdr.type_capacity )
-            {
-                std::fclose( f );
-                _init_empty();
-                return;
-            }
-        }
-
-        // ---- Область данных (включает карту слотов и карту имён) ----
+        // ---- Область данных (включает вектор типов, карту слотов и карту имён) ----
         uintptr_t data_size = hdr.data_area_size;
         _data               = static_cast<char*>( std::malloc( static_cast<std::size_t>( data_size ) ) );
         if ( _data == nullptr )
@@ -1156,8 +1287,11 @@ class PersistentAddressSpace
         std::fclose( f );
 
         // Обновляем заголовок в буфере данных.
-        _header()               = hdr;
-        _header().type_capacity = _type_capacity;
+        _header() = hdr;
+
+        // Восстанавливаем вектор типов из _data (по смещению из заголовка, фаза 8.4).
+        _type_vec_offset = hdr.type_vec_offset;
+        _sync_type_vec_mirrors();
 
         // Восстанавливаем карту слотов из _data (по смещению из заголовка).
         _slot_map_offset = hdr.slot_map_offset;
@@ -1168,9 +1302,14 @@ class PersistentAddressSpace
         _sync_name_map_mirrors();
 
         // Восстанавливаем bump: находим максимальный конец аллоцированных данных.
+        uintptr_t type_end = _type_entries_off + _type_vec_capacity * sizeof( TypeInfo );
         uintptr_t slot_end = _slot_entries_off + _slot_map_capacity * sizeof( slot_entry );
         uintptr_t name_end = _name_entries_off + _name_map_capacity * sizeof( name_entry );
-        _bump              = slot_end > name_end ? slot_end : name_end;
+        _bump = type_end;
+        if ( slot_end > _bump )
+            _bump = slot_end;
+        if ( name_end > _bump )
+            _bump = name_end;
         if ( _bump < sizeof( pam_header ) )
             _bump = sizeof( pam_header );
     }
@@ -1181,36 +1320,28 @@ class PersistentAddressSpace
 
     void _init_empty()
     {
-        // Выделяем начальную таблицу типов.
-        _type_capacity = PAM_INITIAL_TYPE_CAPACITY;
-        _types         = static_cast<type_info_entry*>( std::malloc( sizeof( type_info_entry ) * _type_capacity ) );
-        if ( _types == nullptr )
-            throw std::bad_alloc{};
-        std::memset( _types, 0, sizeof( type_info_entry ) * _type_capacity );
-
         // Выделяем буфер данных.
         uintptr_t data_size = PAM_INITIAL_DATA_SIZE;
         _data               = static_cast<char*>( std::malloc( static_cast<std::size_t>( data_size ) ) );
         if ( _data == nullptr )
-        {
-            std::free( _types );
-            _types = nullptr;
             throw std::bad_alloc{};
-        }
         std::memset( _data, 0, static_cast<std::size_t>( data_size ) );
 
         // Записываем заголовок в начало буфера данных.
-        pam_header& hdr     = _header();
-        hdr.magic           = PAM_MAGIC;
-        hdr.version         = PAM_VERSION;
-        hdr.data_area_size  = data_size;
-        hdr.type_count      = 0;
-        hdr.type_capacity   = _type_capacity;
+        pam_header& hdr    = _header();
+        hdr.magic          = PAM_MAGIC;
+        hdr.version        = PAM_VERSION;
+        hdr.data_area_size = data_size;
+        hdr.type_vec_offset = 0;
         hdr.slot_map_offset = 0;
         hdr.name_map_offset = 0;
 
         // Область данных начинается после заголовка.
         _bump = sizeof( pam_header );
+
+        // Инициализируем вектор типов внутри области данных ПАП (фаза 8.4).
+        _init_type_vec();
+        // Смещение уже записано в _init_type_vec().
 
         // Инициализируем карту слотов внутри области данных ПАП (фаза 8.2).
         _init_slot_map();
@@ -1227,60 +1358,43 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     /**
-     * Найти или зарегистрировать тип в таблице типов.
+     * Найти или зарегистрировать тип в векторе типов внутри ПАП (фаза 8.4).
      * Если тип с таким именем и размером уже есть — возвращает его индекс.
-     * Если нет — добавляет новую запись и возвращает её индекс.
-     * @return Индекс в таблице типов или PAM_INVALID_IDX при ошибке.
+     * Если нет — добавляет новую запись в конец вектора и возвращает её индекс.
+     * @return Индекс в векторе типов или PAM_INVALID_IDX при ошибке.
      */
     unsigned _find_or_register_type( const char* type_name, uintptr_t elem_size )
     {
-        // Ищем существующий тип.
-        for ( unsigned i = 0; i < _type_capacity; i++ )
+        // Ищем существующий тип (O(n) линейный поиск).
+        TypeInfo* te = _type_entries();
+        for ( unsigned i = 0; i < static_cast<unsigned>( _type_vec_size ); i++ )
         {
-            if ( _types[i].used && _types[i].elem_size == elem_size &&
-                 std::strncmp( _types[i].name, type_name, PAM_TYPE_ID_SIZE ) == 0 )
+            if ( te != nullptr && te[i].elem_size == elem_size &&
+                 std::strncmp( te[i].name, type_name, PAM_TYPE_ID_SIZE ) == 0 )
                 return i;
         }
 
-        // Ищем свободное место.
-        unsigned free_idx = static_cast<unsigned>( -1 );
-        for ( unsigned i = 0; i < _type_capacity; i++ )
-        {
-            if ( !_types[i].used )
-            {
-                free_idx = i;
-                break;
-            }
-        }
+        // Не найден — добавляем новую запись в конец вектора.
+        if ( !_ensure_type_vec_capacity() )
+            return static_cast<unsigned>( -1 );
 
-        // Нет свободных — расширяем таблицу типов.
-        if ( free_idx == static_cast<unsigned>( -1 ) )
-        {
-            unsigned new_cap = _type_capacity * 2;
-            if ( new_cap < PAM_INITIAL_TYPE_CAPACITY )
-                new_cap = PAM_INITIAL_TYPE_CAPACITY;
+        // После _ensure_type_vec_capacity() _data мог переместиться — обновляем указатель.
+        te = _type_entries();
+        if ( te == nullptr )
+            return static_cast<unsigned>( -1 );
 
-            type_info_entry* new_types =
-                static_cast<type_info_entry*>( std::realloc( _types, sizeof( type_info_entry ) * new_cap ) );
-            if ( new_types == nullptr )
-                return static_cast<unsigned>( -1 );
-
-            std::memset( new_types + _type_capacity, 0, sizeof( type_info_entry ) * ( new_cap - _type_capacity ) );
-            free_idx                = _type_capacity;
-            _types                  = new_types;
-            _type_capacity          = new_cap;
-            _header().type_capacity = _type_capacity;
-        }
+        unsigned new_idx = static_cast<unsigned>( _type_vec_size );
 
         // Заполняем запись.
-        type_info_entry& te = _types[free_idx];
-        te.used             = true;
-        te.elem_size        = elem_size;
-        std::strncpy( te.name, type_name, PAM_TYPE_ID_SIZE - 1 );
-        te.name[PAM_TYPE_ID_SIZE - 1] = '\0';
+        TypeInfo& entry = te[new_idx];
+        entry.elem_size = elem_size;
+        std::strncpy( entry.name, type_name, PAM_TYPE_ID_SIZE - 1 );
+        entry.name[PAM_TYPE_ID_SIZE - 1] = '\0';
 
-        _header().type_count++;
-        return free_idx;
+        _type_vec_size++;
+        _flush_type_vec_mirrors();
+
+        return new_idx;
     }
 
     // -----------------------------------------------------------------------
