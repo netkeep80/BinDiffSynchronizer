@@ -94,8 +94,8 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
 | `pvector.h` | B | Персистный динамический массив (тонкая обёртка над pmem_array_hdr) |
 | `pmap.h` | B | Персистная карта (sorted array, тонкая обёртка над pmem_array_hdr) |
-| `pstring.h` | B | Персистная строка (внутренняя утилита) |
-| `pstringview.h` | B | Интернированная read-only строка + словарь ПАП |
+| `pstring.h` | B | Персистная readwrite строка для JSON string-value узлов; нет SSO; `assign()` изменяет значение на месте |
+| `pstringview.h` | B | Интернированная read-only строка + персистный словарь (`pstringview_table`); смещение таблицы хранится в `pam_header.string_table_offset`; содержит `pam_intern_string()`, `pam_search_strings()`, `pam_all_strings()` |
 | `pallocator.h` | B | STL-совместимый аллокатор поверх ПАМ |
 | `pjson.h` | C | Персистный JSON: узлы, типы, layout |
 | `pjson_interning.h` | B | Интернирование строк для pjson |
@@ -199,6 +199,28 @@ db.put("/$metrics/node_count_total", 0); // ошибка!
 
 ### Поиск по строкам
 
+На уровне ПАМ доступны функции словаря строк (после `#include "pstringview.h"`):
+
+```cpp
+// Интернировать строку через ПАМ (задача 2.2)
+auto r = pam_intern_string("user_name");
+// r.chars_offset != 0, r.length == 9
+
+// Найти все строки, содержащие подстроку (задача 2.5)
+auto results = pam_search_strings("user");
+for (const auto& r : results) {
+    // r.value — std::string, r.chars_offset, r.length
+}
+
+// Перебрать весь словарь строк (задача 2.5)
+auto all = pam_all_strings();
+for (const auto& r : all) {
+    // r.value — интернированная строка
+}
+```
+
+На уровне pjson_db (целевой API, фаза 6):
+
 ```cpp
 // Найти все строки, содержащие подстроку
 auto results = db.search_strings("alice");
@@ -246,16 +268,18 @@ for (auto sv : db.all_strings()) {
 ### Структура файла ПАМ
 
 ```
-[pam_header]          — заголовок (magic, version, offsets, bump)
+[pam_header]          — заголовок (magic, version=10, offsets, bump, string_table_offset)
 [данные ПАП]
   [type_vec]          — вектор типов TypeInfo
   [slot_map]          — карта слотов
   [name_map]          — карта имён объектов
   [free_list]         — список свободных областей (reuse)
-  [string_table]      — словарь интернированных строк
+  [string_table]      — словарь интернированных строк (pstringview_table, фаза 2)
   [node_pool]         — пул узлов JSON
   [пользовательские данные]
 ```
+
+Смещение `string_table` хранится в поле `pam_header.string_table_offset` (фаза 2, PAM_VERSION 10) и восстанавливается при загрузке образа без вызова конструкторов.
 
 ### Управление памятью
 

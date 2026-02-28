@@ -20,8 +20,8 @@
 /// Магическое число для идентификации файла ПАМ.
 constexpr uint32_t PAM_MAGIC = 0x50414D00u; // 'PAM\0'
 
-/// Версия формата файла ПАМ (фаза 9: free_list + сохранение _bump).
-constexpr uint32_t PAM_VERSION = 9u;
+/// Версия формата файла ПАМ (фаза 10: добавлен string_table_offset для pstringview_table).
+constexpr uint32_t PAM_VERSION = 10u;
 
 /// Максимальная длина идентификатора типа в таблице типов (хранится один раз).
 constexpr unsigned PAM_TYPE_ID_SIZE = 64u;
@@ -190,7 +190,7 @@ static_assert( std::is_trivially_copyable<slot_entry>::value, "slot_entry дол
 // pam_header — заголовок файла ПАМ
 // ---------------------------------------------------------------------------
 
-/// Заголовок файла ПАМ (версия 9: добавлен free_list_offset и bump).
+/// Заголовок файла ПАМ (версия 10: добавлен string_table_offset для pstringview_table).
 struct pam_header
 {
     uint32_t  magic;            ///< PAM_MAGIC
@@ -201,6 +201,7 @@ struct pam_header
     uintptr_t name_map_offset;  ///< Смещение карты имён в данных
     uintptr_t free_list_offset; ///< Смещение списка свободных областей в данных
     uintptr_t bump;             ///< Указатель на следующее свободное смещение
+    uintptr_t string_table_offset; ///< Смещение pstringview_table в данных; 0 = не создана (фаза 10)
 };
 
 static_assert( std::is_trivially_copyable<pam_header>::value, "pam_header должен быть тривиально копируемым" );
@@ -289,7 +290,8 @@ class PersistentAddressSpace
     void Reset()
     {
         std::free( _data );
-        _data = nullptr;
+        _data                = nullptr;
+        _string_table_offset = 0;
         _init_empty();
     }
 
@@ -587,6 +589,23 @@ class PersistentAddressSpace
     uintptr_t GetFreeListSize() const { return _free_list_size(); }    ///< Свободных блоков.
     uintptr_t GetBump() const { return _bump; }                        ///< Позиция bump-указателя.
 
+    /// Получить смещение таблицы интернирования строк (pstringview_table) в ПАП.
+    /// 0 = таблица ещё не создана.
+    uintptr_t GetStringTableOffset() const { return _string_table_offset; }
+
+    /// Зарегистрировать смещение таблицы интернирования строк в заголовке ПАП.
+    /// Вызывается из pstringview_manager при первом создании pstringview_table.
+    void SetStringTableOffset( uintptr_t off )
+    {
+        _string_table_offset          = off;
+        _header().string_table_offset = off;
+    }
+
+    // ── Словарь строк: интернирование и поиск (фаза 2) ─────────────────────
+    // Функции pam_intern_string(), pam_search_strings(), pam_all_strings()
+    // определены в pstringview.h после объявления pstringview_table.
+    // Доступ к ним возможен только после #include "pstringview.h".
+
     uintptr_t GetDataSize() const
     {
         if ( _data == nullptr )
@@ -610,7 +629,7 @@ class PersistentAddressSpace
         if ( !in_range( _type_vec_offset, sizeof( pam_array_hdr ) ) ||
              !in_range( _slot_map_offset, sizeof( pam_array_hdr ) ) ||
              !in_range( _name_map_offset, sizeof( pam_array_hdr ) ) ||
-             !in_range( _free_list_offset, sizeof( pam_array_hdr ) ) )
+             !in_range( _free_list_offset, sizeof( pam_array_hdr ) ) || !in_range( _string_table_offset, 1 ) )
             return false;
         uintptr_t tvsz = _type_vec_size(), tvcp = _type_vec_capacity();
         uintptr_t smsz = _slot_map_size(), smcp = _slot_map_capacity();
@@ -702,12 +721,13 @@ class PersistentAddressSpace
         if ( _filename[0] == '\0' )
             return;
         // Обновляем смещения структур и bump в заголовке перед сохранением.
-        _header().type_vec_offset  = _type_vec_offset;
-        _header().slot_map_offset  = _slot_map_offset;
-        _header().name_map_offset  = _name_map_offset;
-        _header().free_list_offset = _free_list_offset;
-        _header().bump             = _bump;
-        std::FILE* f               = std::fopen( _filename, "wb" );
+        _header().type_vec_offset     = _type_vec_offset;
+        _header().slot_map_offset     = _slot_map_offset;
+        _header().name_map_offset     = _name_map_offset;
+        _header().free_list_offset    = _free_list_offset;
+        _header().string_table_offset = _string_table_offset;
+        _header().bump                = _bump;
+        std::FILE* f                  = std::fopen( _filename, "wb" );
         if ( f == nullptr )
             return;
         std::fwrite( &_header(), sizeof( pam_header ), 1, f );
@@ -744,6 +764,7 @@ class PersistentAddressSpace
     uintptr_t _slot_map_offset;  ///< Смещение pam_array_hdr карты слотов
     uintptr_t _name_map_offset;  ///< Смещение pam_array_hdr карты имён
     uintptr_t _free_list_offset; ///< Смещение pam_array_hdr списка свободных областей
+    uintptr_t _string_table_offset; ///< Смещение pstringview_table в ПАП; 0 = не создана (фаза 10)
 
     /// Счётчик следующего свободного смещения (bump-allocator).
     uintptr_t _bump;
@@ -920,7 +941,7 @@ class PersistentAddressSpace
 
     PersistentAddressSpace()
         : _data( nullptr ), _type_vec_offset( 0 ), _slot_map_offset( 0 ), _name_map_offset( 0 ), _free_list_offset( 0 ),
-          _bump( sizeof( pam_header ) )
+          _string_table_offset( 0 ), _bump( sizeof( pam_header ) )
     {
         _filename[0] = '\0';
     }
@@ -1265,10 +1286,11 @@ class PersistentAddressSpace
             std::free( _data );
             _data = nullptr;
         }
-        _type_vec_offset  = 0;
-        _slot_map_offset  = 0;
-        _name_map_offset  = 0;
-        _free_list_offset = 0;
+        _type_vec_offset     = 0;
+        _slot_map_offset     = 0;
+        _name_map_offset     = 0;
+        _free_list_offset    = 0;
+        _string_table_offset = 0;
 
         std::FILE* f = std::fopen( filename, "rb" );
         if ( f == nullptr )
@@ -1308,10 +1330,11 @@ class PersistentAddressSpace
 
         // Восстанавливаем смещения внутренних массивов из заголовка.
         // Поля size/capacity/data_off читаются из pam_array_hdr в _data напрямую.
-        _type_vec_offset  = hdr.type_vec_offset;
-        _slot_map_offset  = hdr.slot_map_offset;
-        _name_map_offset  = hdr.name_map_offset;
-        _free_list_offset = hdr.free_list_offset;
+        _type_vec_offset     = hdr.type_vec_offset;
+        _slot_map_offset     = hdr.slot_map_offset;
+        _name_map_offset     = hdr.name_map_offset;
+        _free_list_offset    = hdr.free_list_offset;
+        _string_table_offset = hdr.string_table_offset;
 
         // Восстанавливаем bump из заголовка (сохранён при Save).
         _bump = hdr.bump;
@@ -1333,15 +1356,16 @@ class PersistentAddressSpace
         std::memset( _data, 0, static_cast<std::size_t>( data_size ) );
 
         // Записываем заголовок в начало буфера данных.
-        pam_header& hdr      = _header();
-        hdr.magic            = PAM_MAGIC;
-        hdr.version          = PAM_VERSION;
-        hdr.data_area_size   = data_size;
-        hdr.type_vec_offset  = 0;
-        hdr.slot_map_offset  = 0;
-        hdr.name_map_offset  = 0;
-        hdr.free_list_offset = 0;
-        hdr.bump             = 0;
+        pam_header& hdr         = _header();
+        hdr.magic               = PAM_MAGIC;
+        hdr.version             = PAM_VERSION;
+        hdr.data_area_size      = data_size;
+        hdr.type_vec_offset     = 0;
+        hdr.slot_map_offset     = 0;
+        hdr.name_map_offset     = 0;
+        hdr.free_list_offset    = 0;
+        hdr.string_table_offset = 0;
+        hdr.bump                = 0;
 
         // Область данных начинается после заголовка.
         _bump = sizeof( pam_header );

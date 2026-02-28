@@ -2,6 +2,8 @@
 #include "pstring.h"
 #include "pmap.h"
 #include <cstring>
+#include <string>
+#include <vector>
 
 // pstringview — персистная строка только для чтения с интернированием (аналог string_view).
 //
@@ -77,6 +79,8 @@ struct pstringview
   private:
     // Создание pstringview на стеке или как статической переменной запрещено.
     // Используйте fptr<pstringview>::New() для создания в ПАП (Тр.11).
+    // Исключение: pam_intern_string() возвращает pstringview по значению
+    // (только для чтения полей chars_offset/length — не для хранения в ПАП).
     pstringview()  = default;
     ~pstringview() = default;
 
@@ -329,14 +333,27 @@ static_assert( sizeof( pstringview_table ) == 3 * sizeof( void* ),
 struct pstringview_manager
 {
     // Получить или создать таблицу интернирования.
+    // При первом вызове после загрузки образа восстанавливает смещение из заголовка ПАП.
+    // При создании новой таблицы регистрирует смещение в заголовке ПАП.
     static pstringview_table* get_table()
     {
         auto& pam = PersistentAddressSpace::Get();
+        // Синхронизируем _table_offset с заголовком ПАП (восстановление после Load).
         if ( _table_offset == 0 )
         {
-            fptr<pstringview_table> ft;
-            ft.New();
-            _table_offset = ft.addr();
+            uintptr_t stored = pam.GetStringTableOffset();
+            if ( stored != 0 )
+            {
+                _table_offset = stored;
+            }
+            else
+            {
+                // Создаём новую таблицу и регистрируем её в заголовке ПАП.
+                fptr<pstringview_table> ft;
+                ft.New();
+                _table_offset = ft.addr();
+                pam.SetStringTableOffset( _table_offset );
+            }
         }
         return pam.Resolve<pstringview_table>( _table_offset );
     }
@@ -364,20 +381,120 @@ inline void pstringview::intern( const char* s )
     // Сохраняем собственное смещение до любых аллокаций.
     uintptr_t self_off = pam.PtrToOffset( this );
 
-    // Получаем таблицу интернирования.
-    if ( pstringview_manager::_table_offset == 0 )
-    {
-        fptr<pstringview_table> ft;
-        ft.New();
-        pstringview_manager::_table_offset = ft.addr();
-    }
+    // Получаем (или создаём) таблицу интернирования через менеджер.
+    pstringview_table* tbl = pstringview_manager::get_table();
+    // Сохраняем смещение таблицы (get_table мог создать новую таблицу → realloc).
+    uintptr_t tbl_off = pstringview_manager::_table_offset;
 
     // Интернируем строку.
-    pstringview_table* tbl    = pam.Resolve<pstringview_table>( pstringview_manager::_table_offset );
-    auto               result = tbl->intern( s );
+    tbl         = pam.Resolve<pstringview_table>( tbl_off );
+    auto result = tbl->intern( s );
 
     // Переразрешаем себя после возможного realloc.
     pstringview* self  = ( self_off != 0 ) ? pam.Resolve<pstringview>( self_off ) : this;
     self->chars_offset = result.chars_offset;
     self->length       = result.length;
+}
+
+// ---------------------------------------------------------------------------
+// PersistentAddressSpace — расширение API словаря строк (фаза 2)
+//
+// Эти методы определяются здесь (в pstringview.h), а не в pam_core.h,
+// поскольку они зависят от pstringview_table, которая не доступна в pam_core.h
+// из-за запрета на циклические включения.
+//
+// Задача 2.2: InternString — интернирование строки через ПАМ.
+// Задача 2.5: SearchStrings, AllStrings — поиск и перебор строк словаря.
+// ---------------------------------------------------------------------------
+
+/// Результат поиска строки в словаре ПАП.
+struct pstringview_search_result
+{
+    std::string value;        ///< Найденная строка
+    uintptr_t   chars_offset; ///< Смещение символьных данных в ПАП
+    uintptr_t   length;       ///< Длина строки
+};
+
+/// Интернировать строку s через ПАМ: вернуть {chars_offset, length} для строки.
+/// Это обёртка над pstringview_manager::get_table()->intern(s).
+///
+/// Задача 2.2: метод уровня ПАМ для интернирования строк.
+/// Строка будет занесена в персистный словарь pstringview_table
+/// (или возвращено смещение уже существующей записи).
+///
+/// Возвращает pstringview_table::InternResult с заполненными chars_offset и length.
+/// Для хранения pstringview в ПАП создайте его через fptr<pstringview>::New()
+/// и вызовите intern().
+///
+/// Использование:
+///   auto r = pam_intern_string("hello");
+///   // r.chars_offset != 0, r.length == 5
+///   // PersistentAddressSpace::Get().Resolve<char>(r.chars_offset) == "hello"
+inline pstringview_table::InternResult pam_intern_string( const char* s )
+{
+    if ( s == nullptr )
+        s = "";
+    pstringview_table* tbl     = pstringview_manager::get_table();
+    uintptr_t          tbl_off = pstringview_manager::_table_offset;
+    auto&              pam     = PersistentAddressSpace::Get();
+    tbl                        = pam.Resolve<pstringview_table>( tbl_off );
+    return tbl->intern( s );
+}
+
+/// Найти все интернированные строки в словаре ПАП, содержащие подстроку pattern.
+/// Возвращает вектор результатов поиска (pstringview_search_result).
+/// Поиск по substr (O(n*m) scan по всем строкам словаря).
+///
+/// Задача 2.5: поддержка полнотекстового поиска по словарю pstringview.
+inline std::vector<pstringview_search_result> pam_search_strings( const char* pattern )
+{
+    std::vector<pstringview_search_result> results;
+    if ( pattern == nullptr )
+        pattern = "";
+
+    pstringview_table* tbl     = pstringview_manager::get_table();
+    uintptr_t          tbl_off = pstringview_manager::_table_offset;
+    auto&              pam     = PersistentAddressSpace::Get();
+    tbl                        = pam.Resolve<pstringview_table>( tbl_off );
+    if ( tbl == nullptr )
+        return results;
+
+    uintptr_t cap = tbl->capacity_;
+    if ( cap == 0 )
+        return results;
+
+    for ( uintptr_t i = 0; i < cap; i++ )
+    {
+        // Переразрешаем tbl на каждой итерации (нет аллокаций — оптимизация не нужна).
+        tbl = pam.Resolve<pstringview_table>( tbl_off );
+        if ( tbl == nullptr )
+            break;
+        const pstringview_entry* raw = pam.Resolve<pstringview_entry>( tbl->buckets_.addr() );
+        if ( raw == nullptr )
+            break;
+        const pstringview_entry& cell = raw[i];
+        if ( cell.chars_offset == 0 )
+            continue; // пустая ячейка
+        const char* str = pam.Resolve<char>( cell.chars_offset );
+        if ( str == nullptr )
+            continue;
+        if ( std::strstr( str, pattern ) != nullptr )
+        {
+            pstringview_search_result r;
+            r.value        = str;
+            r.chars_offset = cell.chars_offset;
+            r.length       = cell.length;
+            results.push_back( std::move( r ) );
+        }
+    }
+    return results;
+}
+
+/// Вернуть все интернированные строки из словаря ПАП.
+/// Удобно для полного перебора словаря (итерация по всем ключам объектов).
+///
+/// Задача 2.5: PersistentAddressSpace::AllStrings() — перебор всех pstringview в словаре.
+inline std::vector<pstringview_search_result> pam_all_strings()
+{
+    return pam_search_strings( "" );
 }
