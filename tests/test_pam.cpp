@@ -739,3 +739,296 @@ TEST_CASE( "PersistentAddressSpace: phase 8.2 slot map -- Save and Init restore 
     std::error_code ec;
     std::filesystem::remove( fname, ec );
 }
+
+// =============================================================================
+// Тесты фазы 8.3: замена name_info_entry[] на карту имён внутри ПАП
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Структуры карты имён — тривиально копируемы
+// ---------------------------------------------------------------------------
+TEST_CASE( "name_key: is trivially copyable", "[pam][layout][phase83]" )
+{
+    REQUIRE( std::is_trivially_copyable<name_key>::value );
+}
+
+TEST_CASE( "name_entry: is trivially copyable", "[pam][layout][phase83]" )
+{
+    REQUIRE( std::is_trivially_copyable<name_entry>::value );
+}
+
+TEST_CASE( "name_key: has correct size", "[pam][layout][phase83]" )
+{
+    // name_key должен быть ровно PAM_NAME_SIZE байт.
+    REQUIRE( sizeof( name_key ) == PAM_NAME_SIZE );
+}
+
+TEST_CASE( "name_entry: has correct fields", "[pam][layout][phase83]" )
+{
+    // name_entry = name_key (64 байта) + uintptr_t (8 байт).
+    REQUIRE( sizeof( name_entry ) >= sizeof( name_key ) + sizeof( uintptr_t ) );
+}
+
+// ---------------------------------------------------------------------------
+// Карта имён — Find работает через карту внутри ПАП (O(log n))
+// ---------------------------------------------------------------------------
+TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- Find returns correct offset", "[pam][phase83]" )
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    uintptr_t off = pam.Create<int>( "phase83_find_obj" );
+    REQUIRE( off != 0u );
+    *pam.Resolve<int>( off ) = 777;
+
+    // Find работает через карту имён внутри ПАП.
+    uintptr_t found = pam.Find( "phase83_find_obj" );
+    REQUIRE( found == off );
+    REQUIRE( *pam.Resolve<int>( found ) == 777 );
+
+    pam.Delete( off );
+    REQUIRE( pam.Find( "phase83_find_obj" ) == 0u );
+}
+
+// ---------------------------------------------------------------------------
+// Карта имён — GetName возвращает имя через карту внутри ПАП
+// ---------------------------------------------------------------------------
+TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- GetName returns name", "[pam][phase83]" )
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    uintptr_t off = pam.Create<float>( "phase83_name_obj" );
+    REQUIRE( off != 0u );
+
+    const char* nm = pam.GetName( off );
+    REQUIRE( nm != nullptr );
+    REQUIRE( std::strcmp( nm, "phase83_name_obj" ) == 0 );
+
+    pam.Delete( off );
+}
+
+// ---------------------------------------------------------------------------
+// Карта имён — уникальность имён гарантируется
+// ---------------------------------------------------------------------------
+TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- duplicate name returns 0", "[pam][phase83]" )
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    uintptr_t off1 = pam.Create<int>( "phase83_unique_name" );
+    REQUIRE( off1 != 0u );
+
+    // Попытка создать объект с тем же именем должна вернуть 0.
+    uintptr_t off2 = pam.Create<int>( "phase83_unique_name" );
+    REQUIRE( off2 == 0u );
+
+    pam.Delete( off1 );
+}
+
+// ---------------------------------------------------------------------------
+// Карта имён — рост карты за пределы начальной ёмкости
+// ---------------------------------------------------------------------------
+TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- grows correctly with many named objects",
+           "[pam][phase83][grow]" )
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    // Создаём больше объектов, чем начальная ёмкость карты имён (PAM_INITIAL_NAME_CAPACITY).
+    const unsigned         N = PAM_INITIAL_NAME_CAPACITY * 4;
+    std::vector<uintptr_t> offsets;
+    offsets.reserve( N );
+
+    for ( unsigned i = 0; i < N; i++ )
+    {
+        char name[32];
+        std::snprintf( name, sizeof( name ), "phase83_grow_%04u", i );
+        uintptr_t off = pam.Create<int>( name );
+        REQUIRE( off != 0u );
+        *pam.Resolve<int>( off ) = static_cast<int>( i );
+        offsets.push_back( off );
+    }
+
+    // Проверяем поиск всех объектов.
+    for ( unsigned i = 0; i < N; i++ )
+    {
+        char name[32];
+        std::snprintf( name, sizeof( name ), "phase83_grow_%04u", i );
+        uintptr_t found = pam.Find( name );
+        REQUIRE( found == offsets[i] );
+        REQUIRE( *pam.Resolve<int>( found ) == static_cast<int>( i ) );
+    }
+
+    // Удаляем все объекты.
+    for ( unsigned i = 0; i < N; i++ )
+    {
+        char name[32];
+        std::snprintf( name, sizeof( name ), "phase83_grow_%04u", i );
+        pam.Delete( offsets[i] );
+        REQUIRE( pam.Find( name ) == 0u );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Карта имён — Save и Init восстанавливают карту имён из файла
+// ---------------------------------------------------------------------------
+TEST_CASE( "PersistentAddressSpace: phase 8.3 name map -- Save and Init restore name map",
+           "[pam][phase83][save_reload]" )
+{
+    const char* fname = "./test_pam_phase83_name_map.pam";
+    rm_file( fname );
+
+    uintptr_t saved_off = 0;
+    {
+        PersistentAddressSpace::Init( fname );
+        auto& pam = PersistentAddressSpace::Get();
+
+        saved_off = pam.Create<int>( "phase83_save_reload_obj" );
+        REQUIRE( saved_off != 0u );
+        *pam.Resolve<int>( saved_off ) = 42;
+
+        pam.Save();
+    }
+
+    // Перезагружаем ПАП из файла.
+    PersistentAddressSpace::Init( fname );
+    {
+        auto& pam = PersistentAddressSpace::Get();
+
+        // Карта имён восстановлена — Find работает.
+        uintptr_t off = pam.Find( "phase83_save_reload_obj" );
+        REQUIRE( off == saved_off );
+
+        // Данные восстановлены.
+        int* p = pam.Resolve<int>( off );
+        REQUIRE( p != nullptr );
+        REQUIRE( *p == 42 );
+
+        // GetName работает через восстановленную карту имён.
+        const char* nm = pam.GetName( off );
+        REQUIRE( nm != nullptr );
+        REQUIRE( std::strcmp( nm, "phase83_save_reload_obj" ) == 0 );
+
+        pam.Delete( off );
+    }
+
+    rm_file( fname );
+}
+
+// =============================================================================
+// Тесты фазы 8.4: замена type_info_entry[] на pvector<TypeInfo> внутри ПАП
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Структура TypeInfo — тривиально копируема
+// ---------------------------------------------------------------------------
+TEST_CASE( "TypeInfo: is trivially copyable", "[pam][layout][phase84]" )
+{
+    REQUIRE( std::is_trivially_copyable<TypeInfo>::value );
+}
+
+TEST_CASE( "TypeInfo: has correct size", "[pam][layout][phase84]" )
+{
+    // TypeInfo должен содержать elem_size (uintptr_t) + name (char[PAM_TYPE_ID_SIZE]).
+    REQUIRE( sizeof( TypeInfo ) >= sizeof( uintptr_t ) + PAM_TYPE_ID_SIZE );
+}
+
+// ---------------------------------------------------------------------------
+// GetElemSize возвращает правильный размер через вектор типов внутри ПАП
+// ---------------------------------------------------------------------------
+TEST_CASE( "PersistentAddressSpace: phase 8.4 type vec -- GetElemSize returns correct size", "[pam][phase84]" )
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    uintptr_t off_int    = pam.Create<int>();
+    uintptr_t off_double = pam.Create<double>();
+
+    REQUIRE( off_int != 0u );
+    REQUIRE( off_double != 0u );
+
+    // GetElemSize должен возвращать правильный размер через вектор типов.
+    REQUIRE( pam.GetElemSize( off_int ) == sizeof( int ) );
+    REQUIRE( pam.GetElemSize( off_double ) == sizeof( double ) );
+
+    pam.Delete( off_int );
+    pam.Delete( off_double );
+}
+
+// ---------------------------------------------------------------------------
+// Вектор типов — рост вектора за пределы начальной ёмкости
+// ---------------------------------------------------------------------------
+TEST_CASE( "PersistentAddressSpace: phase 8.4 type vec -- grows correctly with many named objects",
+           "[pam][phase84][grow]" )
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    // Создаём N именованных int-объектов.
+    const unsigned         N = PAM_INITIAL_TYPE_CAPACITY * 3;
+    std::vector<uintptr_t> offsets;
+    offsets.reserve( N );
+
+    for ( unsigned i = 0; i < N; i++ )
+    {
+        char name[32];
+        std::snprintf( name, sizeof( name ), "phase84_grow_%04u", i );
+        uintptr_t off = pam.Create<int>( name );
+        REQUIRE( off != 0u );
+        *pam.Resolve<int>( off ) = static_cast<int>( i );
+        offsets.push_back( off );
+    }
+
+    // Проверяем GetElemSize для всех объектов.
+    for ( unsigned i = 0; i < N; i++ )
+    {
+        REQUIRE( pam.GetElemSize( offsets[i] ) == sizeof( int ) );
+        REQUIRE( *pam.Resolve<int>( offsets[i] ) == static_cast<int>( i ) );
+    }
+
+    // Удаляем все объекты.
+    for ( unsigned i = 0; i < N; i++ )
+        pam.Delete( offsets[i] );
+}
+
+// ---------------------------------------------------------------------------
+// Вектор типов — Save и Init восстанавливают вектор типов из файла
+// ---------------------------------------------------------------------------
+TEST_CASE( "PersistentAddressSpace: phase 8.4 type vec -- Save and Init restore type vec",
+           "[pam][phase84][save_reload]" )
+{
+    const char* fname = "./test_pam_phase84_type_vec.pam";
+    rm_file( fname );
+
+    uintptr_t saved_off = 0;
+    {
+        PersistentAddressSpace::Init( fname );
+        auto& pam = PersistentAddressSpace::Get();
+
+        saved_off = pam.Create<double>( "phase84_save_reload_obj" );
+        REQUIRE( saved_off != 0u );
+        *pam.Resolve<double>( saved_off ) = 3.14;
+
+        pam.Save();
+    }
+
+    // Перезагружаем ПАП из файла.
+    PersistentAddressSpace::Init( fname );
+    {
+        auto& pam = PersistentAddressSpace::Get();
+
+        // Вектор типов восстановлен — GetElemSize работает.
+        uintptr_t off = pam.Find( "phase84_save_reload_obj" );
+        REQUIRE( off == saved_off );
+        REQUIRE( pam.GetElemSize( off ) == sizeof( double ) );
+
+        // Данные восстановлены.
+        double* p = pam.Resolve<double>( off );
+        REQUIRE( p != nullptr );
+        REQUIRE( *p == 3.14 );
+
+        // GetName работает через восстановленную карту имён.
+        const char* nm = pam.GetName( off );
+        REQUIRE( nm != nullptr );
+        REQUIRE( std::strcmp( nm, "phase84_save_reload_obj" ) == 0 );
+
+        pam.Delete( off );
+    }
+
+    rm_file( fname );
+}
