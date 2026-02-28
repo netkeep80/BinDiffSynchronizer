@@ -88,7 +88,7 @@ C++17 header-only библиотека для работы с JSON в перси
 
 | Файл | Слой | Описание |
 |------|------|----------|
-| `pam_core.h` | A | Ядро ПАМ: аллокатор, слоты, карта имён, realloc |
+| `pam_core.h` | A | Ядро ПАМ: аллокатор, слоты, карта имён, realloc; внутренние массивы через pam_array_hdr (≡ pmem_array_hdr) |
 | `pam.h` | A | Фасад: включает pvector, pmap, pstring |
 | `persist.h` | A | Базовые типы: fptr<T>, persist<T>, AddressManager |
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |

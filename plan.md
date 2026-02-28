@@ -55,7 +55,7 @@
 
 ---
 
-## Фаза 1. Общий примитив персистного массива (`pmem_array`) ✅ ЗАВЕРШЕНА (частично)
+## Фаза 1. Общий примитив персистного массива (`pmem_array`) ✅ ЗАВЕРШЕНА
 
 **Цель:** Ликвидировать дублирование кода для массивов в ПАП. Сейчас похожие паттерны `grow/copy/sync` повторяются в `pvector`, `pmap`, и во внутренних структурах ПАМ (`type_vec`, `slot_map`, `name_map`, `free_list`).
 
@@ -95,11 +95,14 @@ struct pmem_array_hdr {
 - Использует `pmem_array_insert_sorted` и `pmem_array_find_sorted`.
 - Все тесты `test_pmap.cpp` должны пройти.
 
-### Задача 1.5. Переписать внутренние массивы ПАМ через `pmem_array`
+### Задача 1.5. Переписать внутренние массивы ПАМ через `pmem_array` ✅ ВЫПОЛНЕНО
 
-- `type_vec`, `slot_map`, `name_map`, `free_list` в `pam_core.h` — через `pmem_array_hdr`.
-- Убрать дублирующиеся функции `_sync_*_mirrors`, `_flush_*_mirrors`, `_ensure_*_capacity`.
-- Все тесты `test_pam.cpp` и `test_pallocator.cpp` должны пройти.
+- `type_vec`, `slot_map`, `name_map`, `free_list` в `pam_core.h` — через `pam_array_hdr` (идентичный `pmem_array_hdr`).
+- Введён `pam_array_hdr` (forward-definition без #include, чтобы избежать циклической зависимости).
+- Убраны 12 зеркальных переменных (`_xxx_size`, `_xxx_capacity`, `_xxx_entries_off` × 4 массива).
+- Удалены дублирующиеся `_sync_*_mirrors` и `_flush_*_mirrors` функции (8 штук).
+- Введён единый шаблон `_raw_grow_array<T>` вместо 4 повторяющихся `_ensure_*_capacity`.
+- Все тесты `test_pam.cpp` и `test_pallocator.cpp` проходят. Итого: 273/273.
 
 **Критерии приёмки фазы 1:**
 - Новый файл `pmem_array.h`.
