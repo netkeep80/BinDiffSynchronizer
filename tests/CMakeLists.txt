@@ -22,6 +22,7 @@ set(TEST_SOURCES
     test_pjson_serial.cpp
     test_pjson_opt.cpp
     test_pjson_bench.cpp
+    test_pstringview.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
