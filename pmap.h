@@ -1,5 +1,5 @@
 #pragma once
-#include "pvector.h"
+#include "pmem_array.h"
 #include <cstring>
 
 // pmap<K, V> — персистный ключ-значение контейнер (карта), аналог std::map<K, V>.
@@ -14,8 +14,14 @@
 //   - K должен поддерживать operator< (сравнение).
 //   - K должен поддерживать operator== (равенство).
 //
-// Реализован на основе отсортированного pvector<pmap_entry<K, V>> (сортировка при вставке).
-// Поиск выполняется бинарным поиском, удаление — линейным.
+// Реализован на основе отсортированного pmem_array<pmap_entry<K, V>> (сортировка при вставке).
+// Поиск выполняется бинарным поиском через pmem_array_find_sorted,
+// вставка — через pmem_array_insert_sorted, удаление — через pmem_array_erase_at.
+//
+// Реализация (задача 1.4): pmap<K,V> — тонкая обёртка над pmem_array_hdr.
+//   Раскладка полностью совместима с предыдущей версией:
+//     [size | capacity | data_off] — 3 * sizeof(uintptr_t).
+//   Вся логика grow/copy/sort/search делегируется шаблонным функциям pmem_array.h.
 //
 // Phase 3: size и capacity обновлены до uintptr_t через pvector (задача 3.3).
 //
@@ -48,20 +54,66 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
 {
     using Entry = pmap_entry<K, V>;
 
-    uintptr_t size_; ///< Текущее число записей; uintptr_t для совместимости с Phase 2
-    uintptr_t capacity_; ///< Выделенная ёмкость; uintptr_t для совместимости с Phase 2
-    fptr<Entry> data_;   ///< Смещение в ПАП для массива записей; 0 = не выделено
+    // Единственное поле — заголовок pmem_array_hdr (3 * sizeof(uintptr_t)).
+    // Раскладка идентична предыдущей версии: [size_ | capacity_ | data_off].
+    pmem_array_hdr hdr_; ///< Заголовок персистного массива (size, capacity, data_off)
 
-    // lower_bound: найти индекс первой записи с ключом >= k.
-    uintptr_t lower_bound( const K& k ) const
+    // Получить смещение заголовка в ПАП (realloc-безопасно).
+    uintptr_t _hdr_off() const { return PersistentAddressSpace::Get().PtrToOffset( &hdr_ ); }
+
+    // Вспомогательные функторы для pmem_array_insert_sorted / pmem_array_find_sorted.
+    struct KeyOf
     {
-        if ( size_ == 0 )
-            return 0;
-        // Получаем сырой указатель один раз для быстрого доступа без накладных расходов fptr.
-        const Entry* raw = PersistentAddressSpace::Get().Resolve<Entry>( data_.addr() );
-        if ( raw == nullptr )
-            return 0;
-        uintptr_t lo = 0, hi = size_;
+        const K& operator()( const Entry& e ) const { return e.key; }
+    };
+
+    struct Less
+    {
+        bool operator()( const K& a, const K& b ) const { return a < b; }
+    };
+
+  public:
+    uintptr_t size() const { return hdr_.size; }
+    bool      empty() const { return hdr_.size == 0; }
+
+    // insert: добавить или заменить ключ k со значением v.
+    // Делегирует в pmem_array_insert_sorted для поддержания отсортированного порядка.
+    void insert( const K& k, const V& v )
+    {
+        Entry e;
+        e.key             = k;
+        e.value           = v;
+        uintptr_t hdr_off = _hdr_off();
+        pmem_array_insert_sorted<Entry, KeyOf, Less>( hdr_off, e, KeyOf{}, Less{} );
+    }
+
+    // find: вернуть указатель на значение по ключу k или nullptr, если не найдено.
+    V* find( const K& k )
+    {
+        uintptr_t hdr_off = _hdr_off();
+        Entry*    e       = pmem_array_find_sorted<Entry, K, KeyOf, Less>( hdr_off, k, KeyOf{}, Less{} );
+        return ( e != nullptr ) ? &e->value : nullptr;
+    }
+
+    const V* find( const K& k ) const
+    {
+        uintptr_t    hdr_off = _hdr_off();
+        const Entry* e       = pmem_array_find_sorted_const<Entry, K, KeyOf, Less>( hdr_off, k, KeyOf{}, Less{} );
+        return ( e != nullptr ) ? &e->value : nullptr;
+    }
+
+    // erase: удалить запись с ключом k. Возвращает true, если найдена и удалена.
+    bool erase( const K& k )
+    {
+        uintptr_t hdr_off = _hdr_off();
+        // Бинарный поиск для нахождения индекса.
+        auto&           pam = PersistentAddressSpace::Get();
+        pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
+        if ( hdr == nullptr || hdr->size == 0 || hdr->data_off == 0 )
+            return false;
+
+        Entry*    raw = pam.Resolve<Entry>( hdr->data_off );
+        uintptr_t lo = 0, hi = hdr->size;
         while ( lo < hi )
         {
             uintptr_t mid = ( lo + hi ) / 2;
@@ -70,155 +122,42 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
             else
                 hi = mid;
         }
-        return lo;
-    }
-
-    // grow: обеспечить ёмкость >= needed, при необходимости перевыделить память.
-    //
-    // Использует PersistentAddressSpace::Realloc() для расширения на месте,
-    // если data_ — последний аллоцированный блок (O(1) без копирования).
-    // При невозможности расширить на месте — выделяет новый блок и копирует.
-    pmap<K, V>* grow( uintptr_t needed )
-    {
-        if ( needed <= capacity_ )
-            return this;
-
-        uintptr_t new_cap = ( capacity_ == 0 ) ? 4 : capacity_ * 2;
-        while ( new_cap < needed )
-            new_cap *= 2;
-
-        auto& pam = PersistentAddressSpace::Get();
-
-        uintptr_t old_data_addr = data_.addr();
-        uintptr_t self_offset   = pam.PtrToOffset( this );
-
-        // Попытка расширить блок на месте через realloc (если это последний блок).
-        if ( old_data_addr != 0 )
-        {
-            uintptr_t res = pam.Realloc( old_data_addr, capacity_, new_cap, sizeof( Entry ) );
-            if ( res != 0 )
-            {
-                // Расширено на месте — буфер ПАМ мог переместиться, переприводим this.
-                pmap<K, V>* self = ( self_offset != 0 ) ? pam.Resolve<pmap<K, V>>( self_offset ) : this;
-                self->capacity_  = new_cap;
-                return self;
-            }
-        }
-
-        // Не удалось расширить на месте — выделяем новый блок и копируем.
-        fptr<Entry> new_data;
-        new_data.NewArray( static_cast<unsigned>( new_cap ) );
-
-        pmap<K, V>* self = ( self_offset != 0 ) ? pam.Resolve<pmap<K, V>>( self_offset ) : this;
-
-        fptr<Entry> old_data;
-        old_data.set_addr( old_data_addr );
-        for ( uintptr_t i = 0; i < self->size_; i++ )
-            new_data[static_cast<unsigned>( i )] = old_data[static_cast<unsigned>( i )];
-
-        if ( old_data_addr != 0 )
-            old_data.DeleteArray();
-
-        self->data_     = new_data;
-        self->capacity_ = new_cap;
-        return self;
-    }
-
-  public:
-    uintptr_t size() const { return size_; }
-    bool      empty() const { return size_ == 0; }
-
-    // insert: добавить или заменить ключ k со значением v.
-    // Поддерживает отсортированный порядок.
-    //
-    // Внимание: grow() может вызвать realloc буфера ПАМ, после чего this
-    // становится недействительным. grow() возвращает актуальный self*, который
-    // используется для всех последующих обращений к полям.
-    void insert( const K& k, const V& v )
-    {
-        uintptr_t idx = lower_bound( k );
-        if ( idx < size_ && !( k < data_[static_cast<unsigned>( idx )].key ) &&
-             !( data_[static_cast<unsigned>( idx )].key < k ) )
-        {
-            // Ключ уже существует — обновляем значение.
-            data_[static_cast<unsigned>( idx )].value = v;
-            return;
-        }
-        // Вставляем в позицию idx, сдвигая элементы вправо.
-        // grow() возвращает актуальный self* после возможного realloc буфера ПАМ.
-        pmap<K, V>* self = grow( size_ + 1 );
-        // Сдвигаем элементы вправо через memmove (быстрее поэлементного сдвига).
-        auto&  pam = PersistentAddressSpace::Get();
-        Entry* raw = pam.Resolve<Entry>( self->data_.addr() );
-        if ( raw != nullptr && self->size_ > idx )
-            std::memmove( raw + idx + 1, raw + idx, ( self->size_ - idx ) * sizeof( Entry ) );
-        Entry new_entry{ k, v };
-        if ( raw != nullptr )
-            raw[idx] = new_entry;
-        else
-            self->data_[static_cast<unsigned>( idx )] = new_entry;
-        self->size_++;
-    }
-
-    // find: вернуть указатель на значение по ключу k или nullptr, если не найдено.
-    V* find( const K& k )
-    {
-        uintptr_t idx = lower_bound( k );
-        Entry*    raw = PersistentAddressSpace::Get().Resolve<Entry>( data_.addr() );
-        if ( raw != nullptr && idx < size_ && !( k < raw[idx].key ) && !( raw[idx].key < k ) )
-            return &raw[idx].value;
-        return nullptr;
-    }
-
-    const V* find( const K& k ) const
-    {
-        uintptr_t    idx = lower_bound( k );
-        const Entry* raw = PersistentAddressSpace::Get().Resolve<Entry>( data_.addr() );
-        if ( raw != nullptr && idx < size_ && !( k < raw[idx].key ) && !( raw[idx].key < k ) )
-            return &raw[idx].value;
-        return nullptr;
-    }
-
-    // erase: удалить запись с ключом k. Возвращает true, если найдена и удалена.
-    bool erase( const K& k )
-    {
-        uintptr_t idx = lower_bound( k );
-        if ( idx >= size_ || ( k < data_[static_cast<unsigned>( idx )].key ) ||
-             ( data_[static_cast<unsigned>( idx )].key < k ) )
+        if ( lo >= hdr->size || ( k < raw[lo].key ) || ( raw[lo].key < k ) )
             return false;
-        // Сдвигаем элементы влево через memmove (быстрее поэлементного сдвига).
-        auto&  pam = PersistentAddressSpace::Get();
-        Entry* raw = pam.Resolve<Entry>( data_.addr() );
-        if ( raw != nullptr && idx + 1 < size_ )
-            std::memmove( raw + idx, raw + idx + 1, ( size_ - idx - 1 ) * sizeof( Entry ) );
-        size_--;
+
+        pmem_array_erase_at<Entry>( hdr_off, lo );
         return true;
     }
 
     // operator[]: вставить значение по умолчанию, если ключ не найден; вернуть ссылку на значение.
     V& operator[]( const K& k )
     {
-        uintptr_t idx = lower_bound( k );
-        if ( idx < size_ && !( k < data_[static_cast<unsigned>( idx )].key ) &&
-             !( data_[static_cast<unsigned>( idx )].key < k ) )
-            return data_[static_cast<unsigned>( idx )].value;
+        // Пытаемся найти существующий ключ.
+        uintptr_t hdr_off = _hdr_off();
+        {
+            Entry* e = pmem_array_find_sorted<Entry, K, KeyOf, Less>( hdr_off, k, KeyOf{}, Less{} );
+            if ( e != nullptr )
+                return e->value;
+        }
         // Вставляем значение по умолчанию.
-        V def{};
-        insert( k, def );
-        idx = lower_bound( k );
-        return data_[static_cast<unsigned>( idx )].value;
+        Entry def;
+        def.key = k;
+        std::memset( &def.value, 0, sizeof( V ) );
+        pmem_array_insert_sorted<Entry, KeyOf, Less>( hdr_off, def, KeyOf{}, Less{} );
+        // После insert возможен realloc — обновляем hdr_off и ищем снова.
+        hdr_off   = _hdr_off();
+        Entry* e2 = pmem_array_find_sorted<Entry, K, KeyOf, Less>( hdr_off, k, KeyOf{}, Less{} );
+        return e2->value;
     }
 
     // clear: удалить все записи. НЕ освобождает выделенный буфер.
-    void clear() { size_ = 0; }
+    void clear() { hdr_.size = 0; }
 
     // free: полностью освободить выделенный буфер.
     void free()
     {
-        if ( data_.addr() != 0 )
-            data_.DeleteArray();
-        size_     = 0;
-        capacity_ = 0;
+        uintptr_t hdr_off = _hdr_off();
+        pmem_array_free<Entry>( hdr_off );
     }
 
     // Итерация (по объектам Entry в отсортированном по ключу порядке).
@@ -229,8 +168,18 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
 
       public:
         iterator( pmap<K, V>* pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
-        Entry&    operator*() { return _pm->data_[static_cast<unsigned>( _idx )]; }
-        Entry*    operator->() { return &_pm->data_[static_cast<unsigned>( _idx )]; }
+        Entry& operator*()
+        {
+            auto&  pam = PersistentAddressSpace::Get();
+            Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
+            return raw[_idx];
+        }
+        Entry* operator->()
+        {
+            auto&  pam = PersistentAddressSpace::Get();
+            Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
+            return &raw[_idx];
+        }
         iterator& operator++()
         {
             ++_idx;
@@ -253,8 +202,18 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
 
       public:
         const_iterator( const pmap<K, V>* pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
-        const Entry&    operator*() const { return _pm->data_[static_cast<unsigned>( _idx )]; }
-        const Entry*    operator->() const { return &_pm->data_[static_cast<unsigned>( _idx )]; }
+        const Entry& operator*() const
+        {
+            const auto&  pam = PersistentAddressSpace::Get();
+            const Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
+            return raw[_idx];
+        }
+        const Entry* operator->() const
+        {
+            const auto&  pam = PersistentAddressSpace::Get();
+            const Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
+            return &raw[_idx];
+        }
         const_iterator& operator++()
         {
             ++_idx;
@@ -271,9 +230,9 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     };
 
     iterator       begin() { return iterator( this, 0 ); }
-    iterator       end() { return iterator( this, size_ ); }
+    iterator       end() { return iterator( this, hdr_.size ); }
     const_iterator begin() const { return const_iterator( this, 0 ); }
-    const_iterator end() const { return const_iterator( this, size_ ); }
+    const_iterator end() const { return const_iterator( this, hdr_.size ); }
 
   private:
     // Создание pmap<K,V> на стеке или как статической переменной запрещено.

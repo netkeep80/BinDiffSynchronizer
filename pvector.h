@@ -1,5 +1,5 @@
 #pragma once
-#include "persist.h"
+#include "pmem_array.h"
 
 // pvector<T> — персистный динамический массив, аналог std::vector<T>.
 //
@@ -12,6 +12,11 @@
 //   - T должен быть тривиально копируемым (static_assert ниже).
 //   - Стратегия роста: удвоение ёмкости при заполнении (начальная ёмкость: 4).
 //   - Пустой pvector имеет data.addr() == 0, size == 0, capacity == 0.
+//
+// Реализация (задача 1.3): pvector<T> — тонкая обёртка над pmem_array_hdr.
+//   Раскладка полностью совместима с предыдущей версией:
+//     [size | capacity | data_off] — 3 * sizeof(uintptr_t).
+//   Вся логика grow/copy/sync делегируется шаблонным функциям pmem_array.h.
 //
 // Phase 3: поля size и capacity имеют тип uintptr_t для полной совместимости
 //   с Phase 2 PAM API (PersistentAddressSpace использует uintptr_t).
@@ -29,107 +34,93 @@ template <typename T> class pvector
 {
     static_assert( std::is_trivially_copyable<T>::value, "pvector<T> требует, чтобы T был тривиально копируемым" );
 
-    uintptr_t size_; ///< Текущее число элементов; uintptr_t для совместимости с Phase 2
-    uintptr_t capacity_; ///< Выделенная ёмкость; uintptr_t для совместимости с Phase 2
-    fptr<T> data_; ///< Смещение в ПАП для массива элементов; 0 = не выделено
+    // Единственное поле — заголовок pmem_array_hdr (3 * sizeof(uintptr_t)).
+    // Раскладка идентична предыдущей версии: [size_ | capacity_ | data_off].
+    // Это гарантирует совместимость с pjson.h (array_layout, object_layout).
+    pmem_array_hdr hdr_; ///< Заголовок персистного массива (size, capacity, data_off)
 
-    // grow: обеспечить ёмкость >= needed, при необходимости перевыделить память.
-    //
-    // Внимание: new_data.NewArray() может вызвать realloc буфера данных ПАМ,
-    // после чего указатель this становится недействительным. Сохраняем смещение
-    // this в ПАМ до вызова NewArray() и переприводим указатель к валидному после
-    // возможного перемещения буфера (аналогично pstring::assign()).
-    //
-    // Возвращает указатель на актуальный (возможно переместившийся) pvector<T>.
-    // grow: обеспечить ёмкость >= needed, при необходимости перевыделить память.
-    //
-    // Использует PersistentAddressSpace::Realloc() для расширения на месте,
-    // если data_ — последний аллоцированный блок (O(1) без копирования).
-    // При невозможности расширить на месте — выделяет новый блок и копирует.
-    pvector<T>* grow( uintptr_t needed )
-    {
-        if ( needed <= capacity_ )
-            return this;
-
-        uintptr_t new_cap = ( capacity_ == 0 ) ? 4 : capacity_ * 2;
-        while ( new_cap < needed )
-            new_cap *= 2;
-
-        auto& pam = PersistentAddressSpace::Get();
-
-        uintptr_t old_data_addr = data_.addr();
-        uintptr_t self_offset   = pam.PtrToOffset( this );
-
-        // Попытка расширить блок на месте через realloc (если это последний блок).
-        if ( old_data_addr != 0 )
-        {
-            uintptr_t res = pam.Realloc( old_data_addr, capacity_, new_cap, sizeof( T ) );
-            if ( res != 0 )
-            {
-                // Расширено на месте — буфер ПАМ мог переместиться, переприводим this.
-                pvector<T>* self = ( self_offset != 0 ) ? pam.Resolve<pvector<T>>( self_offset ) : this;
-                self->capacity_  = new_cap;
-                return self;
-            }
-        }
-
-        // Не удалось расширить на месте — выделяем новый блок и копируем.
-        fptr<T> new_data;
-        new_data.NewArray( static_cast<unsigned>( new_cap ) );
-
-        pvector<T>* self = ( self_offset != 0 ) ? pam.Resolve<pvector<T>>( self_offset ) : this;
-
-        fptr<T> old_data;
-        old_data.set_addr( old_data_addr );
-        for ( uintptr_t i = 0; i < self->size_; i++ )
-            new_data[static_cast<unsigned>( i )] = old_data[static_cast<unsigned>( i )];
-
-        if ( old_data_addr != 0 )
-            old_data.DeleteArray();
-
-        self->data_     = new_data;
-        self->capacity_ = new_cap;
-        return self;
-    }
+    // Вспомогательный метод: получить смещение заголовка в ПАП.
+    // Используется для realloc-безопасного доступа к полям через pmem_array_*.
+    uintptr_t _hdr_off() const { return PersistentAddressSpace::Get().PtrToOffset( &hdr_ ); }
 
   public:
-    uintptr_t size() const { return size_; }
-    uintptr_t capacity() const { return capacity_; }
-    bool      empty() const { return size_ == 0; }
+    uintptr_t size() const { return hdr_.size; }
+    uintptr_t capacity() const { return hdr_.capacity; }
+    bool      empty() const { return hdr_.size == 0; }
 
+    // push_back: добавить элемент val в конец массива.
+    // Делегирует grow/alloc в pmem_array_reserve, затем записывает значение.
     void push_back( const T& val )
     {
-        // grow() возвращает валидный self* после возможного realloc буфера ПАМ.
-        pvector<T>* self                                  = grow( size_ + 1 );
-        self->data_[static_cast<unsigned>( self->size_ )] = val;
-        self->size_++;
+        auto&     pam     = PersistentAddressSpace::Get();
+        uintptr_t hdr_off = pam.PtrToOffset( &hdr_ );
+
+        // Резервируем место для нового элемента (может вызвать realloc).
+        pmem_array_reserve<T>( hdr_off, hdr_.size + 1 );
+
+        // После reserve this мог переместиться — повторно разрешаем.
+        pvector<T>* self     = ( hdr_off != 0 ) ? pam.Resolve<pvector<T>>( hdr_off ) : this;
+        T*          raw      = pam.Resolve<T>( self->hdr_.data_off );
+        raw[self->hdr_.size] = val;
+        self->hdr_.size++;
     }
 
     void pop_back()
     {
-        if ( size_ > 0 )
-            size_--;
+        if ( hdr_.size > 0 )
+            hdr_.size--;
     }
 
-    T&       operator[]( uintptr_t idx ) { return data_[static_cast<unsigned>( idx )]; }
-    const T& operator[]( uintptr_t idx ) const { return data_[static_cast<unsigned>( idx )]; }
+    T& operator[]( uintptr_t idx )
+    {
+        auto& pam = PersistentAddressSpace::Get();
+        T*    raw = pam.Resolve<T>( hdr_.data_off );
+        return raw[idx];
+    }
 
-    T&       front() { return data_[0]; }
-    const T& front() const { return data_[0]; }
+    const T& operator[]( uintptr_t idx ) const
+    {
+        const auto& pam = PersistentAddressSpace::Get();
+        const T*    raw = pam.Resolve<T>( hdr_.data_off );
+        return raw[idx];
+    }
 
-    T&       back() { return data_[static_cast<unsigned>( size_ - 1 )]; }
-    const T& back() const { return data_[static_cast<unsigned>( size_ - 1 )]; }
+    T& front()
+    {
+        auto& pam = PersistentAddressSpace::Get();
+        T*    raw = pam.Resolve<T>( hdr_.data_off );
+        return raw[0];
+    }
+
+    const T& front() const
+    {
+        const auto& pam = PersistentAddressSpace::Get();
+        const T*    raw = pam.Resolve<T>( hdr_.data_off );
+        return raw[0];
+    }
+
+    T& back()
+    {
+        auto& pam = PersistentAddressSpace::Get();
+        T*    raw = pam.Resolve<T>( hdr_.data_off );
+        return raw[hdr_.size - 1];
+    }
+
+    const T& back() const
+    {
+        const auto& pam = PersistentAddressSpace::Get();
+        const T*    raw = pam.Resolve<T>( hdr_.data_off );
+        return raw[hdr_.size - 1];
+    }
 
     // clear: обнулить размер. НЕ освобождает выделенный буфер.
-    void clear() { size_ = 0; }
+    void clear() { hdr_.size = 0; }
 
     // free: полностью освободить выделенный буфер.
     void free()
     {
-        if ( data_.addr() != 0 )
-            data_.DeleteArray();
-        size_     = 0;
-        capacity_ = 0;
+        uintptr_t hdr_off = _hdr_off();
+        pmem_array_free<T>( hdr_off );
     }
 
     // Простой итератор в стиле указателя.
@@ -183,11 +174,11 @@ template <typename T> class pvector
     };
 
     iterator       begin() { return iterator( this, 0 ); }
-    iterator       end() { return iterator( this, size_ ); }
+    iterator       end() { return iterator( this, hdr_.size ); }
     const_iterator begin() const { return const_iterator( this, 0 ); }
-    const_iterator end() const { return const_iterator( this, size_ ); }
+    const_iterator end() const { return const_iterator( this, hdr_.size ); }
     const_iterator cbegin() const { return const_iterator( this, 0 ); }
-    const_iterator cend() const { return const_iterator( this, size_ ); }
+    const_iterator cend() const { return const_iterator( this, hdr_.size ); }
 
   private:
     // Создание pvector<T> на стеке или как статической переменной запрещено.

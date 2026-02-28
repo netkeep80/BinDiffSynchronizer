@@ -55,11 +55,11 @@
 
 ---
 
-## Фаза 1. Общий примитив персистного массива (`pmem_array`)
+## Фаза 1. Общий примитив персистного массива (`pmem_array`) ✅ ЗАВЕРШЕНА
 
 **Цель:** Ликвидировать дублирование кода для массивов в ПАП. Сейчас похожие паттерны `grow/copy/sync` повторяются в `pvector`, `pmap`, и во внутренних структурах ПАМ (`type_vec`, `slot_map`, `name_map`, `free_list`).
 
-### Задача 1.1. Определить заголовок `pmem_array_hdr`
+### Задача 1.1. Определить заголовок `pmem_array_hdr` ✅ ВЫПОЛНЕНО
 
 ```cpp
 // pmem_array.h
@@ -70,7 +70,7 @@ struct pmem_array_hdr {
 };
 ```
 
-### Задача 1.2. Реализовать шаблонные функции работы с массивом
+### Задача 1.2. Реализовать шаблонные функции работы с массивом ✅ ВЫПОЛНЕНО
 
 - `pmem_array_init<T>(hdr_off, init_cap)` — инициализация
 - `pmem_array_reserve<T>(hdr_off, min_cap)` — предварительное резервирование
@@ -81,23 +81,28 @@ struct pmem_array_hdr {
 - `pmem_array_find_sorted<T, KeyOf, Less>(hdr_off, key) -> T*` — бинарный поиск
 - `pmem_array_erase_at<T>(hdr_off, idx)` — удаление по индексу
 
-### Задача 1.3. Переписать `pvector` через `pmem_array`
+Реализовано в `pmem_array.h`. Тесты в `tests/test_pmem_array.cpp` (273 тестов, все проходят).
+
+### Задача 1.3. Переписать `pvector` через `pmem_array` ✅ ВЫПОЛНЕНО
 
 - `pvector<T>` становится тонкой обёрткой над `pmem_array_hdr`.
 - Сохранить совместимый layout (size, capacity, data_off).
 - Все тесты `test_pvector.cpp` должны пройти.
 
-### Задача 1.4. Переписать `pmap` через `pmem_array`
+### Задача 1.4. Переписать `pmap` через `pmem_array` ✅ ВЫПОЛНЕНО
 
 - `pmap<K,V>` — sorted array пар `{K, V}`, поиск бинарным поиском.
 - Использует `pmem_array_insert_sorted` и `pmem_array_find_sorted`.
 - Все тесты `test_pmap.cpp` должны пройти.
 
-### Задача 1.5. Переписать внутренние массивы ПАМ через `pmem_array`
+### Задача 1.5. Переписать внутренние массивы ПАМ через `pmem_array` ✅ ВЫПОЛНЕНО
 
-- `type_vec`, `slot_map`, `name_map`, `free_list` в `pam_core.h` — через `pmem_array_hdr`.
-- Убрать дублирующиеся функции `_sync_*_mirrors`, `_flush_*_mirrors`, `_ensure_*_capacity`.
-- Все тесты `test_pam.cpp` и `test_pallocator.cpp` должны пройти.
+- `type_vec`, `slot_map`, `name_map`, `free_list` в `pam_core.h` — через `pam_array_hdr` (идентичный `pmem_array_hdr`).
+- Введён `pam_array_hdr` (forward-definition без #include, чтобы избежать циклической зависимости).
+- Убраны 12 зеркальных переменных (`_xxx_size`, `_xxx_capacity`, `_xxx_entries_off` × 4 массива).
+- Удалены дублирующиеся `_sync_*_mirrors` и `_flush_*_mirrors` функции (8 штук).
+- Введён единый шаблон `_raw_grow_array<T>` вместо 4 повторяющихся `_ensure_*_capacity`.
+- Все тесты `test_pam.cpp` и `test_pallocator.cpp` проходят. Итого: 273/273.
 
 **Критерии приёмки фазы 1:**
 - Новый файл `pmem_array.h`.
