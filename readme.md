@@ -39,6 +39,47 @@
 
 ## Файлы проекта
 
+| Файл | Описание |
+|------|----------|
+| `pam_core.h` | Ядро персистного адресного менеджера (ПАМ): `PersistentAddressSpace`, вектор типов, карта слотов, карта имён, список свободных областей (reuse), `Realloc` |
+| `pam.h` | Надстройка над `pam_core.h`: включает `pvector`, `pmap`, `pstring` |
+| `persist.h` | Базовые типы: `persist<T>`, `fptr<T>`, `AddressManager<T>` |
+| `pvector.h` | Персистный динамический массив `pvector<T>` (аналог `std::vector`) |
+| `pmap.h` | Персистная карта `pmap<K,V>` (аналог `std::map`, sorted array) |
+| `pstring.h` | Персистная строка `pstring` (аналог `std::string`) |
+| `pjson.h` | Персистный JSON `pjson` (аналог `nlohmann::json`) |
+| `pallocator.h` | STL-совместимый аллокатор `pallocator<T>` поверх ПАМ |
+| `main.cpp` | Демонстрационная программа |
+| `tests/` | Тесты на Catch2: ПАМ, pvector, pmap, pstring, pjson, pallocator, производительность |
+| `CMakeLists.txt` | Система сборки (CMake 3.14+, C++17) |
+
+### Структура файла ПАМ (версия 9)
+
+```
+[pam_header]          — заголовок (magic, version, offsets структур, bump)
+[данные ПАП]          — область данных:
+  [type_vec]          — вектор типов TypeInfo (pvector<TypeInfo>)
+  [slot_map]          — карта слотов pmap<uintptr_t, SlotInfo>
+  [name_map]          — карта имён pmap<name_key, uintptr_t>
+  [free_list]         — список свободных областей для reuse
+  [объекты]           — пользовательские данные
+```
+
+### Управление памятью
+
+- **Bump-allocator**: новые объекты выделяются линейно в конце ПАП.
+- **Список свободных областей (free_list)**: при удалении объекта (`Delete`) его область данных добавляется в список свободных. При следующем выделении сначала ищется подходящая свободная область (first-fit), что обеспечивает повторное использование памяти без роста файла.
+- **Realloc**: `pvector::grow` и `pmap::grow` используют `PersistentAddressSpace::Realloc()` — если расширяемый блок является последним в ПАП, он расширяется на месте без копирования данных.
+
+---
+
+## Сборка и тестирование
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
 
 ---
 
