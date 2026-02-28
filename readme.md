@@ -12,7 +12,7 @@
 
 ---
 
-## Архитектура (фаза 8)
+## Архитектура (фаза 8.2)
 
 ### Требования
 
@@ -34,6 +34,53 @@
 | Тр.14 | ПАМ — персистный объект, хранит имена объектов |
 | Тр.15 | `fptr<T>` инициализируется строковым именем объекта через ПАМ |
 | Тр.16 | ПАМ хранит карту объектов и их имена |
+
+### Изменения Phase 8.2 (замена slot_descriptor[] на pmap, issue #24)
+
+Таблица слотов `PersistentAddressSpace` перенесена внутрь ПАП:
+вместо внешнего malloc-массива `slot_descriptor[]` используется
+персистная отсортированная карта `pmap<uintptr_t, SlotInfo>`, хранящаяся
+в области данных ПАМ. Это даёт O(log n) для операций
+Find/Delete/GetName/GetCount/GetElemSize.
+
+#### Новые типы (фаза 8.2)
+
+| Тип | Описание |
+|-----|----------|
+| `SlotInfo` | Значение в карте слотов: `count`, `type_idx`, `name_idx` |
+| `slot_entry` | Запись карты: `{uintptr_t key, SlotInfo value}` (раскладка = `pmap_entry<uintptr_t, SlotInfo>`) |
+
+#### Изменения файлов (фаза 8.2)
+
+| Файл | Изменение |
+|------|-----------|
+| `pam_core.h` | Добавлены `SlotInfo`, `slot_entry`. Удалены `slot_descriptor* _slots`, `_slot_capacity`. Карта слотов хранится внутри `_data`. `name_info_entry.slot_idx` → `slot_offset`. Версия формата: 4 → 5. |
+| `pam.h` | Добавлен `static_assert` совместимости `slot_entry` с `pmap_entry<uintptr_t, SlotInfo>`. |
+| `tests/test_pam.cpp` | Добавлены тесты `[phase82]`: `SlotInfo`, `slot_entry` тривиально копируемы; рост карты слотов внутри ПАП; Save/Init восстанавливают карту слотов. |
+
+#### Формат файла ПАМ (фаза 8.2, версия 5)
+
+```
+[pam_header]                  — заголовок (убраны slot_count/slot_capacity)
+[type_info_entry * type_cap]  — таблица типов
+[name_info_entry * name_cap]  — таблица имён (slot_idx → slot_offset)
+[байты объектов]              — область данных (включает карту слотов внутри ПАП)
+  ├─ [uintptr_t size][uintptr_t capacity][uintptr_t entries_off] — объект карты
+  └─ [slot_entry * capacity]  — отсортированный массив {offset → SlotInfo}
+```
+
+Карта слотов размещается в начале области данных (сразу после `pam_header`)
+и хранится как часть `_data` — сохраняется и восстанавливается вместе с ней.
+
+#### Оставшиеся фазы рефакторинга
+
+| Фаза | Задача |
+|------|--------|
+| 8.3 | Замена `name_info_entry[]` на `pmap<pstring, uintptr_t>` внутри ПАП |
+| 8.4 | Замена `type_info_entry[]` на `pvector<TypeInfo>` внутри ПАП |
+| 8.5 | Упрощение `pam_header` (офсеты встроены в данные ПАП) |
+
+---
 
 ### Изменения Phase 8 (разделение pam.h → pam_core.h, issue #23)
 
@@ -76,7 +123,7 @@ pam_core.h ← persist.h ← pvector.h ← pmap.h ← pam.h
 
 | Фаза | Задача |
 |------|--------|
-| 8.2 | Замена `slot_descriptor[]` на `pmap<uintptr_t, SlotInfo>` внутри ПАП |
+| 8.2 ✓ | Замена `slot_descriptor[]` на `pmap<uintptr_t, SlotInfo>` внутри ПАП |
 | 8.3 | Замена `name_info_entry[]` на `pmap<pstring, uintptr_t>` внутри ПАП |
 | 8.4 | Замена `type_info_entry[]` на `pvector<TypeInfo>` внутри ПАП |
 | 8.5 | Упрощение `pam_header` (офсеты встроены в данные ПАП) |
@@ -234,33 +281,34 @@ pam_core.h ← persist.h ← pvector.h ← pmap.h ← pam.h
 ### `pam_core.h` — Ядро персистного адресного менеджера (ПАМ)
 
 Содержит полный API `PersistentAddressSpace` (Create, Delete, Find, Resolve, Save, ...)
-и реализацию на основе malloc-массивов (фаза 7). Включается в `persist.h`, `pstring.h`,
-`pvector.h`, `pmap.h` — без циклических зависимостей.
+с реализацией таблицы слотов внутри ПАП (фаза 8.2: `pmap<uintptr_t, SlotInfo>`).
+Включается в `persist.h`, `pstring.h`, `pvector.h`, `pmap.h` — без циклических зависимостей.
 
-Также определяет top-level типы и константы, используемые в тестах:
-`type_info_entry`, `name_info_entry`, `slot_descriptor`, `pam_header`,
+Определяет top-level типы и константы, используемые в тестах:
+`type_info_entry`, `name_info_entry`, `SlotInfo`, `slot_entry`, `slot_descriptor`, `pam_header`,
 `PAM_MAGIC`, `PAM_VERSION`, `PAM_INVALID_IDX`, `PAM_NAME_SIZE` и др.
 
-### `pam.h` — Точка входа ПАМ (фаза 8)
+### `pam.h` — Точка входа ПАМ (фаза 8.2)
 
 «Точка входа» для пользовательского кода — включает `pam_core.h` + `pmap.h`.
 Пользовательский API не изменился; `pam.h` устанавливает полную цепочку включений
-без циклических зависимостей. В будущих фазах (8.2–8.5) внутренняя реализация
-`PersistentAddressSpace` будет перенесена в `pam.h` с использованием `pmap<>`/`pvector<>`.
+без циклических зависимостей. Также содержит `static_assert`, проверяющий совместимость
+раскладки `slot_entry` с `pmap_entry<uintptr_t, SlotInfo>`.
 
-Структура файла ПАМ (расширение .pam, версия 4, фаза 5–8):
+Структура файла ПАМ (расширение .pam, версия 5, фаза 8.2):
 ```
 [pam_header]                  — заголовок (магия, версия, размер области данных,
-                                число именованных слотов, ёмкость слотов,
                                 число типов, ёмкость таблицы типов,
                                 число имён, ёмкость таблицы имён)
 [type_info_entry * type_cap]  — таблица типов (имя и размер элемента — по одной
                                 записи на каждый уникальный тип)
-[name_info_entry * name_cap]  — таблица имён (имя объекта и ссылка на слот — по
-                                одной записи на каждое именованное объект)
-[slot_descriptor * cap]       — динамическая таблица дескрипторов объектов
-                                (name_idx вместо char name[64])
+[name_info_entry * name_cap]  — таблица имён (имя объекта и offset — по одной
+                                записи на каждый именованный объект)
 [байты объектов]              — область данных (непрерывный байтовый пул)
+  ├─ [uintptr_t size][uintptr_t capacity][uintptr_t entries_off]
+  │                           — объект карты слотов (pmap-совместимая раскладка)
+  └─ [slot_entry * capacity]  — отсортированный массив {offset → SlotInfo}
+                                (поиск O(log n) бинарным поиском)
 ```
 
 ```cpp
@@ -287,9 +335,11 @@ pam.Save();
 
 **Ключевые типы:**
 - `type_info_entry` — запись таблицы типов (имя типа + размер элемента, хранится один раз)
-- `name_info_entry` — запись таблицы имён (имя объекта + обратная ссылка на слот; уникальность)
-- `slot_descriptor` — дескриптор объекта (смещение, число элементов, индекс типа, индекс имени)
-- `pam_header` — заголовок файла ПАМ (фаза 5: добавлены поля `name_count`, `name_capacity`)
+- `name_info_entry` — запись таблицы имён (имя объекта + `slot_offset`; уникальность; фаза 8.2)
+- `SlotInfo` — значение карты слотов (число элементов, индекс типа, индекс имени; фаза 8.2)
+- `slot_entry` — запись карты слотов (`{uintptr_t key, SlotInfo value}`; совместима с `pmap_entry`; фаза 8.2)
+- `slot_descriptor` — POD-дескриптор (совместимость с тестами, не используется в карте фазы 8.2)
+- `pam_header` — заголовок файла ПАМ (фаза 8.2: убраны `slot_count`/`slot_capacity`, версия = 5)
 
 ---
 
@@ -468,7 +518,7 @@ ctest --test-dir build --output-on-failure
 
 ```
 tests/
-  test_pam.cpp           — тесты PersistentAddressSpace (ПАМ), таблица типов (фаза 4), таблица имён (фаза 5)
+  test_pam.cpp           — тесты PersistentAddressSpace (ПАМ), таблица типов (фаза 4), таблица имён (фаза 5), карта слотов (фаза 8.2)
   test_pam_dynamic.cpp   — тесты динамичности ПАМ: массовое создание именованных объектов
   test_persist.cpp       — тесты persist<T>, fptr<T>, AddressManager<T>
   test_pstring.cpp       — тесты pstring

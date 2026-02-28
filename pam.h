@@ -1,14 +1,14 @@
 #pragma once
 
 /*
- * pam.h — Персистный адресный менеджер (ПАМ), фаза 8.
+ * pam.h — Персистный адресный менеджер (ПАМ), фаза 8.2.
  *
  * Начиная с фазы 8, pam.h выступает как «точка входа» для полноценного ПАМ:
- *   — включает pam_core.h  (базовый API: Create/Delete/Find/Resolve/...)
- *   — включает pmap.h      (персистная карта для будущего рефакторинга реестров)
+ *   — включает pam_core.h  (API: Create/Delete/Find/Resolve/... и карта слотов)
+ *   — включает pmap.h      (персистная карта, совместима с картой слотов фазы 8.2)
  *
  * Цепочка включений (без циклических зависимостей):
- *   pam_core.h   ← базовый класс PersistentAddressSpace
+ *   pam_core.h   ← базовый класс PersistentAddressSpace (карта слотов внутри ПАП)
  *     ↑
  *   persist.h    ← fptr<T>, AddressManager<T>
  *     ↑
@@ -22,10 +22,25 @@
  *   auto& pam = PersistentAddressSpace::Get();
  *   uintptr_t off = pam.Create<int>("counter");
  *
- * Внутренние структуры pam_core.h (malloc-массивы phase 7):
- *   type_info_entry[], name_info_entry[], slot_descriptor[]
- * будут заменены на pmap<>/pvector<> в последующих фазах рефакторинга.
+ * Фаза 8.2: карта слотов slot_descriptor[] заменена на pmap-совместимую
+ * структуру внутри ПАП (pmap<uintptr_t, SlotInfo>). Данные слотов хранятся
+ * в области данных ПАМ, что даёт O(log n) для операций Find/Delete/GetName/GetCount.
+ *
+ * Совместимость раскладки:
+ *   запись карты: slot_entry{uintptr_t key, SlotInfo value}
+ *              == pmap_entry<uintptr_t, SlotInfo>{uintptr_t key, SlotInfo value}
  */
 
 #include "pam_core.h"
 #include "pmap.h"
+
+// ---------------------------------------------------------------------------
+// Проверка совместимости раскладки карты слотов с pmap<uintptr_t, SlotInfo>
+// ---------------------------------------------------------------------------
+
+// slot_entry должна иметь ту же раскладку, что и pmap_entry<uintptr_t, SlotInfo>.
+using _slot_pmap_entry = pmap_entry<uintptr_t, SlotInfo>;
+static_assert( sizeof( slot_entry ) == sizeof( _slot_pmap_entry ),
+               "slot_entry должна совпадать по размеру с pmap_entry<uintptr_t, SlotInfo>" );
+static_assert( std::is_trivially_copyable<_slot_pmap_entry>::value,
+               "pmap_entry<uintptr_t, SlotInfo> должен быть тривиально копируемым" );

@@ -518,7 +518,7 @@ TEST_CASE( "PersistentAddressSpace: Find uses name table for lookup", "[pam][nam
     uintptr_t   offset = pam.Create<double>( name );
     REQUIRE( offset != 0u );
 
-    // Find через таблицу имён: name_info_entry.slot_idx → slot_descriptor.offset.
+    // Find через таблицу имён: name_info_entry.slot_offset → карта слотов (фаза 8.2).
     uintptr_t found = pam.Find( name );
     REQUIRE( found == offset );
 
@@ -625,4 +625,117 @@ TEST_CASE( "PersistentAddressSpace: multiple named objects have independent name
     pam.Delete( off_a );
     pam.Delete( off_b );
     pam.Delete( off_c );
+}
+
+// ---------------------------------------------------------------------------
+// Фаза 8.2: карта слотов внутри ПАП (pmap<uintptr_t, SlotInfo>)
+// ---------------------------------------------------------------------------
+
+// SlotInfo — тривиально копируемый
+TEST_CASE( "SlotInfo: is trivially copyable", "[pam][layout][phase82]" )
+{
+    REQUIRE( std::is_trivially_copyable<SlotInfo>::value );
+}
+
+// slot_entry — тривиально копируемый
+TEST_CASE( "slot_entry: is trivially copyable", "[pam][layout][phase82]" )
+{
+    REQUIRE( std::is_trivially_copyable<slot_entry>::value );
+}
+
+// SlotInfo содержит count, type_idx, name_idx
+TEST_CASE( "SlotInfo: has correct fields", "[pam][layout][phase82]" )
+{
+    SlotInfo si{};
+    si.count    = 42u;
+    si.type_idx = 1u;
+    si.name_idx = PAM_INVALID_IDX;
+    REQUIRE( si.count == 42u );
+    REQUIRE( si.type_idx == 1u );
+    REQUIRE( si.name_idx == PAM_INVALID_IDX );
+}
+
+// GetCount и GetElemSize работают после вставки в карту слотов
+TEST_CASE( "PersistentAddressSpace: phase 8.2 slot map -- GetCount and GetElemSize via binary search",
+           "[pam][phase82]" )
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    uintptr_t off = pam.CreateArray<int>( 7 );
+    REQUIRE( off != 0u );
+
+    // GetCount использует бинарный поиск в карте слотов (O(log n)).
+    REQUIRE( pam.GetCount( off ) == 7u );
+    // GetElemSize использует бинарный поиск в карте слотов (O(log n)).
+    REQUIRE( pam.GetElemSize( off ) == sizeof( int ) );
+
+    pam.Delete( off );
+    REQUIRE( pam.GetCount( off ) == 0u );
+}
+
+// Карта слотов поддерживает много объектов (тест растущей карты внутри ПАП)
+TEST_CASE( "PersistentAddressSpace: phase 8.2 slot map -- grows correctly with many objects", "[pam][phase82][grow]" )
+{
+    auto& pam = PersistentAddressSpace::Get();
+
+    // Создаём больше объектов, чем начальная ёмкость карты слотов (16).
+    const unsigned N = 64;
+    uintptr_t      offsets[N]{};
+    for ( unsigned i = 0; i < N; i++ )
+    {
+        offsets[i] = pam.Create<int>();
+        REQUIRE( offsets[i] != 0u );
+    }
+
+    // Все объекты доступны через GetCount (бинарный поиск в карте слотов).
+    for ( unsigned i = 0; i < N; i++ )
+        REQUIRE( pam.GetCount( offsets[i] ) == 1u );
+
+    // Освобождаем все объекты.
+    for ( unsigned i = 0; i < N; i++ )
+        pam.Delete( offsets[i] );
+
+    // После удаления — карта слотов не находит объекты.
+    for ( unsigned i = 0; i < N; i++ )
+        REQUIRE( pam.GetCount( offsets[i] ) == 0u );
+}
+
+// Save и Init сохраняют/восстанавливают карту слотов внутри ПАП
+TEST_CASE( "PersistentAddressSpace: phase 8.2 slot map -- Save and Init restore slot map",
+           "[pam][phase82][save_reload]" )
+{
+    const char* fname = "./test_pam_phase82_slot_map.pam";
+
+    uintptr_t saved_off = 0;
+    {
+        PersistentAddressSpace::Init( fname );
+        auto& pam = PersistentAddressSpace::Get();
+
+        saved_off = pam.Create<double>( "phase82_slot_map_obj" );
+        REQUIRE( saved_off != 0u );
+        *pam.Resolve<double>( saved_off ) = 2.718;
+
+        pam.Save();
+    }
+
+    PersistentAddressSpace::Init( fname );
+    {
+        auto& pam = PersistentAddressSpace::Get();
+
+        // Карта слотов восстановлена: Find работает через таблицу имён.
+        uintptr_t off = pam.Find( "phase82_slot_map_obj" );
+        REQUIRE( off == saved_off );
+        REQUIRE( pam.GetCount( off ) == 1u );
+        REQUIRE( pam.GetElemSize( off ) == sizeof( double ) );
+
+        // Данные восстановлены.
+        double* p = pam.Resolve<double>( off );
+        REQUIRE( p != nullptr );
+        REQUIRE( *p == 2.718 );
+
+        pam.Delete( off );
+    }
+
+    std::error_code ec;
+    std::filesystem::remove( fname, ec );
 }

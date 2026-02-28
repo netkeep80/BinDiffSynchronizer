@@ -6,14 +6,13 @@
 #include <new>
 #include <stdexcept>
 #include <type_traits>
-#include <typeinfo>
 
 /*
- * pam_core.h — Ядро персистного адресного менеджера (ПАМ), фаза 8.
+ * pam_core.h — Ядро персистного адресного менеджера (ПАМ), фаза 8.2.
  *
  * Содержит полный публичный API PersistentAddressSpace (Create, Delete, Find,
- * Resolve, PtrToOffset, Save, ...) вместе с базовой реализацией на основе
- * malloc-массивов (phase 7).
+ * Resolve, PtrToOffset, Save, ...) с реализацией таблицы слотов внутри ПАП
+ * в виде персистной отсортированной карты (pmap-совместимая раскладка, фаза 8.2).
  *
  * Разделение pam.h → pam_core.h + pam.h устраняет циклическую зависимость:
  *
@@ -24,19 +23,24 @@
  *     pam_core.h ← persist.h ← pvector.h ← pmap.h ← pam.h (включает оба)
  *
  * Типы top-level (используются в тестах и коде):
- *   type_info_entry, name_info_entry, slot_descriptor, pam_header
+ *   type_info_entry, name_info_entry, slot_descriptor, SlotInfo, pam_header
  *
  * Константы top-level:
  *   PAM_MAGIC, PAM_VERSION, PAM_INVALID_IDX, PAM_INITIAL_DATA_SIZE,
  *   PAM_INITIAL_SLOT_CAPACITY, PAM_INITIAL_TYPE_CAPACITY,
  *   PAM_INITIAL_NAME_CAPACITY, PAM_TYPE_ID_SIZE, PAM_NAME_SIZE
  *
- * Структура файла ПАМ (фаза 5, версия 4):
+ * Структура файла ПАМ (фаза 8.2, версия 5):
  *   [pam_header]                  — заголовок
  *   [type_info_entry * type_cap]  — таблица типов
  *   [name_info_entry * name_cap]  — таблица имён
- *   [slot_descriptor * cap]       — таблица слотов
- *   [байты объектов]              — область данных
+ *   [байты объектов]              — область данных (включает карту слотов)
+ *
+ * Карта слотов (slot_map) хранится ВНУТРИ области данных ПАП:
+ *   — раскладка совместима с pmap<uintptr_t, SlotInfo> (фаза 8.2)
+ *   — объект карты: [size, capacity, entries_offset] по _slot_map_offset
+ *   — записи карты: отсортированный массив slot_entry{offset, SlotInfo}
+ *   — поиск O(log n) бинарным поиском
  */
 
 // ---------------------------------------------------------------------------
@@ -46,8 +50,8 @@
 /// Магическое число для идентификации файла ПАМ.
 constexpr uint32_t PAM_MAGIC = 0x50414D00u; // 'PAM\0'
 
-/// Версия формата файла ПАМ (фаза 5: таблица имён).
-constexpr uint32_t PAM_VERSION = 4u;
+/// Версия формата файла ПАМ (фаза 8.2: карта слотов внутри ПАП).
+constexpr uint32_t PAM_VERSION = 5u;
 
 /// Максимальная длина идентификатора типа в таблице типов (хранится один раз).
 constexpr unsigned PAM_TYPE_ID_SIZE = 64u;
@@ -90,12 +94,12 @@ static_assert( std::is_trivially_copyable<type_info_entry>::value,
 // name_info_entry — запись таблицы имён ПАМ
 // ---------------------------------------------------------------------------
 
-/// Запись таблицы имён — хранит имя объекта и индекс его слота.
+/// Запись таблицы имён — хранит имя объекта и смещение его слота в ПАП.
 /// Все поля фиксированного размера, тривиально копируемы.
 struct name_info_entry
 {
     bool      used;           ///< Запись занята
-    uintptr_t slot_idx;       ///< Индекс слота в таблице slot_descriptor
+    uintptr_t slot_offset;    ///< Смещение объекта в ПАП (ключ в карте слотов)
     char name[PAM_NAME_SIZE]; ///< Имя объекта (уникально среди занятых записей)
 };
 
@@ -103,16 +107,31 @@ static_assert( std::is_trivially_copyable<name_info_entry>::value,
                "name_info_entry должен быть тривиально копируемым" );
 
 // ---------------------------------------------------------------------------
-// slot_descriptor — дескриптор одного аллоцированного объекта в таблице ПАМ
+// SlotInfo — значение в карте слотов (pmap<uintptr_t, SlotInfo>)
 // ---------------------------------------------------------------------------
 
-/// Дескриптор аллоцированного объекта в едином ПАП.
+/// Информация о слоте — значение в карте слотов.
+/// Ключом карты служит смещение объекта в области данных ПАП (offset).
 /// Все поля фиксированного размера, тривиально копируемы.
-/// Слоты создаются для ВСЕХ аллоцированных объектов (именованных и безымянных).
-/// slot_count в заголовке считает только именованные слоты (name_idx != PAM_INVALID_IDX).
+struct SlotInfo
+{
+    uintptr_t count;    ///< Количество элементов (для массивов)
+    uintptr_t type_idx; ///< Индекс типа в таблице type_info_entry
+    uintptr_t name_idx; ///< Индекс в таблице name_info_entry; PAM_INVALID_IDX для безымянных
+};
+
+static_assert( std::is_trivially_copyable<SlotInfo>::value, "SlotInfo должен быть тривиально копируемым" );
+
+// ---------------------------------------------------------------------------
+// slot_descriptor — псевдоним для совместимости и тестов
+// ---------------------------------------------------------------------------
+
+/// Дескриптор аллоцированного объекта (для совместимости с тестами фазы 5–8.1).
+/// В фазе 8.2 карта слотов реализована через SlotInfo (ключ = offset).
+/// slot_descriptor сохраняется как POD для тестов проверки тривиальной копируемости.
 struct slot_descriptor
 {
-    bool      used;     ///< Слот занят
+    bool used; ///< Слот занят (не используется в карте 8.2, сохранён для совместимости)
     uintptr_t offset;   ///< Смещение объекта в области данных ПАП
     uintptr_t count;    ///< Количество элементов (для массивов)
     uintptr_t type_idx; ///< Индекс типа в таблице type_info_entry
@@ -123,17 +142,30 @@ static_assert( std::is_trivially_copyable<slot_descriptor>::value,
                "slot_descriptor должен быть тривиально копируемым" );
 
 // ---------------------------------------------------------------------------
+// slot_entry — запись в отсортированном массиве карты слотов (внутри ПАП)
+// ---------------------------------------------------------------------------
+
+/// Одна запись в карте слотов — пара (ключ = offset, значение = SlotInfo).
+/// Раскладка совместима с pmap_entry<uintptr_t, SlotInfo>.
+struct slot_entry
+{
+    uintptr_t key;   ///< Смещение объекта в ПАП (ключ для бинарного поиска)
+    SlotInfo  value; ///< Информация о слоте
+};
+
+static_assert( std::is_trivially_copyable<slot_entry>::value, "slot_entry должен быть тривиально копируемым" );
+
+// ---------------------------------------------------------------------------
 // pam_header — заголовок файла ПАМ
 // ---------------------------------------------------------------------------
 
-/// Заголовок файла персистного адресного пространства (фаза 5).
+/// Заголовок файла персистного адресного пространства (фаза 8.2, версия 5).
+/// Карта слотов хранится внутри области данных ПАП по slot_map_offset.
 struct pam_header
 {
     uint32_t  magic;          ///< PAM_MAGIC — признак файла ПАМ
     uint32_t  version;        ///< PAM_VERSION — версия формата
     uintptr_t data_area_size; ///< Размер области данных в байтах
-    unsigned  slot_count;     ///< Число именованных слотов (только named)
-    unsigned  slot_capacity;  ///< Ёмкость таблицы слотов (число записей в файле)
     unsigned  type_count;     ///< Число записей в таблице типов
     unsigned  type_capacity;  ///< Ёмкость таблицы типов (число записей в файле)
     unsigned  name_count;     ///< Число записей в таблице имён
@@ -150,12 +182,13 @@ static_assert( std::is_trivially_copyable<pam_header>::value, "pam_header дол
  * Единый менеджер персистного адресного пространства (ПАМ).
  *
  * Управляет плоским байтовым буфером (_data), загружаемым из файла без вызова
- * конструкторов. Хранит динамическую таблицу слотов (_slots) для ВСЕХ
- * аллоцированных объектов (именованных и безымянных). Хранит динамическую
- * таблицу типов (_types) — по одной записи на каждый уникальный тип.
- * Хранит динамическую таблицу имён (_names) — по одной записи на каждое
- * именованное объекта; обеспечивает уникальность имён и двустороннюю связь
- * «имя ↔ слот»: name_info_entry.slot_idx → slot, slot_descriptor.name_idx → имя.
+ * конструкторов. Хранит карту слотов (_slot_map) ВНУТРИ ПАП — отсортированный
+ * массив slot_entry, раскладка совместима с pmap<uintptr_t, SlotInfo> (фаза 8.2).
+ * Хранит динамическую таблицу типов (_types) — по одной записи на каждый
+ * уникальный тип. Хранит динамическую таблицу имён (_names) — по одной записи
+ * на каждое именованное объекта; обеспечивает уникальность имён и двустороннюю
+ * связь «имя ↔ слот»: name_info_entry.slot_offset → offset (ключ в карте слотов),
+ * SlotInfo.name_idx → индекс в таблице имён.
  *
  * Использование:
  *   PersistentAddressSpace::Init("myapp.pam");
@@ -239,30 +272,28 @@ class PersistentAddressSpace
     {
         if ( offset == 0 )
             return;
-        for ( unsigned i = 0; i < _slot_capacity; i++ )
+        // Ищем слот в карте слотов (O(log n) бинарным поиском).
+        uintptr_t idx = _slot_lower_bound( offset );
+        if ( idx >= _slot_map_size || _slot_entries()[idx].key != offset )
+            return; // слот не найден
+
+        SlotInfo& info = _slot_entries()[idx].value;
+        uintptr_t nidx = info.name_idx;
+
+        // Освобождаем запись в таблице имён (если объект именованный).
+        if ( nidx != PAM_INVALID_IDX && nidx < _name_capacity && _names[nidx].used )
         {
-            if ( _slots[i].used && _slots[i].offset == offset )
-            {
-                uintptr_t nidx = _slots[i].name_idx;
-                // Освобождаем запись в таблице имён (если объект именованный).
-                if ( nidx != PAM_INVALID_IDX && nidx < _name_capacity && _names[nidx].used )
-                {
-                    _names[nidx].used     = false;
-                    _names[nidx].slot_idx = PAM_INVALID_IDX;
-                    _names[nidx].name[0]  = '\0';
-                    if ( _header().name_count > 0 )
-                        _header().name_count--;
-                    if ( _header().slot_count > 0 )
-                        _header().slot_count--;
-                }
-                _slots[i].used     = false;
-                _slots[i].offset   = 0;
-                _slots[i].count    = 0;
-                _slots[i].type_idx = PAM_INVALID_IDX;
-                _slots[i].name_idx = PAM_INVALID_IDX;
-                return;
-            }
+            _names[nidx].used        = false;
+            _names[nidx].slot_offset = 0;
+            _names[nidx].name[0]     = '\0';
+            if ( _header().name_count > 0 )
+                _header().name_count--;
         }
+
+        // Удаляем запись из карты слотов (сдвигаем оставшиеся влево).
+        for ( uintptr_t i = idx; i + 1 < _slot_map_size; i++ )
+            _slot_entries()[i] = _slot_entries()[i + 1];
+        _slot_map_size--;
     }
 
     // -----------------------------------------------------------------------
@@ -280,12 +311,7 @@ class PersistentAddressSpace
         for ( unsigned i = 0; i < _name_capacity; i++ )
         {
             if ( _names[i].used && std::strncmp( _names[i].name, name, PAM_NAME_SIZE ) == 0 )
-            {
-                uintptr_t sidx = _names[i].slot_idx;
-                if ( sidx < _slot_capacity && _slots[sidx].used )
-                    return _slots[sidx].offset;
-                return 0;
-            }
+                return _names[i].slot_offset;
         }
         return 0;
     }
@@ -305,14 +331,16 @@ class PersistentAddressSpace
                 continue;
             if ( std::strncmp( _names[i].name, name, PAM_NAME_SIZE ) != 0 )
                 continue;
-            uintptr_t sidx = _names[i].slot_idx;
-            if ( sidx >= _slot_capacity || !_slots[sidx].used )
+            uintptr_t slot_off = _names[i].slot_offset;
+            // Ищем слот по смещению (O(log n)).
+            uintptr_t sidx = _slot_lower_bound( slot_off );
+            if ( sidx >= _slot_map_size || _slot_entries_const()[sidx].key != slot_off )
                 continue;
             // Проверяем тип через таблицу типов.
-            uintptr_t tidx = _slots[sidx].type_idx;
+            uintptr_t tidx = _slot_entries_const()[sidx].value.type_idx;
             if ( tidx < _type_capacity && _types[tidx].used &&
                  std::strncmp( _types[tidx].name, tname, PAM_TYPE_ID_SIZE ) == 0 )
-                return _slots[sidx].offset;
+                return slot_off;
         }
         return 0;
     }
@@ -331,12 +359,10 @@ class PersistentAddressSpace
         if ( ptr < base || ptr >= base + data_size )
             return 0;
         uintptr_t offset = static_cast<uintptr_t>( ptr - base );
-        // Проверяем все слоты (включая безымянные).
-        for ( unsigned i = 0; i < _slot_capacity; i++ )
-        {
-            if ( _slots[i].used && _slots[i].offset == offset )
-                return offset;
-        }
+        // Ищем смещение в карте слотов (O(log n)).
+        uintptr_t idx = _slot_lower_bound( offset );
+        if ( idx < _slot_map_size && _slot_entries_const()[idx].key == offset )
+            return offset;
         return 0;
     }
 
@@ -346,7 +372,7 @@ class PersistentAddressSpace
 
     /**
      * Получить имя именованного объекта по его смещению.
-     * Двусторонняя связь: slot_descriptor.name_idx → name_info_entry.name.
+     * Двусторонняя связь: SlotInfo.name_idx → name_info_entry.name.
      * @return Указатель на строку имени или nullptr, если объект безымянный
      *         или смещение неверно.
      */
@@ -354,16 +380,12 @@ class PersistentAddressSpace
     {
         if ( offset == 0 )
             return nullptr;
-        for ( unsigned i = 0; i < _slot_capacity; i++ )
-        {
-            if ( _slots[i].used && _slots[i].offset == offset )
-            {
-                uintptr_t nidx = _slots[i].name_idx;
-                if ( nidx != PAM_INVALID_IDX && nidx < _name_capacity && _names[nidx].used )
-                    return _names[nidx].name;
-                return nullptr;
-            }
-        }
+        uintptr_t idx = _slot_lower_bound( offset );
+        if ( idx >= _slot_map_size || _slot_entries_const()[idx].key != offset )
+            return nullptr;
+        uintptr_t nidx = _slot_entries_const()[idx].value.name_idx;
+        if ( nidx != PAM_INVALID_IDX && nidx < _name_capacity && _names[nidx].used )
+            return _names[nidx].name;
         return nullptr;
     }
 
@@ -375,11 +397,9 @@ class PersistentAddressSpace
     {
         if ( offset == 0 )
             return 0;
-        for ( unsigned i = 0; i < _slot_capacity; i++ )
-        {
-            if ( _slots[i].used && _slots[i].offset == offset )
-                return _slots[i].count;
-        }
+        uintptr_t idx = _slot_lower_bound( offset );
+        if ( idx < _slot_map_size && _slot_entries_const()[idx].key == offset )
+            return _slot_entries_const()[idx].value.count;
         return 0;
     }
 
@@ -391,16 +411,12 @@ class PersistentAddressSpace
     {
         if ( offset == 0 )
             return 0;
-        for ( unsigned i = 0; i < _slot_capacity; i++ )
-        {
-            if ( _slots[i].used && _slots[i].offset == offset )
-            {
-                uintptr_t tidx = _slots[i].type_idx;
-                if ( tidx < _type_capacity && _types[tidx].used )
-                    return _types[tidx].elem_size;
-                return 0;
-            }
-        }
+        uintptr_t idx = _slot_lower_bound( offset );
+        if ( idx >= _slot_map_size || _slot_entries_const()[idx].key != offset )
+            return 0;
+        uintptr_t tidx = _slot_entries_const()[idx].value.type_idx;
+        if ( tidx < _type_capacity && _types[tidx].used )
+            return _types[tidx].elem_size;
         return 0;
     }
 
@@ -463,7 +479,6 @@ class PersistentAddressSpace
         {
             // Выход за пределы — неопределённое поведение в любом случае,
             // возвращаем первый байт как «аварийный» адрес (не nullptr).
-            // Это лучше, чем разыменование nullptr.
             return *reinterpret_cast<T*>( _data );
         }
         return reinterpret_cast<T*>( _data + offset )[index];
@@ -485,9 +500,9 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     /**
-     * Сохранить весь образ ПАМ в файл.
-     * Записывает: заголовок, таблицу типов, таблицу имён, таблицу слотов,
-     * область данных.
+     * Сохранить весь образ ПАМ в файл (фаза 8.2).
+     * Записывает: заголовок, таблицу типов, таблицу имён, область данных.
+     * Карта слотов сохраняется как часть области данных (внутри ПАП).
      */
     void Save()
     {
@@ -499,7 +514,6 @@ class PersistentAddressSpace
         std::fwrite( &_header(), sizeof( pam_header ), 1, f );
         std::fwrite( _types, sizeof( type_info_entry ), _type_capacity, f );
         std::fwrite( _names, sizeof( name_info_entry ), _name_capacity, f );
-        std::fwrite( _slots, sizeof( slot_descriptor ), _slot_capacity, f );
         std::fwrite( _data, 1, static_cast<std::size_t>( _header().data_area_size ), f );
         std::fclose( f );
     }
@@ -515,11 +529,6 @@ class PersistentAddressSpace
         {
             std::free( _data );
             _data = nullptr;
-        }
-        if ( _slots != nullptr )
-        {
-            std::free( _slots );
-            _slots = nullptr;
         }
         if ( _types != nullptr )
         {
@@ -538,10 +547,18 @@ class PersistentAddressSpace
     // Внутреннее состояние
     // -----------------------------------------------------------------------
 
-    char             _filename[256]; ///< Путь к файлу ПАМ
-    char*            _data;          ///< Буфер области данных
-    slot_descriptor* _slots;         ///< Динамическая таблица слотов
-    unsigned         _slot_capacity; ///< Текущая ёмкость таблицы слотов
+    char _filename[256]; ///< Путь к файлу ПАМ
+    char* _data; ///< Буфер области данных (включает заголовок и карту слотов)
+
+    /// Карта слотов хранится ВНУТРИ _data по смещению _slot_map_offset.
+    /// Раскладка (фаза 8.2, совместима с pmap<uintptr_t, SlotInfo>):
+    ///   [uintptr_t size][uintptr_t capacity][uintptr_t entries_offset]
+    /// Массив записей slot_entry[] расположен по entries_offset в _data.
+    uintptr_t _slot_map_offset;   ///< Смещение объекта карты слотов в _data
+    uintptr_t _slot_map_size;     ///< Текущее число слотов (зеркало size_ в _data)
+    uintptr_t _slot_map_capacity; ///< Текущая ёмкость карты (зеркало capacity_ в _data)
+    uintptr_t _slot_entries_off; ///< Смещение массива slot_entry[] в _data (зеркало entries_offset)
+
     type_info_entry* _types;         ///< Динамическая таблица типов
     unsigned         _type_capacity; ///< Текущая ёмкость таблицы типов
     name_info_entry* _names;         ///< Динамическая таблица имён объектов
@@ -549,7 +566,6 @@ class PersistentAddressSpace
 
     // Заголовок хранится в начале буфера _data как pam_header.
     // _data[0..sizeof(pam_header)-1] — заголовок.
-    // Таблицы слотов, типов и имён хранятся отдельно (динамические буферы).
     // Область данных начинается после заголовка.
 
     /// Счётчик следующего доступного смещения в области данных (bump-allocator).
@@ -564,12 +580,54 @@ class PersistentAddressSpace
     const pam_header& _header_const() const { return *reinterpret_cast<const pam_header*>( _data ); }
 
     // -----------------------------------------------------------------------
+    // Доступ к массиву записей карты слотов (внутри _data)
+    // -----------------------------------------------------------------------
+
+    /// Получить указатель на массив slot_entry в _data (изменяемый).
+    slot_entry* _slot_entries()
+    {
+        if ( _slot_entries_off == 0 )
+            return nullptr;
+        return reinterpret_cast<slot_entry*>( _data + _slot_entries_off );
+    }
+
+    /// Получить указатель на массив slot_entry в _data (константный).
+    const slot_entry* _slot_entries_const() const
+    {
+        if ( _slot_entries_off == 0 )
+            return nullptr;
+        return reinterpret_cast<const slot_entry*>( _data + _slot_entries_off );
+    }
+
+    // -----------------------------------------------------------------------
+    // Бинарный поиск по ключу (offset) в карте слотов (O(log n))
+    // -----------------------------------------------------------------------
+
+    /// Найти индекс первой записи с ключом >= offset (lower_bound).
+    uintptr_t _slot_lower_bound( uintptr_t offset ) const
+    {
+        const slot_entry* entries = _slot_entries_const();
+        if ( entries == nullptr )
+            return 0;
+        uintptr_t lo = 0, hi = _slot_map_size;
+        while ( lo < hi )
+        {
+            uintptr_t mid = ( lo + hi ) / 2;
+            if ( entries[mid].key < offset )
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo;
+    }
+
+    // -----------------------------------------------------------------------
     // Конструктор и синглтон
     // -----------------------------------------------------------------------
 
     PersistentAddressSpace()
-        : _data( nullptr ), _slots( nullptr ), _slot_capacity( 0 ), _types( nullptr ), _type_capacity( 0 ),
-          _names( nullptr ), _name_capacity( 0 ), _bump( sizeof( pam_header ) )
+        : _data( nullptr ), _slot_map_offset( 0 ), _slot_map_size( 0 ), _slot_map_capacity( 0 ), _slot_entries_off( 0 ),
+          _types( nullptr ), _type_capacity( 0 ), _names( nullptr ), _name_capacity( 0 ), _bump( sizeof( pam_header ) )
     {
         _filename[0] = '\0';
     }
@@ -578,6 +636,169 @@ class PersistentAddressSpace
     {
         static PersistentAddressSpace _pam;
         return _pam;
+    }
+
+    // -----------------------------------------------------------------------
+    // Низкоуровневое выделение памяти в области данных (без регистрации слота)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Выделить size байт в области данных ПАМ без регистрации слота.
+     * Используется для внутренней аллокации (карта слотов, её записи).
+     * Возвращает смещение в _data или 0 при ошибке.
+     * После вызова _data может переместиться (realloc).
+     */
+    uintptr_t _raw_alloc( uintptr_t size, uintptr_t align )
+    {
+        if ( size == 0 )
+            return 0;
+        uintptr_t data_size    = _header().data_area_size;
+        uintptr_t aligned_bump = ( _bump + align - 1 ) & ~( align - 1 );
+
+        if ( aligned_bump + size > data_size )
+        {
+            uintptr_t new_size = data_size * 2;
+            while ( aligned_bump + size > new_size )
+                new_size *= 2;
+
+            char* new_data = static_cast<char*>( std::realloc( _data, static_cast<std::size_t>( new_size ) ) );
+            if ( new_data == nullptr )
+                return 0;
+            _data = new_data;
+            std::memset( _data + data_size, 0, static_cast<std::size_t>( new_size - data_size ) );
+            _header().data_area_size = new_size;
+            data_size                = new_size;
+            aligned_bump             = ( _bump + align - 1 ) & ~( align - 1 );
+        }
+
+        uintptr_t offset = aligned_bump;
+        _bump            = aligned_bump + size;
+        return offset;
+    }
+
+    // -----------------------------------------------------------------------
+    // Управление картой слотов (внутри ПАП)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Синхронизировать зеркальные поля карты слотов из _data.
+     * Вызывается после realloc (когда _data мог переместиться).
+     */
+    void _sync_slot_map_mirrors()
+    {
+        if ( _slot_map_offset == 0 )
+            return;
+        uintptr_t* sm      = reinterpret_cast<uintptr_t*>( _data + _slot_map_offset );
+        _slot_map_size     = sm[0];
+        _slot_map_capacity = sm[1];
+        _slot_entries_off  = sm[2];
+    }
+
+    /**
+     * Сохранить зеркальные поля карты слотов в _data.
+     */
+    void _flush_slot_map_mirrors()
+    {
+        if ( _slot_map_offset == 0 )
+            return;
+        uintptr_t* sm = reinterpret_cast<uintptr_t*>( _data + _slot_map_offset );
+        sm[0]         = _slot_map_size;
+        sm[1]         = _slot_map_capacity;
+        sm[2]         = _slot_entries_off;
+    }
+
+    /**
+     * Инициализировать карту слотов: выделить объект и начальный массив внутри ПАП.
+     * Вызывается при создании пустого образа и при загрузке нового формата.
+     */
+    void _init_slot_map()
+    {
+        // Выделяем объект карты (3 × uintptr_t: size, capacity, entries_offset).
+        uintptr_t sm_obj_align = alignof( uintptr_t );
+        _slot_map_offset       = _raw_alloc( 3 * sizeof( uintptr_t ), sm_obj_align );
+        if ( _slot_map_offset == 0 )
+            throw std::bad_alloc{};
+
+        // Выделяем начальный массив записей.
+        uintptr_t init_cap    = PAM_INITIAL_SLOT_CAPACITY;
+        uintptr_t entries_off = _raw_alloc( init_cap * sizeof( slot_entry ), alignof( slot_entry ) );
+        if ( entries_off == 0 )
+            throw std::bad_alloc{};
+
+        std::memset( _data + entries_off, 0, init_cap * sizeof( slot_entry ) );
+
+        _slot_map_size     = 0;
+        _slot_map_capacity = init_cap;
+        _slot_entries_off  = entries_off;
+        _flush_slot_map_mirrors();
+    }
+
+    /**
+     * Убедиться, что карта слотов имеет достаточную ёмкость для ещё одной записи.
+     * При необходимости расширяет массив записей (с копированием).
+     * Возвращает false при ошибке выделения памяти.
+     */
+    bool _ensure_slot_map_capacity()
+    {
+        if ( _slot_map_size < _slot_map_capacity )
+            return true;
+
+        uintptr_t new_cap = _slot_map_capacity * 2;
+        if ( new_cap < PAM_INITIAL_SLOT_CAPACITY )
+            new_cap = PAM_INITIAL_SLOT_CAPACITY;
+
+        // Копируем старые записи перед realloc (они в _data, который может переместиться).
+        uintptr_t   old_size_bytes = _slot_map_size * sizeof( slot_entry );
+        slot_entry* tmp = static_cast<slot_entry*>( std::malloc( static_cast<std::size_t>( old_size_bytes ) ) );
+        if ( tmp == nullptr )
+            return false;
+        if ( _slot_entries_off != 0 && _slot_map_size > 0 )
+            std::memcpy( tmp, _data + _slot_entries_off, old_size_bytes );
+
+        // Выделяем новый массив в ПАП (raw_alloc — без регистрации слота).
+        uintptr_t new_off = _raw_alloc( new_cap * sizeof( slot_entry ), alignof( slot_entry ) );
+        if ( new_off == 0 )
+        {
+            std::free( tmp );
+            return false;
+        }
+        std::memset( _data + new_off, 0, new_cap * sizeof( slot_entry ) );
+
+        // Копируем старые записи в новый массив.
+        if ( _slot_map_size > 0 )
+            std::memcpy( _data + new_off, tmp, old_size_bytes );
+        std::free( tmp );
+
+        _slot_entries_off  = new_off;
+        _slot_map_capacity = new_cap;
+        _flush_slot_map_mirrors();
+        return true;
+    }
+
+    /**
+     * Вставить новый слот в карту слотов (отсортированный массив).
+     * offset является ключом; info — значением.
+     * Сохраняет сортировку для O(log n) поиска.
+     * Возвращает true при успехе.
+     */
+    bool _slot_insert( uintptr_t offset, const SlotInfo& info )
+    {
+        if ( !_ensure_slot_map_capacity() )
+            return false;
+
+        // Позиция для вставки (нижняя граница).
+        uintptr_t idx = _slot_lower_bound( offset );
+
+        // Сдвигаем записи вправо.
+        slot_entry* entries = _slot_entries();
+        for ( uintptr_t i = _slot_map_size; i > idx; i-- )
+            entries[i] = entries[i - 1];
+
+        entries[idx].key   = offset;
+        entries[idx].value = info;
+        _slot_map_size++;
+        _flush_slot_map_mirrors();
+        return true;
     }
 
     // -----------------------------------------------------------------------
@@ -594,12 +815,6 @@ class PersistentAddressSpace
             std::free( _data );
             _data = nullptr;
         }
-        if ( _slots != nullptr )
-        {
-            std::free( _slots );
-            _slots         = nullptr;
-            _slot_capacity = 0;
-        }
         if ( _types != nullptr )
         {
             std::free( _types );
@@ -612,6 +827,10 @@ class PersistentAddressSpace
             _names         = nullptr;
             _name_capacity = 0;
         }
+        _slot_map_offset   = 0;
+        _slot_map_size     = 0;
+        _slot_map_capacity = 0;
+        _slot_entries_off  = 0;
 
         std::FILE* f = std::fopen( filename, "rb" );
         if ( f == nullptr )
@@ -679,31 +898,7 @@ class PersistentAddressSpace
             }
         }
 
-        // ---- Таблица слотов ----
-        unsigned cap = hdr.slot_capacity;
-        if ( cap < PAM_INITIAL_SLOT_CAPACITY )
-            cap = PAM_INITIAL_SLOT_CAPACITY;
-
-        _slots = static_cast<slot_descriptor*>( std::malloc( sizeof( slot_descriptor ) * cap ) );
-        if ( _slots == nullptr )
-        {
-            std::fclose( f );
-            throw std::bad_alloc{};
-        }
-        std::memset( _slots, 0, sizeof( slot_descriptor ) * cap );
-        _slot_capacity = cap;
-
-        if ( hdr.slot_capacity > 0 )
-        {
-            if ( std::fread( _slots, sizeof( slot_descriptor ), hdr.slot_capacity, f ) != hdr.slot_capacity )
-            {
-                std::fclose( f );
-                _init_empty();
-                return;
-            }
-        }
-
-        // ---- Область данных ----
+        // ---- Область данных (включает карту слотов) ----
         uintptr_t data_size = hdr.data_area_size;
         _data               = static_cast<char*>( std::malloc( static_cast<std::size_t>( data_size ) ) );
         if ( _data == nullptr )
@@ -713,35 +908,25 @@ class PersistentAddressSpace
         }
 
         // Конструкторы объектов НЕ вызываются (Тр.10) — просто fread.
-        std::size_t read = std::fread( _data, 1, static_cast<std::size_t>( data_size ), f );
-        if ( read != static_cast<std::size_t>( data_size ) )
-        {
-            // Частичное чтение — заполняем оставшееся нулями.
-            std::memset( _data + read, 0, static_cast<std::size_t>( data_size ) - read );
-        }
+        std::size_t rd = std::fread( _data, 1, static_cast<std::size_t>( data_size ), f );
+        if ( rd != static_cast<std::size_t>( data_size ) )
+            std::memset( _data + rd, 0, static_cast<std::size_t>( data_size ) - rd );
         std::fclose( f );
 
         // Обновляем заголовок в буфере данных.
         _header()               = hdr;
-        _header().slot_capacity = _slot_capacity;
         _header().type_capacity = _type_capacity;
         _header().name_capacity = _name_capacity;
 
-        // Восстанавливаем bump из уже занятых слотов.
-        _bump = sizeof( pam_header );
-        for ( unsigned i = 0; i < _slot_capacity; i++ )
-        {
-            if ( _slots[i].used )
-            {
-                uintptr_t tidx      = _slots[i].type_idx;
-                uintptr_t elem_size = 0;
-                if ( tidx < _type_capacity && _types[tidx].used )
-                    elem_size = _types[tidx].elem_size;
-                uintptr_t end = _slots[i].offset + elem_size * _slots[i].count;
-                if ( end > _bump )
-                    _bump = end;
-            }
-        }
+        // Восстанавливаем карту слотов из _data.
+        // Объект карты сохранён по _slot_map_offset (первые байты после заголовка).
+        _slot_map_offset = sizeof( pam_header );
+        _sync_slot_map_mirrors();
+
+        // Восстанавливаем bump: находим максимальный конец среди всех слотов.
+        _bump = _slot_entries_off + _slot_map_capacity * sizeof( slot_entry );
+        if ( _bump < sizeof( pam_header ) )
+            _bump = sizeof( pam_header );
     }
 
     // -----------------------------------------------------------------------
@@ -768,26 +953,11 @@ class PersistentAddressSpace
         }
         std::memset( _names, 0, sizeof( name_info_entry ) * _name_capacity );
 
-        // Выделяем начальную таблицу слотов.
-        _slot_capacity = PAM_INITIAL_SLOT_CAPACITY;
-        _slots         = static_cast<slot_descriptor*>( std::malloc( sizeof( slot_descriptor ) * _slot_capacity ) );
-        if ( _slots == nullptr )
-        {
-            std::free( _names );
-            _names = nullptr;
-            std::free( _types );
-            _types = nullptr;
-            throw std::bad_alloc{};
-        }
-        std::memset( _slots, 0, sizeof( slot_descriptor ) * _slot_capacity );
-
         // Выделяем буфер данных.
         uintptr_t data_size = PAM_INITIAL_DATA_SIZE;
         _data               = static_cast<char*>( std::malloc( static_cast<std::size_t>( data_size ) ) );
         if ( _data == nullptr )
         {
-            std::free( _slots );
-            _slots = nullptr;
             std::free( _names );
             _names = nullptr;
             std::free( _types );
@@ -801,8 +971,6 @@ class PersistentAddressSpace
         hdr.magic          = PAM_MAGIC;
         hdr.version        = PAM_VERSION;
         hdr.data_area_size = data_size;
-        hdr.slot_count     = 0;
-        hdr.slot_capacity  = _slot_capacity;
         hdr.type_count     = 0;
         hdr.type_capacity  = _type_capacity;
         hdr.name_count     = 0;
@@ -810,6 +978,9 @@ class PersistentAddressSpace
 
         // Область данных начинается после заголовка.
         _bump = sizeof( pam_header );
+
+        // Инициализируем карту слотов внутри области данных ПАП.
+        _init_slot_map();
     }
 
     // -----------------------------------------------------------------------
@@ -878,12 +1049,12 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     /**
-     * Зарегистрировать новое имя в таблице имён (связать с индексом слота slot_idx).
+     * Зарегистрировать новое имя в таблице имён (связать с offset объекта).
      * Если имя уже занято — возвращает PAM_INVALID_IDX (уникальность нарушена).
      * Добавляет новую запись в свободное место, при необходимости расширяя таблицу.
      * @return Индекс в таблице имён или PAM_INVALID_IDX при ошибке/дубликате.
      */
-    unsigned _register_name( const char* name, unsigned slot_idx )
+    unsigned _register_name( const char* name, uintptr_t slot_offset )
     {
         // Проверяем уникальность: имя не должно уже присутствовать.
         for ( unsigned i = 0; i < _name_capacity; i++ )
@@ -925,49 +1096,11 @@ class PersistentAddressSpace
         // Заполняем запись.
         name_info_entry& ne = _names[free_idx];
         ne.used             = true;
-        ne.slot_idx         = static_cast<uintptr_t>( slot_idx );
+        ne.slot_offset      = slot_offset;
         std::strncpy( ne.name, name, PAM_NAME_SIZE - 1 );
         ne.name[PAM_NAME_SIZE - 1] = '\0';
 
         _header().name_count++;
-        return free_idx;
-    }
-
-    // -----------------------------------------------------------------------
-    // Расширение таблицы слотов
-    // -----------------------------------------------------------------------
-
-    /**
-     * Найти свободный слот, при необходимости расширяя таблицу.
-     * @return Индекс свободного слота или UINT_MAX при ошибке.
-     */
-    unsigned _ensure_free_slot()
-    {
-        // Ищем свободный слот.
-        for ( unsigned i = 0; i < _slot_capacity; i++ )
-        {
-            if ( !_slots[i].used )
-                return i;
-        }
-
-        // Нет свободных — расширяем таблицу.
-        unsigned new_cap = _slot_capacity * 2;
-        if ( new_cap < PAM_INITIAL_SLOT_CAPACITY )
-            new_cap = PAM_INITIAL_SLOT_CAPACITY;
-
-        slot_descriptor* new_slots =
-            static_cast<slot_descriptor*>( std::realloc( _slots, sizeof( slot_descriptor ) * new_cap ) );
-        if ( new_slots == nullptr )
-            return static_cast<unsigned>( -1 );
-
-        // Инициализируем новые слоты нулями.
-        std::memset( new_slots + _slot_capacity, 0, sizeof( slot_descriptor ) * ( new_cap - _slot_capacity ) );
-
-        unsigned free_idx       = _slot_capacity; // Первый новый слот.
-        _slots                  = new_slots;
-        _slot_capacity          = new_cap;
-        _header().slot_capacity = _slot_capacity;
-
         return free_idx;
     }
 
@@ -977,10 +1110,11 @@ class PersistentAddressSpace
 
     /**
      * Выделить size*count байт в области данных ПАМ.
-     * Всегда создаётся запись в таблице слотов.
+     * Всегда создаётся запись в карте слотов (внутри ПАП, фаза 8.2).
      * Тип регистрируется в таблице типов (один раз на уникальный тип).
      * Если name задано — регистрируется запись в таблице имён и устанавливается
-     * двусторонняя связь: name_info_entry.slot_idx ↔ slot_descriptor.name_idx.
+     * двусторонняя связь: name_info_entry.slot_offset = offset,
+     *                     SlotInfo.name_idx = индекс в таблице имён.
      * Если name задано, но уже занято — возвращает 0 (уникальность нарушена).
      * Возвращает смещение или 0 при ошибке.
      */
@@ -1006,9 +1140,8 @@ class PersistentAddressSpace
             _data = new_data;
             std::memset( _data + data_size, 0, static_cast<std::size_t>( new_size - data_size ) );
             _header().data_area_size = new_size;
-            // Пересчитываем aligned_bump после возможного realloc.
-            data_size    = new_size;
-            aligned_bump = ( _bump + align - 1 ) & ~( align - 1 );
+            data_size                = new_size;
+            aligned_bump             = ( _bump + align - 1 ) & ~( align - 1 );
         }
 
         uintptr_t offset = aligned_bump;
@@ -1019,31 +1152,34 @@ class PersistentAddressSpace
         if ( type_idx == static_cast<unsigned>( -1 ) )
             return 0;
 
-        // Создаём запись в таблице слотов.
-        unsigned slot_idx = _ensure_free_slot();
-        if ( slot_idx == static_cast<unsigned>( -1 ) )
-            return 0;
-
-        slot_descriptor& sd = _slots[slot_idx];
-        sd.used             = true;
-        sd.offset           = offset;
-        sd.count            = count;
-        sd.type_idx         = static_cast<uintptr_t>( type_idx );
-        sd.name_idx         = PAM_INVALID_IDX; // по умолчанию — безымянный
-
-        bool named = ( name != nullptr && name[0] != '\0' );
+        // Регистрируем имя (если задано), проверяя уникальность.
+        bool     named = ( name != nullptr && name[0] != '\0' );
+        unsigned nidx  = static_cast<unsigned>( PAM_INVALID_IDX );
         if ( named )
         {
-            // Регистрируем имя и устанавливаем двустороннюю связь.
-            unsigned nidx = _register_name( name, slot_idx );
+            nidx = _register_name( name, offset );
             if ( nidx == static_cast<unsigned>( -1 ) )
+                return 0; // имя занято
+        }
+
+        // Вставляем запись в карту слотов (внутри ПАП, O(log n) вставка).
+        SlotInfo info;
+        info.count    = count;
+        info.type_idx = static_cast<uintptr_t>( type_idx );
+        info.name_idx = named ? static_cast<uintptr_t>( nidx ) : PAM_INVALID_IDX;
+
+        if ( !_slot_insert( offset, info ) )
+        {
+            // Откатываем регистрацию имени при ошибке вставки в карту.
+            if ( named && nidx != static_cast<unsigned>( PAM_INVALID_IDX ) )
             {
-                // Имя занято — откатываем слот.
-                sd.used = false;
-                return 0;
+                _names[nidx].used        = false;
+                _names[nidx].slot_offset = 0;
+                _names[nidx].name[0]     = '\0';
+                if ( _header().name_count > 0 )
+                    _header().name_count--;
             }
-            sd.name_idx = static_cast<uintptr_t>( nidx );
-            _header().slot_count++; // Увеличиваем счётчик ТОЛЬКО именованных.
+            return 0;
         }
 
         return offset;
