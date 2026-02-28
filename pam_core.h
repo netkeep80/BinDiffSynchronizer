@@ -229,9 +229,9 @@ static_assert( std::is_trivially_copyable<slot_entry>::value, "slot_entry дол
 /// Добавлен type_vec_offset для восстановления вектора типов из файла.
 struct pam_header
 {
-    uint32_t  magic;           ///< PAM_MAGIC — признак файла ПАМ
-    uint32_t  version;         ///< PAM_VERSION — версия формата
-    uintptr_t data_area_size;  ///< Размер области данных в байтах
+    uint32_t  magic;          ///< PAM_MAGIC — признак файла ПАМ
+    uint32_t  version;        ///< PAM_VERSION — версия формата
+    uintptr_t data_area_size; ///< Размер области данных в байтах
     uintptr_t type_vec_offset; ///< Смещение объекта вектора типов в области данных (фаза 8.4)
     uintptr_t slot_map_offset; ///< Смещение объекта карты слотов в области данных
     uintptr_t name_map_offset; ///< Смещение объекта карты имён в области данных (фаза 8.3)
@@ -630,7 +630,7 @@ class PersistentAddressSpace
     uintptr_t _type_vec_offset;   ///< Смещение объекта вектора типов в _data
     uintptr_t _type_vec_size;     ///< Текущее число типов (зеркало size_ в _data)
     uintptr_t _type_vec_capacity; ///< Текущая ёмкость вектора (зеркало capacity_ в _data)
-    uintptr_t _type_entries_off;  ///< Смещение массива TypeInfo[] в _data (зеркало entries_offset)
+    uintptr_t _type_entries_off; ///< Смещение массива TypeInfo[] в _data (зеркало entries_offset)
 
     /// Карта слотов хранится ВНУТРИ _data по смещению _slot_map_offset.
     /// Раскладка (фаза 8.2, совместима с pmap<uintptr_t, SlotInfo>):
@@ -774,8 +774,7 @@ class PersistentAddressSpace
     // -----------------------------------------------------------------------
 
     PersistentAddressSpace()
-        : _data( nullptr ),
-          _type_vec_offset( 0 ), _type_vec_size( 0 ), _type_vec_capacity( 0 ), _type_entries_off( 0 ),
+        : _data( nullptr ), _type_vec_offset( 0 ), _type_vec_size( 0 ), _type_vec_capacity( 0 ), _type_entries_off( 0 ),
           _slot_map_offset( 0 ), _slot_map_size( 0 ), _slot_map_capacity( 0 ), _slot_entries_off( 0 ),
           _name_map_offset( 0 ), _name_map_size( 0 ), _name_map_capacity( 0 ), _name_entries_off( 0 ),
           _bump( sizeof( pam_header ) )
@@ -839,7 +838,7 @@ class PersistentAddressSpace
     {
         if ( _type_vec_offset == 0 )
             return;
-        uintptr_t* tv     = reinterpret_cast<uintptr_t*>( _data + _type_vec_offset );
+        uintptr_t* tv      = reinterpret_cast<uintptr_t*>( _data + _type_vec_offset );
         _type_vec_size     = tv[0];
         _type_vec_capacity = tv[1];
         _type_entries_off  = tv[2];
@@ -903,7 +902,7 @@ class PersistentAddressSpace
 
         // Копируем старые записи перед realloc (они в _data, который может переместиться).
         uintptr_t old_size_bytes = _type_vec_size * sizeof( TypeInfo );
-        TypeInfo* tmp = static_cast<TypeInfo*>( std::malloc( static_cast<std::size_t>( old_size_bytes ) ) );
+        TypeInfo* tmp            = static_cast<TypeInfo*>( std::malloc( static_cast<std::size_t>( old_size_bytes ) ) );
         if ( tmp == nullptr )
             return false;
         if ( _type_entries_off != 0 && _type_vec_size > 0 )
@@ -1305,7 +1304,7 @@ class PersistentAddressSpace
         uintptr_t type_end = _type_entries_off + _type_vec_capacity * sizeof( TypeInfo );
         uintptr_t slot_end = _slot_entries_off + _slot_map_capacity * sizeof( slot_entry );
         uintptr_t name_end = _name_entries_off + _name_map_capacity * sizeof( name_entry );
-        _bump = type_end;
+        _bump              = type_end;
         if ( slot_end > _bump )
             _bump = slot_end;
         if ( name_end > _bump )
@@ -1328,10 +1327,10 @@ class PersistentAddressSpace
         std::memset( _data, 0, static_cast<std::size_t>( data_size ) );
 
         // Записываем заголовок в начало буфера данных.
-        pam_header& hdr    = _header();
-        hdr.magic          = PAM_MAGIC;
-        hdr.version        = PAM_VERSION;
-        hdr.data_area_size = data_size;
+        pam_header& hdr     = _header();
+        hdr.magic           = PAM_MAGIC;
+        hdr.version         = PAM_VERSION;
+        hdr.data_area_size  = data_size;
         hdr.type_vec_offset = 0;
         hdr.slot_map_offset = 0;
         hdr.name_map_offset = 0;

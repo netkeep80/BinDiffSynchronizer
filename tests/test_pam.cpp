@@ -933,8 +933,7 @@ TEST_CASE( "TypeInfo: has correct size", "[pam][layout][phase84]" )
 // ---------------------------------------------------------------------------
 // GetElemSize возвращает правильный размер через вектор типов внутри ПАП
 // ---------------------------------------------------------------------------
-TEST_CASE( "PersistentAddressSpace: phase 8.4 type vec -- GetElemSize returns correct size",
-           "[pam][phase84]" )
+TEST_CASE( "PersistentAddressSpace: phase 8.4 type vec -- GetElemSize returns correct size", "[pam][phase84]" )
 {
     auto& pam = PersistentAddressSpace::Get();
 
