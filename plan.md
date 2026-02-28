@@ -10,7 +10,9 @@
 **Ключевые архитектурные принципы:**
 
 1. Все объекты в ПАП — только POD-структуры, доступ через смещения (`node_id`).
-2. Все строки — интернированные `pstringview` (нет SSO, нет дублирования).
+2. В ПАП ровно два типа строк:
+   - **readonly (`pstringview`)** — интернированные, только накапливаются в словаре, используются как ключи `pmap` и пути `$ref`. Сравнение O(1). Нет SSO.
+   - **readwrite (`pstring`)** — изменяемые строковые значения JSON (`node_tag::string`), могут модифицироваться на лету. Необходимы для совместимости с [jsonRVM](https://github.com/netkeep80/jsonRVM). Нет SSO.
 3. Структура менеджера разделена на слои (storage → primitives → json model → db manager).
 4. `pjson_db.h` — единственный заголовок для конечного пользователя.
 5. Никаких `.cpp`, никаких внешних зависимостей.
@@ -30,7 +32,7 @@
 | `persist.h` | Пересмотреть | fptr<T>, persist<T>, AddressManager<T> |
 | `pvector.h` | Сохранить | Персистный динамический массив |
 | `pmap.h` | Сохранить | Персистная карта (sorted array) |
-| `pstring.h` | Сохранить, ограничить | Персистная строка (только как внутренняя утилита) |
+| `pstring.h` | Сохранить, расширить | Персистная readwrite строка (JSON string-value узлы); убрать SSO |
 | `pstringview.h` | Расширить | Интернированная read-only строка + таблица |
 | `pjson.h` | Рефакторинг | Персистный JSON (переработать на node_id) |
 | `pjson_interning.h` | Объединить с pstringview | Интернирование строк |
@@ -104,9 +106,9 @@ struct pmem_array_hdr {
 
 ---
 
-## Фаза 2. Единый словарь строк через `pstringview`
+## Фаза 2. Словарь строк: readonly (`pstringview`) и readwrite (`pstring`)
 
-**Цель:** Все строки в ПАП хранятся в одном месте, интернированы, никогда не освобождаются. Сравнение строк — O(1) через `chars_offset`.
+**Цель:** Закрепить двухтиповую архитектуру строк в ПАП. Readonly строки (`pstringview`) — только для ключей `pmap` и путей `$ref`, интернированы, сравнение O(1). Readwrite строки (`pstring`) — для JSON string-value узлов, изменяемые на лету (необходимо для [jsonRVM](https://github.com/netkeep80/jsonRVM)).
 
 ### Задача 2.1. Расширить `pstringview` для работы со словарём
 
@@ -120,29 +122,38 @@ struct pmem_array_hdr {
 - Ищет в таблице: если найдена — возвращает существующую.
 - Если не найдена — аллоцирует char-массив в ПАП, добавляет в таблицу, возвращает.
 - Таблица — часть заголовочной секции ПАМ (хранится в образе).
+- Интернированные строки только накапливаются; освобождения нет.
 
-### Задача 2.3. Убрать SSO из `pstringview`
+### Задача 2.3. Убрать SSO из `pstringview` и `pstring`
 
 - `pstringview` НЕ содержит inline-буфера (no SSO).
+- `pstring` также НЕ содержит inline-буфера (no SSO).
 - Любая строка, даже из 1 символа, хранится в ПАП через `chars_offset`.
 - Это необходимо для сквозного поиска по всем строкам ПАП.
 
-### Задача 2.4. Поддержка полнотекстового поиска
+### Задача 2.4. Чётко разграничить области применения двух типов строк
 
-- `PersistentAddressSpace::SearchStrings(pattern) -> pvector<pstringview>` — поиск подстроки/паттерна по всем интернированным строкам.
-- Доступ ко всей карте: `PersistentAddressSpace::AllStrings() -> итератор`.
+| Тип | Применение | Изменяемость |
+|-----|-----------|--------------|
+| `pstringview` | Ключи `pmap<pstringview, node_id>`, путь в `$ref`, сегменты path-адресации | readonly (interned) |
+| `pstring` | JSON string-value узлы (`node_tag::string`) | readwrite (изменяются на лету) |
 
-### Задача 2.5. Ограничить использование `pstring`
+- `pstring` используется в узлах `node_tag::string` (JSON строковые значения).
+- `pstring` НЕ используется как ключ `pmap` — только `pstringview`.
+- [jsonRVM](https://github.com/netkeep80/jsonRVM) работает непосредственно в БД и может модифицировать `pstring`-узлы "на месте", не затрагивая словарь `pstringview`.
 
-- `pstring` остаётся только как внутренняя утилита (временные/локальные строки).
-- В `pjson` и `pjson_db` — только `pstringview`.
-- Обновить существующие тесты строк.
+### Задача 2.5. Поддержка полнотекстового поиска по обоим типам строк
+
+- `PersistentAddressSpace::SearchStrings(pattern) -> vector<result>` — поиск по всем интернированным `pstringview` в словаре.
+- `pjson_db::search_strings(pattern)` — поиск по словарю `pstringview` И по всем `pstring`-значениям в пуле узлов.
+- `PersistentAddressSpace::AllStrings() -> итератор` — перебор всех `pstringview` в словаре.
 
 **Критерии приёмки фазы 2:**
 - `pstringview_table` хранится в ПАП и восстанавливается при загрузке образа.
 - Два одинаковых `intern("hello")` дают одинаковый `chars_offset`.
-- Сравнение строк `==` через `chars_offset` (O(1)).
-- Тесты `test_pstringview.cpp` проходят.
+- Сравнение строк-ключей `==` через `chars_offset` (O(1)).
+- `pstring`-значения изменяемы: `node.string_val.assign("new_value")` работает без пересоздания узла.
+- Тесты `test_pstringview.cpp` и `test_pstring.cpp` проходят.
 
 ---
 
@@ -160,11 +171,11 @@ enum class node_tag : uint32_t {
     integer  = 2,   // int64_t
     uinteger = 3,   // uint64_t
     real     = 4,   // double
-    string   = 5,   // pstringview (интернированная)
+    string   = 5,   // pstring (readwrite, изменяемое строковое значение JSON)
     binary   = 6,   // pvector<uint8_t> в ПАП
     array    = 7,   // pvector<node_id>
-    object   = 8,   // pmap<pstringview, node_id>
-    ref      = 9,   // pstringview path + node_id target
+    object   = 8,   // pmap<pstringview, node_id> — ключи readonly (pstringview)
+    ref      = 9,   // pstringview path (readonly) + node_id target
 };
 ```
 
@@ -180,8 +191,10 @@ struct node {
         uint64_t  uint_val;
         double    real_val;
 
-        // string: pstringview (length + chars_offset)
-        struct { uintptr_t length; uintptr_t chars_offset; } string_val;
+        // string: pstring (readwrite, length + chars_offset)
+        // Изменяемые строковые значения — для поддержки jsonRVM,
+        // который может модифицировать строковые узлы "на лету".
+        struct { uintptr_t length; uintptr_t chars_offset; } string_val; // совместим с pstring
 
         // binary: pvector<uint8_t>-совместимая раскладка
         struct { uintptr_t size; uintptr_t cap; uintptr_t data_off; } binary_val;
@@ -190,13 +203,14 @@ struct node {
         struct { uintptr_t size; uintptr_t cap; uintptr_t data_off; } array_val;
 
         // object: pmap<pstringview, node_id>-совместимая раскладка
+        // Ключи — readonly pstringview (интернированные)
         struct { uintptr_t size; uintptr_t cap; uintptr_t data_off; } object_val;
 
-        // ref: path (pstringview) + target (node_id)
+        // ref: path (readonly pstringview) + target (node_id)
         struct {
             uintptr_t path_length;
-            uintptr_t path_chars_offset;
-            uintptr_t target; // node_id (0 = не разрешён)
+            uintptr_t path_chars_offset; // указывает в словарь pstringview (readonly)
+            uintptr_t target;            // node_id (0 = не разрешён)
         } ref_val;
     };
 };
@@ -223,7 +237,7 @@ struct node_view {
     bool        as_bool() const;
     int64_t     as_int() const;
     double      as_double() const;
-    pstringview as_string() const;
+    std::string_view as_string() const; // возвращает вид на pstring (readwrite значение)
 
     // Навигация
     node_view at(pstringview key) const;  // для object
@@ -239,8 +253,12 @@ struct node_view {
 
 - Тест создания каждого типа узла.
 - Тест `node_view::deref()` — рекурсивное и нерекурсивное разыменование.
-- Тест `object_val` — вставка/поиск по ключу `pstringview`.
+- Тест `object_val` — вставка/поиск по ключу `pstringview` (readonly).
 - Тест `array_val` — push_back, at, size.
+- Тест двух типов строк:
+  - `string_val` (pstring, readwrite): создание, `assign("new")`, изменение без пересоздания узла.
+  - `ref_val.path` (pstringview, readonly): интернирование, сравнение через `chars_offset`.
+  - Проверка, что ключи объектов — только `pstringview`, значения типа `string` — только `pstring`.
 
 **Критерии приёмки фазы 3:**
 - Новый файл `pjson_node.h`.
@@ -290,7 +308,9 @@ public:
 ### Задача 5.1. Переработать `pjson_serializer.h` → `pjson_codec.h`
 
 - Переработать десериализатор для работы с `node_id` и `pjson_pool`.
-- Входные строки интернируются через `PersistentAddressSpace::InternString`.
+- Ключи объектов интернируются через `PersistentAddressSpace::InternString` → `pstringview`.
+- Строковые значения JSON создаются как `pstring`-узлы (readwrite) через `pjson_pool::alloc_string(value)`.
+- Сегменты путей `$ref` интернируются как `pstringview` (readonly).
 
 ### Задача 5.2. Реализовать распознавание `$ref`
 
@@ -455,8 +475,9 @@ struct db_metrics {
 
 ### Задача 8.2. Реализовать интерфейс поиска по строкам
 
-- `pjson_db::search_strings(const char* pattern) -> std::vector<pstringview>` — поиск по всем интернированным строкам.
-- `pjson_db::all_strings() -> итератор` — перебор всех строк словаря.
+- `pjson_db::search_strings(const char* pattern) -> std::vector<search_result>` — поиск по всем интернированным ключам (`pstringview`) И по всем `pstring`-значениям в пуле узлов.
+- `pjson_db::all_strings() -> итератор` — перебор всех строк словаря `pstringview`.
+- `search_result` содержит найденную строку и `node_id` узла (если это `pstring`-значение) или путь ключа (если это `pstringview`-ключ).
 
 ### Задача 8.3. Написать интеграционные тесты
 
@@ -522,13 +543,21 @@ struct db_metrics {
 - В текущем коде `persist<T>` используется в тестах и `main.cpp`.
 - Предложение: оставить `persist<T>` как compatibility shim, но не использовать в новом коде `pjson_db`.
 
-### В4. Двойные типы строк: readonly vs readwrite
+### В4. Двойные типы строк: readonly vs readwrite ✅ РЕШЕНО
 
-**Вопрос:** Должны ли значения-строки в JSON быть изменяемыми?
+**Решение:** В ПАП существуют ровно два типа строк с принципиально разными свойствами:
 
-- Требование: "readonly строки только накапливаются в словаре".
-- Если строковые значения тоже интернированы, то изменение строкового узла = создание нового интернированного значения (старое остаётся в словаре).
-- Предложение: ВСЕ строки в ПАП интернированы (нет изменяемых строк). Это упрощает реализацию и сквозной поиск.
+- **readonly (`pstringview`)** — интернированные строки, только накапливаются в словаре, используются исключительно как ключи `pmap` (объектные ключи, сегменты путей `$ref`). Сравнение O(1) через `chars_offset`. Никогда не изменяются и не освобождаются.
+
+- **readwrite (`pstring`)** — изменяемые строки, являются JSON string-value узлами. Могут модифицироваться на лету — это критически важно для совместимости с [jsonRVM](https://github.com/netkeep80/jsonRVM), который работает непосредственно внутри базы данных и может менять строковые значения узлов "на месте".
+
+**Последствия для архитектуры:**
+
+- Тип `string` в `node_tag` хранит `pstring` (readwrite, offset + length), не `pstringview`.
+- `pstringview` используется только как ключ в `pmap<pstringview, node_id>` и в `ref_val.path`.
+- Сквозной поиск по строкам охватывает **оба** типа: словарь `pstringview` и все `pstring`-узлы.
+- NO SSO в `pstringview` — обязательно. NO SSO в `pstring` — требуется для сквозного поиска по значениям.
+- `pjson_db::search_strings(pattern)` должен искать по словарю И по всем `pstring`-значениям в пуле узлов.
 
 ### В5. Конвертация индексов массива в путях
 
@@ -555,13 +584,14 @@ struct db_metrics {
 - Hash map: O(1) поиск, но сложнее в ПАП (нет перехэшивания указателей).
 - Рекомендация: Sorted array как сейчас. При необходимости — hash map в будущей фазе.
 
-### В8. Граница между `pstringview` как ключ и как значение
+### В8. Граница между `pstringview` как ключ и `pstring` как значение ✅ РЕШЕНО
 
-**Вопрос:** Нужны ли два разных типа (`key_string` и `value_string`)?
+**Решение:** Используются два разных типа с принципиально разными свойствами.
 
-- Требование 11: "фактически в ПАП у нас будет всего 2 типа строк: readonly которые только накапливаются в словаре и используются как ключ, и readwrite которые являются узлами json".
-- Если оба типа интернированы (readonly) — различие исчезает на уровне хранения.
-- Рекомендация: Единый тип `pstringview` для всего. Семантическое различие (ключ vs значение) — только на уровне API, не на уровне хранения.
+- **`pstringview`** — только для ключей `pmap<pstringview, node_id>` и путей `$ref`. Интернированная, readonly. Сравнение по `chars_offset` — O(1). Только накапливается в словаре.
+- **`pstring`** — только для JSON string-value узлов (`node_tag::string`). Readwrite, изменяемая. Позволяет [jsonRVM](https://github.com/netkeep80/jsonRVM) модифицировать строковые значения непосредственно в БД.
+
+Это принципиальное архитектурное решение, а не просто семантическое: `pstring` допускает `assign()`, `pstringview` — нет.
 
 ---
 
