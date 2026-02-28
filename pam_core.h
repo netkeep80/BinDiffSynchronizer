@@ -255,6 +255,14 @@ class PersistentAddressSpace
         return pam;
     }
 
+    /// Сбросить ПАМ к пустому состоянию за O(1) — для быстрой очистки в тестах.
+    void Reset()
+    {
+        std::free( _data );
+        _data = nullptr;
+        _init_empty();
+    }
+
     // -----------------------------------------------------------------------
     // Создание объектов
     // -----------------------------------------------------------------------
@@ -531,7 +539,16 @@ class PersistentAddressSpace
         return static_cast<uintptr_t>( ptr - _data );
     }
 
-    // ─── Метрики ПАМ ─────────────────────────────────────────────────────────
+    // ─── Предварительное резервирование и метрики ПАМ ────────────────────────
+
+    /// Зарезервировать ёмкость карты слотов >= min_slots.
+    /// Оптимизирует массовое добавление объектов: один вызов вместо многократных
+    /// реаллокаций. Если текущая ёмкость уже достаточна — ничего не делает.
+    void ReserveSlots( uintptr_t min_slots )
+    {
+        if ( min_slots > _slot_map_capacity )
+            _reserve_slot_map( min_slots );
+    }
 
     uintptr_t GetSlotCount() const { return _slot_map_size; }        ///< Аллоцированных слотов.
     uintptr_t GetSlotCapacity() const { return _slot_map_capacity; } ///< Ёмкость карты слотов.
@@ -714,59 +731,29 @@ class PersistentAddressSpace
     /// Счётчик следующего свободного смещения (bump-allocator).
     uintptr_t _bump;
 
-    // -----------------------------------------------------------------------
-    // Доступ к заголовку
-    // -----------------------------------------------------------------------
+    // Вспомогательные методы доступа к внутренним структурам _data
 
-    pam_header& _header() { return *reinterpret_cast<pam_header*>( _data ); }
-
+    pam_header&       _header() { return *reinterpret_cast<pam_header*>( _data ); }
     const pam_header& _header_const() const { return *reinterpret_cast<const pam_header*>( _data ); }
 
-    // -----------------------------------------------------------------------
-    // Доступ к массиву записей вектора типов (внутри _data) — фаза 8.4
-    // -----------------------------------------------------------------------
-
-    /// Получить указатель на массив TypeInfo в _data (изменяемый).
     TypeInfo* _type_entries()
     {
-        if ( _type_entries_off == 0 )
-            return nullptr;
-        return reinterpret_cast<TypeInfo*>( _data + _type_entries_off );
+        return _type_entries_off ? reinterpret_cast<TypeInfo*>( _data + _type_entries_off ) : nullptr;
     }
-
-    /// Получить указатель на массив TypeInfo в _data (константный).
     const TypeInfo* _type_entries_const() const
     {
-        if ( _type_entries_off == 0 )
-            return nullptr;
-        return reinterpret_cast<const TypeInfo*>( _data + _type_entries_off );
+        return _type_entries_off ? reinterpret_cast<const TypeInfo*>( _data + _type_entries_off ) : nullptr;
     }
 
-    // -----------------------------------------------------------------------
-    // Доступ к массиву записей карты слотов (внутри _data)
-    // -----------------------------------------------------------------------
-
-    /// Получить указатель на массив slot_entry в _data (изменяемый).
     slot_entry* _slot_entries()
     {
-        if ( _slot_entries_off == 0 )
-            return nullptr;
-        return reinterpret_cast<slot_entry*>( _data + _slot_entries_off );
+        return _slot_entries_off ? reinterpret_cast<slot_entry*>( _data + _slot_entries_off ) : nullptr;
     }
-
-    /// Получить указатель на массив slot_entry в _data (константный).
     const slot_entry* _slot_entries_const() const
     {
-        if ( _slot_entries_off == 0 )
-            return nullptr;
-        return reinterpret_cast<const slot_entry*>( _data + _slot_entries_off );
+        return _slot_entries_off ? reinterpret_cast<const slot_entry*>( _data + _slot_entries_off ) : nullptr;
     }
 
-    // -----------------------------------------------------------------------
-    // Доступ к массиву записей карты имён (внутри _data) — фаза 8.3
-    // -----------------------------------------------------------------------
-
-    /// Получить указатель на массив name_entry в _data (изменяемый).
     name_entry* _name_entries()
     {
         if ( _name_entries_off == 0 )
@@ -1089,19 +1076,19 @@ class PersistentAddressSpace
         _slot_entries_off  = entries_off;
         _flush_slot_map_mirrors();
     }
-    bool _ensure_slot_map_capacity()
+
+    /// Зарезервировать ёмкость карты слотов не менее new_cap записей.
+    bool _reserve_slot_map( uintptr_t new_cap )
     {
-        if ( _slot_map_size < _slot_map_capacity )
+        if ( new_cap <= _slot_map_capacity )
             return true;
-        uintptr_t new_cap = _slot_map_capacity * 2;
-        if ( new_cap < PAM_INITIAL_SLOT_CAPACITY )
-            new_cap = PAM_INITIAL_SLOT_CAPACITY;
-        uintptr_t   old_size_bytes = _slot_map_size * sizeof( slot_entry );
-        slot_entry* tmp = static_cast<slot_entry*>( std::malloc( static_cast<std::size_t>( old_size_bytes ) ) );
-        if ( tmp == nullptr )
+        uintptr_t   old_bytes = _slot_map_size * sizeof( slot_entry );
+        slot_entry* tmp =
+            old_bytes > 0 ? static_cast<slot_entry*>( std::malloc( static_cast<std::size_t>( old_bytes ) ) ) : nullptr;
+        if ( old_bytes > 0 && tmp == nullptr )
             return false;
-        if ( _slot_entries_off != 0 && _slot_map_size > 0 )
-            std::memcpy( tmp, _data + _slot_entries_off, old_size_bytes );
+        if ( tmp != nullptr && _slot_entries_off != 0 )
+            std::memcpy( tmp, _data + _slot_entries_off, old_bytes );
         uintptr_t new_off = _raw_alloc( new_cap * sizeof( slot_entry ), alignof( slot_entry ) );
         if ( new_off == 0 )
         {
@@ -1109,13 +1096,23 @@ class PersistentAddressSpace
             return false;
         }
         std::memset( _data + new_off, 0, new_cap * sizeof( slot_entry ) );
-        if ( _slot_map_size > 0 )
-            std::memcpy( _data + new_off, tmp, old_size_bytes );
+        if ( tmp != nullptr )
+            std::memcpy( _data + new_off, tmp, old_bytes );
         std::free( tmp );
         _slot_entries_off  = new_off;
         _slot_map_capacity = new_cap;
         _flush_slot_map_mirrors();
         return true;
+    }
+
+    bool _ensure_slot_map_capacity()
+    {
+        if ( _slot_map_size < _slot_map_capacity )
+            return true;
+        uintptr_t new_cap = _slot_map_capacity * 2;
+        if ( new_cap < PAM_INITIAL_SLOT_CAPACITY )
+            new_cap = PAM_INITIAL_SLOT_CAPACITY;
+        return _reserve_slot_map( new_cap );
     }
     bool _slot_insert( uintptr_t offset, const SlotInfo& info )
     {

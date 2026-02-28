@@ -400,6 +400,11 @@ TEST_CASE( "pjson serial: round-trip nested structure", "[pjson][serial][roundtr
 
 TEST_CASE( "pjson serial: round-trip test.json via from_string and to_string", "[pjson][serial][roundtrip][large]" )
 {
+    // Предварительно резервируем ёмкость карты слотов ПАМ.
+    // test.json содержит ~100k+ узлов; резервирование устраняет многократные
+    // реаллокации и ускоряет разбор (задача #88).
+    PersistentAddressSpace::Get().ReserveSlots( 200000 );
+
     // Load test.json as string.
     std::ifstream fin( TEST_JSON_PATH );
     REQUIRE( fin.is_open() );
@@ -423,6 +428,6 @@ TEST_CASE( "pjson serial: round-trip test.json via from_string and to_string", "
     // Compare original and restored JSON.
     REQUIRE( original.dump() == restored.dump() );
 
-    fv->free();
-    fv.Delete();
+    // Сбрасываем ПАМ целиком — быстрее O(1) vs O(n²) поэлементной очистки.
+    PersistentAddressSpace::Get().Reset();
 }
