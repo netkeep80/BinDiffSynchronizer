@@ -275,7 +275,7 @@ TEST_CASE( "node: ref node creation with path (pstringview readonly)", "[pjson_n
     fn.Delete();
 }
 
-TEST_CASE( "node: ref node path is interned (pstringview — readonly)", "[pjson_node][ref]" )
+TEST_CASE( "node: ref node path is interned (pstringview - readonly)", "[pjson_node][ref]" )
 {
     reset_pam();
 
@@ -572,7 +572,7 @@ TEST_CASE( "node: object keys are readonly pstringview (same key returns existin
     fn_obj.Delete();
 }
 
-TEST_CASE( "node: object keys are interned (pstringview) — same chars_offset", "[pjson_node][object]" )
+TEST_CASE( "node: object keys are interned (pstringview) - same chars_offset", "[pjson_node][object]" )
 {
     reset_pam();
 
@@ -663,7 +663,7 @@ TEST_CASE( "node: empty object has size 0", "[pjson_node][object]" )
 // Two string types: string_val (pstring, readwrite) vs ref_val.path (pstringview, readonly)
 // (Task 3.5: проверка двух типов строк)
 // ---------------------------------------------------------------------------
-TEST_CASE( "node: string_val uses pstring (readwrite) — assign modifies in place", "[pjson_node][string][pstring]" )
+TEST_CASE( "node: string_val uses pstring (readwrite) - assign modifies in place", "[pjson_node][string][pstring]" )
 {
     reset_pam();
 
@@ -682,7 +682,7 @@ TEST_CASE( "node: string_val uses pstring (readwrite) — assign modifies in pla
     fn.Delete();
 }
 
-TEST_CASE( "node: ref_val.path uses pstringview (readonly, interned) — same offset for same path",
+TEST_CASE( "node: ref_val.path uses pstringview (readonly, interned) - same offset for same path",
            "[pjson_node][ref][pstringview]" )
 {
     reset_pam();
@@ -709,7 +709,7 @@ TEST_CASE( "node: ref_val.path uses pstringview (readonly, interned) — same of
     fn2.Delete();
 }
 
-TEST_CASE( "node: object keys are pstringview (readonly) — not pstring (readwrite)",
+TEST_CASE( "node: object keys are pstringview (readonly) - not pstring (readwrite)",
            "[pjson_node][object][pstringview]" )
 {
     reset_pam();
@@ -909,7 +909,7 @@ TEST_CASE( "node_view: equality comparison by id", "[pjson_node][node_view]" )
 // ---------------------------------------------------------------------------
 // Комплексный тест: вложенный объект с массивом и ref (Task 3.5)
 // ---------------------------------------------------------------------------
-TEST_CASE( "node: nested object with array and ref — complex scenario", "[pjson_node][complex]" )
+TEST_CASE( "node: nested object with array and ref - complex scenario", "[pjson_node][complex]" )
 {
     reset_pam();
 
