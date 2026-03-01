@@ -99,8 +99,9 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pallocator.h` | B | STL-совместимый аллокатор поверх ПАМ |
 | `pjson.h` | C | Персистный JSON (старый API): узлы, типы, layout |
 | `pjson_node.h` | C | Новая модель узлов JSON (Фаза 3): `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; вспомогательные функции init/set/assign/push_back/insert |
+| `pjson_pool.h` | C | Пул узлов JSON (Фаза 4): `pjson_pool` — быстрая аллокация O(1) через `pvector<node>` + free-list на основе `node_tag::_free`; API: `alloc()`, `free()`, `get()` |
 | `pjson_interning.h` | B | Интернирование строк для pjson |
-| `pjson_node_pool.h` | C | Пул узлов для быстрой аллокации |
+| `pjson_node_pool.h` | C | Пул узлов (старый API, для `pjson`; устарел в пользу `pjson_pool.h`) |
 | `pjson_serializer.h` | C | Сериализация/десериализация pjson |
 | `main.cpp` | — | Демонстрационная программа |
 | `tests/` | — | Тесты на Catch2 |
@@ -325,6 +326,73 @@ REQUIRE( obj_view.at( "name" ).as_string() == "Alice" );
 node_set_string( off, "original" );
 node_assign_string( off, "updated" );  // освобождает старые данные, выделяет новые
 // node_view{ off }.as_string() == "updated"
+```
+
+---
+
+## Пул узлов JSON: `pjson_pool.h` (Фаза 4)
+
+`pjson_pool` обеспечивает быструю аллокацию узлов `node` — O(1) амортизированно.
+
+Вместо отдельного вызова `fptr<node>::New()` для каждого узла пул хранит непрерывный массив узлов (`pvector<node>`) в ПАП и управляет свободными слотами через free-list. Освобождённые слоты помечаются тегом `node_tag::_free` и повторно используются без обращения к аллокатору ПАМ.
+
+### Создание пула
+
+```cpp
+#include "pjson_pool.h"
+
+fptr<pjson_pool> pool;
+pool.New();  // создать пул в ПАП
+```
+
+### API пула
+
+```cpp
+// Выделить новый узел (O(1) амортизированно)
+node_id id = pool->alloc();
+
+// Работать с узлом через стандартные хелперы
+node_set_int( id, 42 );
+
+// Читать узел через node_view
+REQUIRE( node_view{ id }.as_int() == 42 );
+
+// Вернуть слот в free-list (O(1))
+pool->free( id );
+
+// Прямой доступ по node_id
+node& n = pool->get( id );
+const node& cn = pool->get( id );  // const-версия
+
+// Метрики
+uintptr_t total   = pool->total_count();   // всего узлов в пуле
+uintptr_t free_n  = pool->free_in_pool();  // в free-list
+uintptr_t used_n  = pool->used_count();    // занято пользователем
+
+// Освободить весь массив узлов (возвращает память в ПАМ)
+pool->free_pool();
+
+pool.Delete();
+```
+
+### Персистентность
+
+Пул сохраняется вместе с образом ПАМ и восстанавливается без вызова конструкторов (Тр.10):
+
+```cpp
+// Сохранение
+fptr<pjson_pool> pool;
+pool.New( "my_pool" );
+node_id id = pool->alloc();
+node_set_string( id, "hello" );
+PersistentAddressSpace::Get().Save();
+
+// Загрузка
+PersistentAddressSpace::Init( "data.pam" );
+auto& pam = PersistentAddressSpace::Get();
+uintptr_t off = pam.Find( "my_pool" );
+pjson_pool* p = pam.Resolve<pjson_pool>( off );
+REQUIRE( node_view{ id }.as_string() == "hello" );
 ```
 
 ---

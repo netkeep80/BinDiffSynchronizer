@@ -25,6 +25,7 @@ set(TEST_SOURCES
     test_pstringview.cpp
     test_pmem_array.cpp
     test_pjson_node.cpp
+    test_pjson_pool.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
