@@ -379,10 +379,9 @@ class PersistentAddressSpace
     {
         if ( offset == 0 )
             return;
-        // Ищем слот в карте слотов (линейный поиск O(n)).
         uintptr_t idx = _slot_lower_bound( offset );
         if ( idx >= _slot_map_size() )
-            return; // слот не найден
+            return;
 
         SlotInfo& info = _slot_entries()[idx].value;
 
@@ -395,10 +394,7 @@ class PersistentAddressSpace
                 freed_size = te[info.type_idx].elem_size * info.count;
         }
 
-        // Освобождаем запись в карте имён (если объект именованный).
-        // Поиск выполняется линейным сканом карты имён по полю slot_offset
-        // (O(n_names)), что значительно быстрее, чем O(n_slots) поддержка
-        // индексов name_idx при каждой операции Create/Delete.
+        // Освобождаем запись в карте имён (линейный скан по slot_offset, O(n_names)).
         if ( info.name_idx != PAM_INVALID_IDX )
         {
             name_entry* nentries = _name_entries();
@@ -416,7 +412,6 @@ class PersistentAddressSpace
                 }
                 if ( nidx != PAM_INVALID_IDX )
                 {
-                    // Сдвигаем оставшиеся записи карты имён влево.
                     for ( uintptr_t i = nidx; i + 1 < nm_size; i++ )
                         nentries[i] = nentries[i + 1];
                     _arr_hdr( _name_map_offset )->size--;
@@ -424,17 +419,14 @@ class PersistentAddressSpace
             }
         }
 
-        // Удаляем запись из карты слотов: swap-with-last (O(1)).
+        // Удаляем из slot_map: swap-with-last O(1), обновляем кэш.
         uintptr_t   sm_size = _slot_map_size();
         slot_entry* smap    = _slot_entries();
-        // Удаляем из кэша запись удаляемого слота.
         _slot_index_cache.erase( offset );
         if ( idx + 1 < sm_size )
         {
-            // Перемещаем последнюю запись на место удалённой.
-            uintptr_t moved_offset = smap[sm_size - 1].key;
-            smap[idx]              = smap[sm_size - 1]; // swap with last
-            // Обновляем кэш: последняя запись теперь имеет индекс idx.
+            uintptr_t moved_offset          = smap[sm_size - 1].key;
+            smap[idx]                       = smap[sm_size - 1];
             _slot_index_cache[moved_offset] = idx;
         }
         _arr_hdr( _slot_map_offset )->size--;
@@ -480,11 +472,9 @@ class PersistentAddressSpace
         if ( idx >= _name_map_size() || !( _name_entries_const()[idx].key == nk ) )
             return 0;
         uintptr_t slot_off = _name_entries_const()[idx].slot_offset;
-        // Ищем слот по смещению (линейный поиск O(n)).
-        uintptr_t sidx = _slot_lower_bound( slot_off );
+        uintptr_t sidx     = _slot_lower_bound( slot_off );
         if ( sidx >= _slot_map_size() )
             return 0;
-        // Проверяем тип через вектор типов (фаза 8.4).
         uintptr_t tidx = _slot_entries_const()[sidx].value.type_idx;
         if ( tidx < _type_vec_size() )
         {
@@ -509,8 +499,7 @@ class PersistentAddressSpace
         if ( ptr < base || ptr >= base + data_size )
             return 0;
         uintptr_t offset = static_cast<uintptr_t>( ptr - base );
-        // Ищем смещение в карте слотов (линейный поиск O(n)).
-        uintptr_t idx = _slot_lower_bound( offset );
+        uintptr_t idx    = _slot_lower_bound( offset );
         if ( idx < _slot_map_size() )
             return offset;
         return 0;
@@ -680,8 +669,7 @@ class PersistentAddressSpace
             for ( uintptr_t ni = 0; ni < nmsz; ni++ )
             {
                 uintptr_t si = _slot_lower_bound( ne[ni].slot_offset );
-                if ( si >= smsz || se[si].key != ne[ni].slot_offset ||
-                     se[si].value.name_idx == PAM_INVALID_IDX )
+                if ( si >= smsz || se[si].key != ne[ni].slot_offset || se[si].value.name_idx == PAM_INVALID_IDX )
                     return false;
             }
         }
@@ -798,10 +786,7 @@ class PersistentAddressSpace
     /// Счётчик следующего свободного смещения (bump-allocator).
     uintptr_t _bump;
 
-    /// Кэш быстрого поиска: offset → индекс в _slot_map.
-    /// Поддерживается в актуальном состоянии при каждом изменении slot_map.
-    /// Позволяет выполнять lookup за O(1) вместо O(n) линейного поиска.
-    /// mutable: допускает доступ из const-методов (_slot_lower_bound).
+    /// Кэш offset→index для O(1) поиска в slot_map (поддерживается синхронно).
     mutable std::unordered_map<uintptr_t, uintptr_t> _slot_index_cache;
 
     // -----------------------------------------------------------------------
@@ -927,12 +912,7 @@ class PersistentAddressSpace
     }
 
     // -----------------------------------------------------------------------
-    // Поиск по ключу (offset) в карте слотов — O(1) через кэш хэш-таблицы.
-    //
-    // Карта слотов хранится как неупорядоченный плоский массив в ПАМ (для персистности).
-    // Вставка (O(1) append) и удаление (O(1) swap-with-last) — эффективны.
-    // Поиск делегируется _slot_index_cache (std::unordered_map), который
-    // поддерживается синхронно со slot_map и даёт O(1) average.
+    // Поиск slot_map: O(1) через _slot_index_cache (hash map offset→index).
     // -----------------------------------------------------------------------
 
     /// Найти индекс записи с ключом == offset. Возвращает _slot_map_size() если не найдено.
@@ -1204,13 +1184,11 @@ class PersistentAddressSpace
     {
         if ( !_ensure_slot_map_capacity() )
             return false;
-        // Добавляем запись в конец массива (O(1) append, без поддержания порядка).
-        slot_entry* entries = _slot_entries();
-        uintptr_t   sm_size = _slot_map_size();
+        slot_entry* entries    = _slot_entries();
+        uintptr_t   sm_size    = _slot_map_size();
         entries[sm_size].key   = offset;
         entries[sm_size].value = info;
         _arr_hdr( _slot_map_offset )->size++;
-        // Обновляем кэш: новый элемент имеет индекс sm_size.
         _slot_index_cache[offset] = sm_size;
         return true;
     }
@@ -1344,12 +1322,10 @@ class PersistentAddressSpace
         _free_list_offset    = hdr.free_list_offset;
         _string_table_offset = hdr.string_table_offset;
 
-        // Восстанавливаем bump из заголовка (сохранён при Save).
         _bump = hdr.bump;
         if ( _bump < sizeof( pam_header ) )
             _bump = sizeof( pam_header );
-
-        // Перестраиваем кэш индексов слотов из загруженного slot_map.
+        // Перестраиваем _slot_index_cache из загруженного slot_map.
         _slot_index_cache.clear();
         const slot_entry* se    = _slot_entries_const();
         uintptr_t         sm_sz = _slot_map_size();
