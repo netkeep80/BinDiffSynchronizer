@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <typeinfo>
+#include <unordered_map>
 
 // pam_core.h — Ядро персистного адресного менеджера (ПАМ).
 // Содержит PersistentAddressSpace с вектором типов (type_vec), картой слотов
@@ -292,6 +293,7 @@ class PersistentAddressSpace
         std::free( _data );
         _data                = nullptr;
         _string_table_offset = 0;
+        _slot_index_cache.clear();
         _init_empty();
     }
 
@@ -377,13 +379,11 @@ class PersistentAddressSpace
     {
         if ( offset == 0 )
             return;
-        // Ищем слот в карте слотов (O(log n) бинарным поиском).
         uintptr_t idx = _slot_lower_bound( offset );
-        if ( idx >= _slot_map_size() || _slot_entries()[idx].key != offset )
-            return; // слот не найден
+        if ( idx >= _slot_map_size() )
+            return;
 
         SlotInfo& info = _slot_entries()[idx].value;
-        uintptr_t nidx = info.name_idx;
 
         // Вычисляем размер освобождаемой области для списка свободных областей.
         uintptr_t freed_size = 0;
@@ -394,26 +394,41 @@ class PersistentAddressSpace
                 freed_size = te[info.type_idx].elem_size * info.count;
         }
 
-        // Освобождаем запись в карте имён (если объект именованный).
-        if ( nidx != PAM_INVALID_IDX && nidx < _name_map_size() )
+        // Освобождаем запись в карте имён (линейный скан по slot_offset, O(n_names)).
+        if ( info.name_idx != PAM_INVALID_IDX )
         {
             name_entry* nentries = _name_entries();
             if ( nentries != nullptr )
             {
-                // Сдвигаем оставшиеся записи карты имён влево.
                 uintptr_t nm_size = _name_map_size();
-                for ( uintptr_t i = nidx; i + 1 < nm_size; i++ )
-                    nentries[i] = nentries[i + 1];
-                _arr_hdr( _name_map_offset )->size--;
-                // Корректируем name_idx для слотов с индексами > nidx.
-                _shift_name_indices_after_delete( nidx );
+                uintptr_t nidx    = PAM_INVALID_IDX;
+                for ( uintptr_t i = 0; i < nm_size; i++ )
+                {
+                    if ( nentries[i].slot_offset == offset )
+                    {
+                        nidx = i;
+                        break;
+                    }
+                }
+                if ( nidx != PAM_INVALID_IDX )
+                {
+                    for ( uintptr_t i = nidx; i + 1 < nm_size; i++ )
+                        nentries[i] = nentries[i + 1];
+                    _arr_hdr( _name_map_offset )->size--;
+                }
             }
         }
 
-        // Удаляем запись из карты слотов (сдвигаем оставшиеся влево).
-        uintptr_t sm_size = _slot_map_size();
-        for ( uintptr_t i = idx; i + 1 < sm_size; i++ )
-            _slot_entries()[i] = _slot_entries()[i + 1];
+        // Удаляем из slot_map: swap-with-last O(1), обновляем кэш.
+        uintptr_t   sm_size = _slot_map_size();
+        slot_entry* smap    = _slot_entries();
+        _slot_index_cache.erase( offset );
+        if ( idx + 1 < sm_size )
+        {
+            uintptr_t moved_offset          = smap[sm_size - 1].key;
+            smap[idx]                       = smap[sm_size - 1];
+            _slot_index_cache[moved_offset] = idx;
+        }
         _arr_hdr( _slot_map_offset )->size--;
 
         // Добавляем освобождённую область в список свободных (для повторного использования).
@@ -457,11 +472,9 @@ class PersistentAddressSpace
         if ( idx >= _name_map_size() || !( _name_entries_const()[idx].key == nk ) )
             return 0;
         uintptr_t slot_off = _name_entries_const()[idx].slot_offset;
-        // Ищем слот по смещению (O(log n)).
-        uintptr_t sidx = _slot_lower_bound( slot_off );
-        if ( sidx >= _slot_map_size() || _slot_entries_const()[sidx].key != slot_off )
+        uintptr_t sidx     = _slot_lower_bound( slot_off );
+        if ( sidx >= _slot_map_size() )
             return 0;
-        // Проверяем тип через вектор типов (фаза 8.4).
         uintptr_t tidx = _slot_entries_const()[sidx].value.type_idx;
         if ( tidx < _type_vec_size() )
         {
@@ -486,9 +499,8 @@ class PersistentAddressSpace
         if ( ptr < base || ptr >= base + data_size )
             return 0;
         uintptr_t offset = static_cast<uintptr_t>( ptr - base );
-        // Ищем смещение в карте слотов (O(log n)).
-        uintptr_t idx = _slot_lower_bound( offset );
-        if ( idx < _slot_map_size() && _slot_entries_const()[idx].key == offset )
+        uintptr_t idx    = _slot_lower_bound( offset );
+        if ( idx < _slot_map_size() )
             return offset;
         return 0;
     }
@@ -499,7 +511,7 @@ class PersistentAddressSpace
 
     /**
      * Получить имя именованного объекта по его смещению.
-     * Двусторонняя связь: SlotInfo.name_idx → индекс в карте имён (фаза 8.3).
+     * Поиск выполняется линейным сканом карты имён по полю slot_offset (O(n_names)).
      * @return Указатель на строку имени или nullptr, если объект безымянный
      *         или смещение неверно.
      */
@@ -508,15 +520,20 @@ class PersistentAddressSpace
         if ( offset == 0 )
             return nullptr;
         uintptr_t idx = _slot_lower_bound( offset );
-        if ( idx >= _slot_map_size() || _slot_entries_const()[idx].key != offset )
+        if ( idx >= _slot_map_size() )
             return nullptr;
-        uintptr_t nidx = _slot_entries_const()[idx].value.name_idx;
-        if ( nidx == PAM_INVALID_IDX || nidx >= _name_map_size() )
+        if ( _slot_entries_const()[idx].value.name_idx == PAM_INVALID_IDX )
             return nullptr;
-        const name_entry* ne = _name_entries_const();
+        const name_entry* ne      = _name_entries_const();
+        uintptr_t         nm_size = _name_map_size();
         if ( ne == nullptr )
             return nullptr;
-        return ne[nidx].key.name;
+        for ( uintptr_t i = 0; i < nm_size; i++ )
+        {
+            if ( ne[i].slot_offset == offset )
+                return ne[i].key.name;
+        }
+        return nullptr;
     }
 
     /**
@@ -528,7 +545,7 @@ class PersistentAddressSpace
         if ( offset == 0 )
             return 0;
         uintptr_t idx = _slot_lower_bound( offset );
-        if ( idx < _slot_map_size() && _slot_entries_const()[idx].key == offset )
+        if ( idx < _slot_map_size() )
             return _slot_entries_const()[idx].value.count;
         return 0;
     }
@@ -542,7 +559,7 @@ class PersistentAddressSpace
         if ( offset == 0 )
             return 0;
         uintptr_t idx = _slot_lower_bound( offset );
-        if ( idx >= _slot_map_size() || _slot_entries_const()[idx].key != offset )
+        if ( idx >= _slot_map_size() )
             return 0;
         uintptr_t tidx = _slot_entries_const()[idx].value.type_idx;
         if ( tidx < _type_vec_size() )
@@ -652,7 +669,7 @@ class PersistentAddressSpace
             for ( uintptr_t ni = 0; ni < nmsz; ni++ )
             {
                 uintptr_t si = _slot_lower_bound( ne[ni].slot_offset );
-                if ( si >= smsz || se[si].key != ne[ni].slot_offset || se[si].value.name_idx != ni )
+                if ( si >= smsz || se[si].key != ne[ni].slot_offset || se[si].value.name_idx == PAM_INVALID_IDX )
                     return false;
             }
         }
@@ -768,6 +785,9 @@ class PersistentAddressSpace
 
     /// Счётчик следующего свободного смещения (bump-allocator).
     uintptr_t _bump;
+
+    /// Кэш offset→index для O(1) поиска в slot_map (поддерживается синхронно).
+    mutable std::unordered_map<uintptr_t, uintptr_t> _slot_index_cache;
 
     // -----------------------------------------------------------------------
     // Вспомогательные методы доступа к заголовкам внутренних массивов
@@ -892,25 +912,16 @@ class PersistentAddressSpace
     }
 
     // -----------------------------------------------------------------------
-    // Бинарный поиск по ключу (offset) в карте слотов (O(log n))
+    // Поиск slot_map: O(1) через _slot_index_cache (hash map offset→index).
     // -----------------------------------------------------------------------
 
-    /// Найти индекс первой записи с ключом >= offset (lower_bound).
+    /// Найти индекс записи с ключом == offset. Возвращает _slot_map_size() если не найдено.
     uintptr_t _slot_lower_bound( uintptr_t offset ) const
     {
-        const slot_entry* entries = _slot_entries_const();
-        if ( entries == nullptr )
-            return 0;
-        uintptr_t lo = 0, hi = _slot_map_size();
-        while ( lo < hi )
-        {
-            uintptr_t mid = ( lo + hi ) / 2;
-            if ( entries[mid].key < offset )
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        return lo;
+        auto it = _slot_index_cache.find( offset );
+        if ( it != _slot_index_cache.end() )
+            return it->second;
+        return _slot_map_size();
     }
 
     // -----------------------------------------------------------------------
@@ -1173,15 +1184,12 @@ class PersistentAddressSpace
     {
         if ( !_ensure_slot_map_capacity() )
             return false;
-        uintptr_t   idx     = _slot_lower_bound( offset );
-        slot_entry* entries = _slot_entries();
-        uintptr_t   sm_size = _slot_map_size();
-        for ( uintptr_t i = sm_size; i > idx; i-- )
-            entries[i] = entries[i - 1];
-
-        entries[idx].key   = offset;
-        entries[idx].value = info;
+        slot_entry* entries    = _slot_entries();
+        uintptr_t   sm_size    = _slot_map_size();
+        entries[sm_size].key   = offset;
+        entries[sm_size].value = info;
         _arr_hdr( _slot_map_offset )->size++;
+        _slot_index_cache[offset] = sm_size;
         return true;
     }
 
@@ -1212,7 +1220,10 @@ class PersistentAddressSpace
         return _raw_grow_array<name_entry>( _name_map_offset, new_cap );
     }
 
-    /// Вставить имя в карту имён (отсортировано). PAM_INVALID_IDX при ошибке/дубликате.
+    /// Вставить имя в карту имён (отсортировано).
+    /// Возвращает PAM_INVALID_IDX при ошибке/дубликате, или ненулевое значение при успехе.
+    /// name_idx в SlotInfo устанавливается в 0 (сигнал: объект именован), но не хранит
+    /// позицию в карте имён — это устраняет O(n) пересчёт при каждой вставке/удалении.
     uintptr_t _name_insert( const name_key& nk, uintptr_t slot_offset )
     {
         if ( !_ensure_name_map_capacity() )
@@ -1225,11 +1236,7 @@ class PersistentAddressSpace
         if ( idx < _name_map_size() && _name_entries()[idx].key == nk )
             return PAM_INVALID_IDX; // имя занято
 
-        // Перед сдвигом существующих элементов корректируем name_idx в карте слотов
-        // (все записи с name_idx >= idx получат +1).
-        _shift_name_indices_after_insert( idx );
-
-        // Сдвигаем записи вправо.
+        // Сдвигаем записи вправо (без обновления name_idx в карте слотов).
         name_entry* entries = _name_entries();
         uintptr_t   nm_size = _name_map_size();
         for ( uintptr_t i = nm_size; i > idx; i-- )
@@ -1239,38 +1246,16 @@ class PersistentAddressSpace
         entries[idx].slot_offset = slot_offset;
         _arr_hdr( _name_map_offset )->size++;
 
-        return idx;
+        // Возвращаем 0 как сигнал «объект именован» (отличается от PAM_INVALID_IDX).
+        // name_idx в SlotInfo больше не хранит позицию в карте имён.
+        return 0;
     }
 
-    /// Скорректировать name_idx в слотах (уменьшить на 1 для индексов > del_idx).
-    void _shift_name_indices_after_delete( uintptr_t del_idx )
-    {
-        slot_entry* entries = _slot_entries();
-        if ( entries == nullptr )
-            return;
-        uintptr_t sm_size = _slot_map_size();
-        for ( uintptr_t i = 0; i < sm_size; i++ )
-        {
-            uintptr_t& nidx = entries[i].value.name_idx;
-            if ( nidx != PAM_INVALID_IDX && nidx > del_idx )
-                nidx--;
-        }
-    }
-
-    /// Скорректировать name_idx в слотах (увеличить на 1 для индексов >= ins_idx).
-    void _shift_name_indices_after_insert( uintptr_t ins_idx )
-    {
-        slot_entry* entries = _slot_entries();
-        if ( entries == nullptr )
-            return;
-        uintptr_t sm_size = _slot_map_size();
-        for ( uintptr_t i = 0; i < sm_size; i++ )
-        {
-            uintptr_t& nidx = entries[i].value.name_idx;
-            if ( nidx != PAM_INVALID_IDX && nidx >= ins_idx )
-                nidx++;
-        }
-    }
+    // Методы _shift_name_indices_after_delete и _shift_name_indices_after_insert
+    // удалены: обновление name_idx при каждой вставке/удалении из name_map
+    // приводило к O(n²) сложности при массовых операциях Create/Delete.
+    // SlotInfo.name_idx теперь хранит только флаг «объект именован» (0)
+    // или «безымянный» (PAM_INVALID_IDX), а не позицию в name_map.
 
     // -----------------------------------------------------------------------
     // Загрузка образа из файла
@@ -1291,6 +1276,7 @@ class PersistentAddressSpace
         _name_map_offset     = 0;
         _free_list_offset    = 0;
         _string_table_offset = 0;
+        _slot_index_cache.clear();
 
         std::FILE* f = std::fopen( filename, "rb" );
         if ( f == nullptr )
@@ -1336,10 +1322,19 @@ class PersistentAddressSpace
         _free_list_offset    = hdr.free_list_offset;
         _string_table_offset = hdr.string_table_offset;
 
-        // Восстанавливаем bump из заголовка (сохранён при Save).
         _bump = hdr.bump;
         if ( _bump < sizeof( pam_header ) )
             _bump = sizeof( pam_header );
+        // Перестраиваем _slot_index_cache из загруженного slot_map.
+        _slot_index_cache.clear();
+        const slot_entry* se    = _slot_entries_const();
+        uintptr_t         sm_sz = _slot_map_size();
+        if ( se != nullptr )
+        {
+            _slot_index_cache.reserve( sm_sz * 2 );
+            for ( uintptr_t i = 0; i < sm_sz; i++ )
+                _slot_index_cache[se[i].key] = i;
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1478,16 +1473,23 @@ class PersistentAddressSpace
 
         if ( !_slot_insert( offset, info ) )
         {
-            if ( named && nidx != PAM_INVALID_IDX && nidx < _name_map_size() )
+            // Откатываем вставку имени: ищем запись по slot_offset и удаляем её.
+            if ( named && nidx != PAM_INVALID_IDX )
             {
                 name_entry* entries = _name_entries();
                 if ( entries != nullptr )
                 {
-                    _shift_name_indices_after_delete( nidx );
                     uintptr_t nm_size = _name_map_size();
-                    for ( uintptr_t i = nidx; i + 1 < nm_size; i++ )
-                        entries[i] = entries[i + 1];
-                    _arr_hdr( _name_map_offset )->size--;
+                    for ( uintptr_t i = 0; i < nm_size; i++ )
+                    {
+                        if ( entries[i].slot_offset == offset )
+                        {
+                            for ( uintptr_t j = i; j + 1 < nm_size; j++ )
+                                entries[j] = entries[j + 1];
+                            _arr_hdr( _name_map_offset )->size--;
+                            break;
+                        }
+                    }
                 }
             }
             return 0;
