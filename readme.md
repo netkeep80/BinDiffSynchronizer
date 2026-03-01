@@ -94,10 +94,11 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
 | `pvector.h` | B | Персистный динамический массив (тонкая обёртка над pmem_array_hdr) |
 | `pmap.h` | B | Персистная карта (sorted array, тонкая обёртка над pmem_array_hdr) |
-| `pstring.h` | B | Персистная строка (внутренняя утилита) |
-| `pstringview.h` | B | Интернированная read-only строка + словарь ПАП |
+| `pstring.h` | B | Персистная readwrite строка для JSON string-value узлов; нет SSO; `assign()` изменяет значение на месте |
+| `pstringview.h` | B | Интернированная read-only строка + персистный словарь (`pstringview_table`); смещение таблицы хранится в `pam_header.string_table_offset`; содержит `pam_intern_string()`, `pam_search_strings()`, `pam_all_strings()` |
 | `pallocator.h` | B | STL-совместимый аллокатор поверх ПАМ |
-| `pjson.h` | C | Персистный JSON: узлы, типы, layout |
+| `pjson.h` | C | Персистный JSON (старый API): узлы, типы, layout |
+| `pjson_node.h` | C | Новая модель узлов JSON (Фаза 3): `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; вспомогательные функции init/set/assign/push_back/insert |
 | `pjson_interning.h` | B | Интернирование строк для pjson |
 | `pjson_node_pool.h` | C | Пул узлов для быстрой аллокации |
 | `pjson_serializer.h` | C | Сериализация/десериализация pjson |
@@ -199,6 +200,28 @@ db.put("/$metrics/node_count_total", 0); // ошибка!
 
 ### Поиск по строкам
 
+На уровне ПАМ доступны функции словаря строк (после `#include "pstringview.h"`):
+
+```cpp
+// Интернировать строку через ПАМ (задача 2.2)
+auto r = pam_intern_string("user_name");
+// r.chars_offset != 0, r.length == 9
+
+// Найти все строки, содержащие подстроку (задача 2.5)
+auto results = pam_search_strings("user");
+for (const auto& r : results) {
+    // r.value — std::string, r.chars_offset, r.length
+}
+
+// Перебрать весь словарь строк (задача 2.5)
+auto all = pam_all_strings();
+for (const auto& r : all) {
+    // r.value — интернированная строка
+}
+```
+
+На уровне pjson_db (целевой API, фаза 6):
+
 ```cpp
 // Найти все строки, содержащие подстроку
 auto results = db.search_strings("alice");
@@ -207,6 +230,101 @@ auto results = db.search_strings("alice");
 for (auto sv : db.all_strings()) {
     // sv — pstringview
 }
+```
+
+---
+
+## Новая модель узлов JSON: `pjson_node.h` (Фаза 3)
+
+Фаза 3 вводит низкоуровневый API для работы с узлами JSON через `node_id`-адресацию.
+Все узлы хранятся в ПАП как POD-структуры; доступ — через смещения (`node_id`).
+
+### Типы узлов (`node_tag`)
+
+```cpp
+#include "pjson_node.h"
+
+// Создать узел в ПАП
+fptr<node> fn;
+fn.New();
+uintptr_t off = fn.addr();  // node_id — смещение узла в ПАП
+
+// Инициализировать как нужный тип
+node_set_bool( off, true );             // boolean
+node_set_int( off, -42 );              // integer (int64_t)
+node_set_uint( off, 100u );            // uinteger (uint64_t)
+node_set_real( off, 3.14 );            // real (double)
+node_set_string( off, "hello" );       // string (pstring, readwrite)
+node_set_ref( off, "/path/to/node" );  // ref (pstringview path, readonly)
+node_set_array( off );                 // array (pvector<node_id>)
+node_set_object( off );                // object (pmap<pstringview, node_id>)
+node_set_binary( off );                // binary (pvector<uint8_t>)
+```
+
+### `node_view` — безопасный accessor
+
+```cpp
+node_view v{ off };  // создать view по node_id
+
+// Запросы типа
+v.is_null();    v.is_boolean();  v.is_integer();
+v.is_string();  v.is_array();    v.is_object();
+v.is_ref();     v.is_binary();   v.is_number();
+
+// Получение значений
+bool     b = v.as_bool();
+int64_t  i = v.as_int();
+uint64_t u = v.as_uint();
+double   d = v.as_double();
+std::string_view s = v.as_string(); // вид на pstring (readwrite) в ПАП
+std::string_view p = v.ref_path();  // путь ref-узла (pstringview, readonly)
+
+// Навигация
+uintptr_t sz = v.size();            // для array/object/string/binary
+node_view elem = v.at( 0u );        // элемент массива по индексу
+node_view field = v.at( "key" );    // поле объекта по ключу (pstringview)
+std::string_view k = v.key_at( 0u );    // ключ i-го поля объекта (итерация)
+node_view val = v.value_at( 0u );        // значение i-го поля объекта (итерация)
+
+// Разыменование ref
+node_view deref_v = v.deref( true, 32 ); // рекурсивное разыменование (max_depth=32)
+node_view one_level = v.deref( false );   // только один уровень
+```
+
+### Работа с массивами
+
+```cpp
+node_set_array( arr_off );
+
+// push_back возвращает node_id нового слота (инициализирован как null)
+node_id slot = node_array_push_back( arr_off );
+node_set_int( slot, 42 );
+
+node_view arr_view{ arr_off };
+REQUIRE( arr_view.size() == 1u );
+REQUIRE( arr_view.at( 0u ).as_int() == 42 );
+```
+
+### Работа с объектами (ключи — `pstringview`, readonly)
+
+```cpp
+node_set_object( obj_off );
+
+// node_object_insert интернирует ключ через pstringview_table (readonly)
+node_id name_slot = node_object_insert( obj_off, "name" );
+node_set_string( name_slot, "Alice" );
+
+// Поиск по ключу (бинарный поиск по интернированному offset)
+node_view obj_view{ obj_off };
+REQUIRE( obj_view.at( "name" ).as_string() == "Alice" );
+```
+
+### Изменение строковых значений (`pstring`, readwrite)
+
+```cpp
+node_set_string( off, "original" );
+node_assign_string( off, "updated" );  // освобождает старые данные, выделяет новые
+// node_view{ off }.as_string() == "updated"
 ```
 
 ---
@@ -246,16 +364,18 @@ for (auto sv : db.all_strings()) {
 ### Структура файла ПАМ
 
 ```
-[pam_header]          — заголовок (magic, version, offsets, bump)
+[pam_header]          — заголовок (magic, version=10, offsets, bump, string_table_offset)
 [данные ПАП]
   [type_vec]          — вектор типов TypeInfo
   [slot_map]          — карта слотов
   [name_map]          — карта имён объектов
   [free_list]         — список свободных областей (reuse)
-  [string_table]      — словарь интернированных строк
+  [string_table]      — словарь интернированных строк (pstringview_table, фаза 2)
   [node_pool]         — пул узлов JSON
   [пользовательские данные]
 ```
+
+Смещение `string_table` хранится в поле `pam_header.string_table_offset` (фаза 2, PAM_VERSION 10) и восстанавливается при загрузке образа без вызова конструкторов.
 
 ### Управление памятью
 

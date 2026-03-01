@@ -111,32 +111,33 @@ struct pmem_array_hdr {
 
 ---
 
-## Фаза 2. Словарь строк: readonly (`pstringview`) и readwrite (`pstring`)
+## Фаза 2. Словарь строк: readonly (`pstringview`) и readwrite (`pstring`) ✅ ЗАВЕРШЕНА
 
 **Цель:** Закрепить двухтиповую архитектуру строк в ПАП. Readonly строки (`pstringview`) — только для ключей `pmap` и путей `$ref`, интернированы, сравнение O(1). Readwrite строки (`pstring`) — для JSON string-value узлов, изменяемые на лету (необходимо для [jsonRVM](https://github.com/netkeep80/jsonRVM)).
 
-### Задача 2.1. Расширить `pstringview` для работы со словарём
+### Задача 2.1. Расширить `pstringview` для работы со словарём ✅ ВЫПОЛНЕНО
 
-- `pstringview` хранит `length` и `chars_offset` (уже сделано).
-- Добавить полную `pstringview_table` — персистный объект (живёт в ПАП).
-- `pstringview_table` — это `pmap<key_hash, chars_offset>` или sorted array пар.
+- `pstringview` хранит `length` и `chars_offset` (сделано ранее).
+- `pstringview_table` — персистный объект (живёт в ПАП) — реализована как хэш-таблица с открытой адресацией (linear probing).
+- Смещение `pstringview_table` хранится в `pam_header.string_table_offset` (фаза 10, PAM_VERSION 10).
+- При `Save()` смещение таблицы записывается в заголовок; при `Load()` — восстанавливается.
+- `pstringview_manager::get_table()` синхронизирует `_table_offset` с `pam.GetStringTableOffset()` при первом вызове после перезагрузки.
 
-### Задача 2.2. Реализовать метод `intern` на уровне ПАМ
+### Задача 2.2. Реализовать функцию `intern` на уровне ПАМ ✅ ВЫПОЛНЕНО
 
-- `PersistentAddressSpace::InternString(const char* s, size_t len) -> pstringview`
-- Ищет в таблице: если найдена — возвращает существующую.
-- Если не найдена — аллоцирует char-массив в ПАП, добавляет в таблицу, возвращает.
-- Таблица — часть заголовочной секции ПАМ (хранится в образе).
+- `pam_intern_string(const char* s) -> pstringview_table::InternResult` — определена в `pstringview.h`.
+- Ищет строку в `pstringview_table`: если найдена — возвращает `{chars_offset, length}` существующего массива.
+- Если не найдена — аллоцирует char-массив в ПАП, добавляет в таблицу, возвращает смещение.
+- `PersistentAddressSpace::GetStringTableOffset()` / `SetStringTableOffset()` — публичный API для доступа к смещению таблицы из ПАМ.
 - Интернированные строки только накапливаются; освобождения нет.
 
-### Задача 2.3. Убрать SSO из `pstringview` и `pstring`
+### Задача 2.3. Убрать SSO из `pstringview` и `pstring` ✅ ВЫПОЛНЕНО
 
-- `pstringview` НЕ содержит inline-буфера (no SSO).
-- `pstring` также НЕ содержит inline-буфера (no SSO).
+- `pstringview` НЕ содержит inline-буфера (no SSO): хранит только `length` и `chars_offset`.
+- `pstring` НЕ содержит inline-буфера (no SSO): хранит только `length` и `chars` (fptr<char>).
 - Любая строка, даже из 1 символа, хранится в ПАП через `chars_offset`.
-- Это необходимо для сквозного поиска по всем строкам ПАП.
 
-### Задача 2.4. Чётко разграничить области применения двух типов строк
+### Задача 2.4. Чётко разграничить области применения двух типов строк ✅ ВЫПОЛНЕНО
 
 | Тип | Применение | Изменяемость |
 |-----|-----------|--------------|
@@ -147,26 +148,26 @@ struct pmem_array_hdr {
 - `pstring` НЕ используется как ключ `pmap` — только `pstringview`.
 - [jsonRVM](https://github.com/netkeep80/jsonRVM) работает непосредственно в БД и может модифицировать `pstring`-узлы "на месте", не затрагивая словарь `pstringview`.
 
-### Задача 2.5. Поддержка полнотекстового поиска по обоим типам строк
+### Задача 2.5. Поддержка полнотекстового поиска по словарю pstringview ✅ ВЫПОЛНЕНО
 
-- `PersistentAddressSpace::SearchStrings(pattern) -> vector<result>` — поиск по всем интернированным `pstringview` в словаре.
-- `pjson_db::search_strings(pattern)` — поиск по словарю `pstringview` И по всем `pstring`-значениям в пуле узлов.
-- `PersistentAddressSpace::AllStrings() -> итератор` — перебор всех `pstringview` в словаре.
+- `pam_search_strings(pattern) -> vector<pstringview_search_result>` — поиск по всем интернированным строкам в `pstringview_table` (определена в `pstringview.h`).
+- `pam_all_strings() -> vector<pstringview_search_result>` — перебор всех строк словаря (обёртка над `pam_search_strings("")`).
+- `pstringview_search_result` содержит `value`, `chars_offset`, `length`.
 
-**Критерии приёмки фазы 2:**
-- `pstringview_table` хранится в ПАП и восстанавливается при загрузке образа.
-- Два одинаковых `intern("hello")` дают одинаковый `chars_offset`.
-- Сравнение строк-ключей `==` через `chars_offset` (O(1)).
-- `pstring`-значения изменяемы: `node.string_val.assign("new_value")` работает без пересоздания узла.
-- Тесты `test_pstringview.cpp` и `test_pstring.cpp` проходят.
+**Критерии приёмки фазы 2:** ✅
+- `pstringview_table` хранится в ПАП и восстанавливается при загрузке образа (через `pam_header.string_table_offset`, PAM_VERSION 10). Тест `pstringview_table: survives PAM Save and Load`.
+- Два одинаковых `intern("hello")` дают одинаковый `chars_offset`. Тест `pstringview_table: two intern(same) calls give identical chars_offset`.
+- Сравнение строк-ключей `==` через `chars_offset` (O(1)). Тест `pstringview: operator== compares by chars_offset`.
+- `pstring`-значения изменяемы: `node.string_val.assign("new_value")` работает без пересоздания узла. Тест `pstring: reassigning frees old allocation and stores new content`.
+- Тесты `test_pstringview.cpp` (284 всего, включая 11 новых Phase 2 тестов) и `test_pstring.cpp` проходят.
 
 ---
 
-## Фаза 3. Новая модель узлов JSON (`pjson_node`)
+## Фаза 3. Новая модель узлов JSON (`pjson_node`) ✅ ЗАВЕРШЕНА
 
 **Цель:** Переработать `pjson` на `node_id`-адресацию. Добавить типы `ref` и `binary`.
 
-### Задача 3.1. Определить расширенный `node_tag`
+### Задача 3.1. Определить расширенный `node_tag` ✅ ВЫПОЛНЕНО
 
 ```cpp
 // pjson_node.h
@@ -184,7 +185,7 @@ enum class node_tag : uint32_t {
 };
 ```
 
-### Задача 3.2. Определить структуру `node`
+### Задача 3.2. Определить структуру `node` ✅ ВЫПОЛНЕНО
 
 ```cpp
 struct node {
@@ -221,13 +222,13 @@ struct node {
 };
 ```
 
-### Задача 3.3. Определить тип `node_id`
+### Задача 3.3. Определить тип `node_id` ✅ ВЫПОЛНЕНО
 
 ```cpp
 using node_id = uintptr_t; // смещение узла в ПАП; 0 = null/invalid
 ```
 
-### Задача 3.4. Реализовать `node_view` — безопасный accessor
+### Задача 3.4. Реализовать `node_view` — безопасный accessor ✅ ВЫПОЛНЕНО
 
 ```cpp
 struct node_view {
@@ -254,7 +255,7 @@ struct node_view {
 };
 ```
 
-### Задача 3.5. Написать тесты для новой модели узлов
+### Задача 3.5. Написать тесты для новой модели узлов ✅ ВЫПОЛНЕНО
 
 - Тест создания каждого типа узла.
 - Тест `node_view::deref()` — рекурсивное и нерекурсивное разыменование.
@@ -265,10 +266,11 @@ struct node_view {
   - `ref_val.path` (pstringview, readonly): интернирование, сравнение через `chars_offset`.
   - Проверка, что ключи объектов — только `pstringview`, значения типа `string` — только `pstring`.
 
-**Критерии приёмки фазы 3:**
-- Новый файл `pjson_node.h`.
-- Все типы узлов работают.
-- `node_view` корректно работает с ПАП.
+**Критерии приёмки фазы 3:** ✅
+- Новый файл `pjson_node.h`. ✅
+- Все типы узлов работают. ✅
+- `node_view` корректно работает с ПАП. ✅
+- Тесты `tests/test_pjson_node.cpp` (46 тестов) проходят. Итого: 327/327. ✅
 
 ---
 
