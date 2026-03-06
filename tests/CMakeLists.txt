@@ -26,6 +26,7 @@ set(TEST_SOURCES
     test_pmem_array.cpp
     test_pjson_node.cpp
     test_pjson_pool.cpp
+    test_pjson_codec.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
