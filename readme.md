@@ -102,7 +102,8 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pjson_pool.h` | C | Пул узлов JSON (Фаза 4): `pjson_pool` — быстрая аллокация O(1) через `pvector<node>` + free-list на основе `node_tag::_free`; API: `alloc()`, `free()`, `get()` |
 | `pjson_interning.h` | B | Интернирование строк для pjson |
 | `pjson_node_pool.h` | C | Пул узлов (старый API, для `pjson`; устарел в пользу `pjson_pool.h`) |
-| `pjson_serializer.h` | C | Сериализация/десериализация pjson |
+| `pjson_serializer.h` | C | Сериализация/десериализация pjson (старый API) |
+| `pjson_codec.h` | C | Новая сериализация/десериализация (Фаза 5): парсер/сериализатор для `node_id`-модели; поддержка `$ref` и `$base64`; Base64 кодек; функции: `node_to_string()`, `node_from_string()`, `node_parse()` |
 | `main.cpp` | — | Демонстрационная программа |
 | `tests/` | — | Тесты на Catch2 |
 | `CMakeLists.txt` | — | Система сборки (CMake 3.16+, C++17) |
