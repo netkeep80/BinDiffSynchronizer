@@ -1,33 +1,27 @@
 /*
- * main.cpp — Демонстрационный пример использования персистной инфраструктуры.
+ * main.cpp — Демонстрационный пример использования pjson_db.
  *
- * Показывает основные персистные классы:
- *   - PersistentAddressSpace (ПАП) — единое персистное адресное пространство
- *   - fptr<T>    — персистный указатель (смещение в ПАП)
- *   - pstring    — персистная строка
- *   - pvector<T> — персистный динамический массив
- *   - pmap<K,V>  — персистная карта (ключ-значение)
- *   - pjson      — персистный JSON
- *   - pallocator — персистный STL-совместимый аллокатор
+ * Показывает возможности высокоуровневого API pjson_db (Фазы 6–8):
+ *   - Открытие/создание базы данных через pjson_db::open()
+ *   - Запись данных: put() (bool, int64, double, string), put_ref(), parse_into()
+ *   - Чтение данных: get(), exists()
+ *   - Удаление данных: erase()
+ *   - Поддержка $ref (настоящие указатели на узлы)
+ *   - Поддержка $base64 (бинарные данные)
+ *   - Персистные метрики через /$metrics
+ *   - Иерархический доступ: operator[], find(), insert() (Фаза 8)
+ *   - Поиск по строкам: search_strings(), search_node_strings() (Фаза 8)
+ *   - Сохранение: save()
  *
  * При каждом запуске программа:
- *   1. Загружает ПАП из файла demo.pam (или создаёт новый).
- *   2. Увеличивает счётчик запусков.
- *   3. Добавляет имя очередного пользователя в персистный список.
- *   4. Обновляет конфигурацию в виде pjson-объекта.
- *   5. Сохраняет ПАП обратно в файл.
+ *   1. Открывает БД из файла demo.pam (или создаёт новый).
+ *   2. Демонстрирует все возможности API.
+ *   3. Сохраняет БД обратно в файл.
  *
  * Запустите программу несколько раз, чтобы увидеть накопленные данные.
  */
 
 #include <cstdio>
-#include <vector>
-#include "persist.h"
-#include "pstring.h"
-#include "pvector.h"
-#include "pmap.h"
-#include "pjson.h"
-#include "pallocator.h"
 #include "pjson_db.h"
 
 // ---------------------------------------------------------------------------
@@ -39,381 +33,238 @@ static void print_separator( const char* title )
     std::printf( "\n--- %s ---\n", title );
 }
 
-static void print_pstring( const fptr<pstring>& fps )
-{
-    if ( fps == nullptr )
-        std::printf( "(null)" );
-    else
-        std::printf( "\"%s\"", fps->c_str() );
-}
+// ---------------------------------------------------------------------------
+// Демо 1: открытие БД и базовые put/get операции
+// ---------------------------------------------------------------------------
 
-static void print_pjson( const fptr<pjson>& fpj, int indent = 0 );
-
-static void print_indent( int indent )
+static void demo_open_and_put_get( pjson_db& db )
 {
-    for ( int i = 0; i < indent * 2; i++ )
-        std::putchar( ' ' );
-}
+    print_separator( "Демо 1: открытие БД и put/get" );
 
-static void print_pjson( const fptr<pjson>& fpj, int indent )
-{
-    if ( fpj == nullptr )
-    {
-        std::printf( "null" );
-        return;
-    }
-    const pjson& j = *fpj;
-    switch ( j.type_tag() )
-    {
-    case pjson_type::null:
-        std::printf( "null" );
-        break;
-    case pjson_type::boolean:
-        std::printf( "%s", j.get_bool() ? "true" : "false" );
-        break;
-    case pjson_type::integer:
-        std::printf( "%lld", static_cast<long long>( j.get_int() ) );
-        break;
-    case pjson_type::uinteger:
-        std::printf( "%llu", static_cast<unsigned long long>( j.get_uint() ) );
-        break;
-    case pjson_type::real:
-        std::printf( "%g", j.get_real() );
-        break;
-    case pjson_type::string:
-        std::printf( "\"%s\"", j.get_string() );
-        break;
-    case pjson_type::array:
-    {
-        std::printf( "[\n" );
-        uintptr_t sz = j.size();
-        for ( uintptr_t i = 0; i < sz; i++ )
-        {
-            print_indent( indent + 1 );
-            // Обращаемся к элементам массива через data.addr() (pvector-совместимая раскладка).
-            pjson* ep = PersistentAddressSpace::Get().Resolve<pjson>( j.payload.array_val.data.addr() ) + i;
-            if ( ep )
-            {
-                // Вывод непосредственно через указатель
-                switch ( ep->type_tag() )
-                {
-                case pjson_type::null:
-                    std::printf( "null" );
-                    break;
-                case pjson_type::boolean:
-                    std::printf( "%s", ep->get_bool() ? "true" : "false" );
-                    break;
-                case pjson_type::integer:
-                    std::printf( "%lld", static_cast<long long>( ep->get_int() ) );
-                    break;
-                case pjson_type::uinteger:
-                    std::printf( "%llu", static_cast<unsigned long long>( ep->get_uint() ) );
-                    break;
-                case pjson_type::real:
-                    std::printf( "%g", ep->get_real() );
-                    break;
-                case pjson_type::string:
-                    std::printf( "\"%s\"", ep->get_string() );
-                    break;
-                default:
-                    std::printf( "..." );
-                    break;
-                }
-            }
-            if ( i + 1 < sz )
-                std::printf( "," );
-            std::printf( "\n" );
-        }
-        print_indent( indent );
-        std::printf( "]" );
-        break;
-    }
-    case pjson_type::object:
-    {
-        std::printf( "{\n" );
-        uintptr_t sz = j.size();
-        for ( uintptr_t i = 0; i < sz; i++ )
-        {
-            // Обращаемся к парам объекта через data.addr() (pvector-совместимая раскладка).
-            pjson_kv_entry* pair =
-                PersistentAddressSpace::Get().Resolve<pjson_kv_entry>( j.payload.object_val.data.addr() ) + i;
-            if ( pair )
-            {
-                print_indent( indent + 1 );
-                // Выводим ключ через pstring::c_str().
-                const char* key = pair->key.c_str();
-                std::printf( "\"%s\": ", key );
-                // Выводим значение
-                switch ( pair->value.type_tag() )
-                {
-                case pjson_type::null:
-                    std::printf( "null" );
-                    break;
-                case pjson_type::boolean:
-                    std::printf( "%s", pair->value.get_bool() ? "true" : "false" );
-                    break;
-                case pjson_type::integer:
-                    std::printf( "%lld", static_cast<long long>( pair->value.get_int() ) );
-                    break;
-                case pjson_type::uinteger:
-                    std::printf( "%llu", static_cast<unsigned long long>( pair->value.get_uint() ) );
-                    break;
-                case pjson_type::real:
-                    std::printf( "%g", pair->value.get_real() );
-                    break;
-                case pjson_type::string:
-                    std::printf( "\"%s\"", pair->value.get_string() );
-                    break;
-                case pjson_type::array:
-                    std::printf( "[...(%llu)]", static_cast<unsigned long long>( pair->value.size() ) );
-                    break;
-                case pjson_type::object:
-                    std::printf( "{...(%llu)}", static_cast<unsigned long long>( pair->value.size() ) );
-                    break;
-                }
-                if ( i + 1 < sz )
-                    std::printf( "," );
-                std::printf( "\n" );
-            }
-        }
-        print_indent( indent );
-        std::printf( "}" );
-        break;
-    }
-    }
+    // Запись различных типов данных по путям.
+    db.put( "/app/name", "BinDiffSynchronizer" );
+    db.put( "/app/version", static_cast<int64_t>( 1 ) );
+    db.put( "/app/debug", false );
+    db.put( "/app/threshold", 0.75 );
+
+    // Чтение записанных данных.
+    std::string_view name = db.get( "/app/name" ).as_string();
+    int64_t          ver  = db.get( "/app/version" ).as_int();
+    bool             dbg  = db.get( "/app/debug" ).as_bool();
+    double           thr  = db.get( "/app/threshold" ).as_double();
+
+    std::printf( "app.name      = \"%.*s\"\n", static_cast<int>( name.size() ), name.data() );
+    std::printf( "app.version   = %lld\n", static_cast<long long>( ver ) );
+    std::printf( "app.debug     = %s\n", dbg ? "true" : "false" );
+    std::printf( "app.threshold = %.2f\n", thr );
+
+    // Проверка существования пути.
+    std::printf( "exists(\"/app/name\")   = %s\n", db.exists( "/app/name" ) ? "true" : "false" );
+    std::printf( "exists(\"/nonexistent\") = %s\n", db.exists( "/nonexistent" ) ? "true" : "false" );
 }
 
 // ---------------------------------------------------------------------------
-// Демо 1: счётчик запусков через fptr<double>
+// Демо 2: вложенные объекты и массивы через parse_into()
 // ---------------------------------------------------------------------------
 
-static void demo_counter( PersistentAddressSpace& pam )
+static void demo_nested_objects( pjson_db& db )
 {
-    print_separator( "Демо 1: персистный счётчик запусков" );
+    print_separator( "Демо 2: вложенные объекты и массивы (parse_into)" );
 
-    uintptr_t off = pam.Find( "demo.counter" );
-    if ( off == 0 )
-    {
-        off                         = pam.Create<double>( "demo.counter" );
-        *pam.Resolve<double>( off ) = 0.0;
-    }
+    // Создаём вложенную структуру через parse_into().
+    db.parse_into( "/users/alice", R"({"age": 30, "active": true})" );
+    db.parse_into( "/users/bob",   R"({"age": 25, "active": false})" );
+    db.parse_into( "/tags",        R"(["persistent", "header-only", "c++17"])" );
 
-    double* counter = pam.Resolve<double>( off );
-    *counter += 1.0;
+    // Чтение вложенных полей.
+    int64_t alice_age = db.get( "/users/alice/age" ).as_int();
+    bool    bob_active = db.get( "/users/bob/active" ).as_bool();
 
-    std::printf( "Запуск №%.0f\n", *counter );
+    std::printf( "users.alice.age   = %lld\n", static_cast<long long>( alice_age ) );
+    std::printf( "users.bob.active  = %s\n", bob_active ? "true" : "false" );
+
+    // Чтение элемента массива по индексу.
+    std::string_view tag0 = db.get( "/tags/0" ).as_string();
+    std::printf( "tags[0]           = \"%.*s\"\n", static_cast<int>( tag0.size() ), tag0.data() );
+
+    // Сериализация поддерева в JSON-строку.
+    std::string alice_json = db.dump( db.get( "/users/alice" ).id );
+    std::printf( "dump(/users/alice) = %s\n", alice_json.c_str() );
 }
 
 // ---------------------------------------------------------------------------
-// Демо 2: персистная строка через fptr<pstring>
+// Демо 3: $ref — настоящие указатели на узлы
 // ---------------------------------------------------------------------------
 
-static void demo_pstring( PersistentAddressSpace& pam )
+static void demo_ref( pjson_db& db )
 {
-    print_separator( "Демо 2: pstring — персистная строка" );
+    print_separator( "Демо 3: $ref — настоящие указатели" );
 
-    // Ищем или создаём строку в ПАП
-    uintptr_t     off = pam.FindTyped<pstring>( "demo.greeting" );
-    fptr<pstring> fps;
-    if ( off == 0 )
-    {
-        fps.New( "demo.greeting" );
-        fps->assign( "Привет, персистный мир!" );
-    }
-    else
-    {
-        fps.set_addr( off );
-    }
+    // Создаём данные, на которые будем ссылаться.
+    db.put( "/defaults/timeout", static_cast<int64_t>( 30 ) );
+    db.put( "/defaults/retries", static_cast<int64_t>( 3 ) );
 
-    std::printf( "Строка: " );
-    print_pstring( fps );
-    std::printf( " (длина: %llu)\n", static_cast<unsigned long long>( fps->size() ) );
+    // Создаём $ref-узел, указывающий на /defaults/timeout.
+    db.put_ref( "/config/timeout", "/defaults/timeout" );
+
+    // Можно создать $ref и через parse_into.
+    db.parse_into( "/config/retries", R"({"$ref": "/defaults/retries"})" );
+
+    // resolve_all_refs() разрешает все $ref-узлы в дереве, устанавливая node_id цели.
+    // Необходимо вызвать перед чтением через get() с разыменованием.
+    db.resolve_all_refs();
+
+    // При чтении get() автоматически разыменовывает ref.
+    int64_t timeout = db.get( "/config/timeout" ).as_int();
+    std::printf( "config.timeout (via $ref) = %lld\n", static_cast<long long>( timeout ) );
+
+    int64_t retries = db.get( "/config/retries" ).as_int();
+    std::printf( "config.retries (via $ref) = %lld\n", static_cast<long long>( retries ) );
+
+    // Чтение без разыменования: get(..., deref_ref=false).
+    node_view ref_node = db.get( "/config/timeout", /*deref_refs=*/false );
+    std::printf( "config.timeout (raw ref) is_ref = %s\n", ref_node.is_ref() ? "true" : "false" );
+    std::printf( "ref path = \"%.*s\"\n",
+                 static_cast<int>( ref_node.ref_path().size() ),
+                 ref_node.ref_path().data() );
+
+    // Явное разыменование через resolve_ref().
+    node_view resolved = db.resolve_ref( ref_node.id );
+    std::printf( "resolved value = %lld\n", static_cast<long long>( resolved.as_int() ) );
 }
 
 // ---------------------------------------------------------------------------
-// Демо 3: персистный вектор через fptr<pvector<int>>
+// Демо 4: $base64 — бинарные данные
 // ---------------------------------------------------------------------------
 
-static void demo_pvector( PersistentAddressSpace& pam )
+static void demo_base64( pjson_db& db )
 {
-    print_separator( "Демо 3: pvector<int> — персистный массив" );
+    print_separator( "Демо 4: $base64 — бинарные данные" );
 
-    uintptr_t          off = pam.FindTyped<pvector<int>>( "demo.numbers" );
-    fptr<pvector<int>> fv;
+    // Парсинг $base64: "AAEC" = байты [0x00, 0x01, 0x02].
+    db.parse_into( "/data/thumbnail", R"({"$base64": "AAEC"})" );
 
-    if ( off == 0 )
-    {
-        fv.New( "demo.numbers" );
-        // Начальные значения
-        for ( int i = 1; i <= 5; i++ )
-            fv->push_back( i * 10 );
-    }
-    else
-    {
-        fv.set_addr( off );
-        // Добавляем элемент при каждом запуске
-        int next = static_cast<int>( fv->size() + 1 ) * 10;
-        fv->push_back( next );
-    }
+    node_view bin = db.get( "/data/thumbnail" );
+    std::printf( "thumbnail is binary = %s\n", bin.is_binary() ? "true" : "false" );
+    std::printf( "thumbnail size (bytes) = %llu\n", static_cast<unsigned long long>( bin.size() ) );
 
-    std::printf( "Элементы (%llu): [", static_cast<unsigned long long>( fv->size() ) );
-    for ( uintptr_t i = 0; i < fv->size(); i++ )
-    {
-        if ( i > 0 )
-            std::printf( ", " );
-        std::printf( "%d", ( *fv )[i] );
-    }
-    std::printf( "]\n" );
+    // Сериализация обратно в JSON с $base64.
+    std::string json = db.dump( bin.id );
+    std::printf( "dump(/data/thumbnail) = %s\n", json.c_str() );
 }
 
 // ---------------------------------------------------------------------------
-// Демо 4: персистная карта через fptr<pmap<int, double>>
+// Демо 5: метрики (Фаза 7)
 // ---------------------------------------------------------------------------
 
-static void demo_pmap( PersistentAddressSpace& pam )
+static void demo_metrics( pjson_db& db )
 {
-    print_separator( "Демо 4: pmap<int, double> — персистная карта" );
+    print_separator( "Демо 5: персистные метрики (/$metrics)" );
 
-    uintptr_t               off = pam.FindTyped<pmap<int, double>>( "demo.scores" );
-    fptr<pmap<int, double>> fm;
+    uint64_t node_count  = db.get( "/$metrics/node_count_total" ).as_uint();
+    uint64_t str_count   = db.get( "/$metrics/string_count_total" ).as_uint();
+    uint64_t ref_cnt     = db.get( "/$metrics/ref_count" ).as_uint();
+    uint64_t arr_cnt     = db.get( "/$metrics/array_count" ).as_uint();
+    uint64_t obj_cnt     = db.get( "/$metrics/object_count" ).as_uint();
+    uint64_t bin_bytes   = db.get( "/$metrics/binary_bytes_total" ).as_uint();
+    uint64_t bump        = db.get( "/$metrics/pam_bump_offset" ).as_uint();
+    uint64_t total_size  = db.get( "/$metrics/pam_total_size" ).as_uint();
+    uint64_t slot_cnt    = db.get( "/$metrics/pam_slot_count" ).as_uint();
+    uint64_t named_cnt   = db.get( "/$metrics/pam_named_count" ).as_uint();
 
-    if ( off == 0 )
-    {
-        fm.New( "demo.scores" );
-        fm->insert( 1, 9.5 );
-        fm->insert( 2, 7.3 );
-        fm->insert( 3, 8.8 );
-    }
-    else
-    {
-        fm.set_addr( off );
-        // Обновляем оценку при каждом запуске
-        double* v = fm->find( 1 );
-        if ( v )
-            *v += 0.1;
-    }
+    std::printf( "node_count_total   = %llu\n", static_cast<unsigned long long>( node_count ) );
+    std::printf( "string_count_total = %llu\n", static_cast<unsigned long long>( str_count ) );
+    std::printf( "ref_count          = %llu\n", static_cast<unsigned long long>( ref_cnt ) );
+    std::printf( "array_count        = %llu\n", static_cast<unsigned long long>( arr_cnt ) );
+    std::printf( "object_count       = %llu\n", static_cast<unsigned long long>( obj_cnt ) );
+    std::printf( "binary_bytes_total = %llu\n", static_cast<unsigned long long>( bin_bytes ) );
+    std::printf( "pam_bump_offset    = %llu\n", static_cast<unsigned long long>( bump ) );
+    std::printf( "pam_total_size     = %llu\n", static_cast<unsigned long long>( total_size ) );
+    std::printf( "pam_slot_count     = %llu\n", static_cast<unsigned long long>( slot_cnt ) );
+    std::printf( "pam_named_count    = %llu\n", static_cast<unsigned long long>( named_cnt ) );
 
-    std::printf( "Карта (%llu записей):\n", static_cast<unsigned long long>( fm->size() ) );
-    for ( auto& entry : *fm )
-    {
-        std::printf( "  %d -> %.2f\n", entry.key, entry.value );
-    }
+    // Попытка записи в метрики — запрещена.
+    bool ok = db.put( "/$metrics/node_count_total", static_cast<int64_t>( 0 ) );
+    std::printf( "put(/$metrics/...) allowed = %s (должно быть false)\n", ok ? "true" : "false" );
 }
 
 // ---------------------------------------------------------------------------
-// Демо 5: pjson — персистный JSON-объект
+// Демо 6: иерархический интерфейс operator[], find(), insert() (Фаза 8)
 // ---------------------------------------------------------------------------
 
-static void demo_pjson( PersistentAddressSpace& pam )
+static void demo_hierarchical( pjson_db& db )
 {
-    print_separator( "Демо 5: pjson — персистный JSON" );
+    print_separator( "Демо 6: иерархический интерфейс (Фаза 8)" );
 
-    uintptr_t   off = pam.FindTyped<pjson>( "demo.config" );
-    fptr<pjson> fj;
-
-    if ( off == 0 )
-    {
-        // Создаём новый объект конфигурации
-        fj.New( "demo.config" );
-        fj->set_object();
-
-        fj->obj_insert( "version" ).set_int( 1 );
-        fj->obj_insert( "app" ).set_string( "BinDiffSynchronizer" );
-        fj->obj_insert( "debug" ).set_bool( false );
-        fj->obj_insert( "threshold" ).set_real( 0.75 );
-
-        // Вложенный массив тегов
-        pjson& tags = fj->obj_insert( "tags" );
-        tags.set_array();
-        tags.push_back().set_string( "persistent" );
-        tags.push_back().set_string( "demo" );
-    }
-    else
-    {
-        fj.set_addr( off );
-        // Обновляем версию при каждом запуске
-        pjson* ver = fj->obj_find( "version" );
-        if ( ver && ver->is_integer() )
-            ver->set_int( ver->get_int() + 1 );
-    }
-
-    std::printf( "JSON-объект конфигурации:\n" );
-    print_pjson( fj );
-    std::printf( "\n" );
-}
-
-// ---------------------------------------------------------------------------
-// Демо 6: pallocator — персистный STL-совместимый аллокатор
-// ---------------------------------------------------------------------------
-
-static void demo_pallocator()
-{
-    print_separator( "Демо 6: pallocator — персистный STL-аллокатор" );
-
-    // std::vector, использующий персистный аллокатор
-    std::vector<int, pallocator<int>> v;
-    v.push_back( 100 );
-    v.push_back( 200 );
-    v.push_back( 300 );
-
-    std::printf( "std::vector<int, pallocator<int>>: [" );
-    for ( std::size_t i = 0; i < v.size(); i++ )
-    {
-        if ( i > 0 )
-            std::printf( ", " );
-        std::printf( "%d", v[i] );
-    }
-    std::printf( "]\n" );
-}
-
-// ---------------------------------------------------------------------------
-// Демо 7: pjson_db — Фаза 8 (иерархический интерфейс pmap + расширенный поиск)
-// ---------------------------------------------------------------------------
-
-static void demo_pjson_db_phase8()
-{
-    print_separator( "Демо 7: pjson_db Фаза 8 — operator[], find(), insert(), search_node_strings()" );
-
-    // Сбрасываем ПАМ для демонстрации в чистом состоянии.
-    pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
-
-    pjson_db db;
-
-    // Задача 8.1: вставка через insert() (JSON-значения по пути).
-    db.insert( "/employees/1/name", "\"Иван Петров\"" );
-    db.insert( "/employees/1/dept", "\"Разработка\"" );
+    // insert() — вставка/перезапись JSON-значения по пути.
+    db.insert( "/employees/1/name",   "\"Иван Петров\"" );
+    db.insert( "/employees/1/dept",   "\"Разработка\"" );
     db.insert( "/employees/1/salary", "120000" );
-    db.insert( "/employees/2/name", "\"Мария Сидорова\"" );
-    db.insert( "/employees/2/dept", "\"Маркетинг\"" );
+    db.insert( "/employees/2/name",   "\"Мария Сидорова\"" );
+    db.insert( "/employees/2/dept",   "\"Маркетинг\"" );
     db.insert( "/employees/2/salary", "95000" );
 
-    // Задача 8.1: поиск через find() (без создания, без разыменования ref).
-    std::printf( "find(\"/employees/1/name\") = \"%s\"\n",
-                 std::string( db.find( "/employees/1/name" ).as_string() ).c_str() );
-    std::printf( "find(\"/employees/2/dept\") = \"%s\"\n",
-                 std::string( db.find( "/employees/2/dept" ).as_string() ).c_str() );
-    std::printf( "find(\"/nonexistent\").valid() = %s\n", db.find( "/nonexistent" ).valid() ? "true" : "false" );
+    // find() — поиск без создания нового узла, без разыменования ref.
+    node_view found = db.find( "/employees/1/name" );
+    std::printf( "find(\"/employees/1/name\") = \"%.*s\"\n",
+                 static_cast<int>( found.as_string().size() ),
+                 found.as_string().data() );
+    std::printf( "find(\"/nonexistent\").valid() = %s\n",
+                 db.find( "/nonexistent" ).valid() ? "true" : "false" );
 
-    // Задача 8.1: доступ через operator[] (создаёт узел если не существует).
-    node_view existing = db["/employees/1/name"];
-    std::printf( "operator[](\"/employees/1/name\") = \"%s\"\n", std::string( existing.as_string() ).c_str() );
+    // operator[] — доступ по пути, создаёт null-узел если не существует.
+    node_view existing = db["/employees/1/dept"];
+    std::printf( "operator[](\"/employees/1/dept\") = \"%.*s\"\n",
+                 static_cast<int>( existing.as_string().size() ),
+                 existing.as_string().data() );
+}
 
-    // Задача 8.2: search_node_strings() — поиск по значениям pstring-узлов.
+// ---------------------------------------------------------------------------
+// Демо 7: поиск по строкам (Фаза 8)
+// ---------------------------------------------------------------------------
+
+static void demo_search( pjson_db& db )
+{
+    print_separator( "Демо 7: поиск по строкам (Фаза 8)" );
+
+    // search_node_strings() — поиск по pstring-значениям (readwrite строки JSON-узлов).
     auto name_results = db.search_node_strings( "Петров" );
-    std::printf( "search_node_strings(\"Петров\"): найдено %zu узла(ов)\n", name_results.size() );
+    std::printf( "search_node_strings(\"Петров\"): %zu узла(ов)\n", name_results.size() );
     for ( node_id id : name_results )
     {
-        std::printf( "  -> \"%s\"\n", std::string( node_view{ id }.as_string() ).c_str() );
+        std::string_view sv = node_view{ id }.as_string();
+        std::printf( "  -> \"%.*s\"\n", static_cast<int>( sv.size() ), sv.data() );
     }
 
-    // Сравнение: search_strings ищет по словарю ключей (pstringview).
-    auto key_results = db.search_strings( "name" );
-    std::printf( "search_strings(\"name\"): найдено %zu ключа(ей) в словаре\n", key_results.size() );
+    // Пустой pattern — все string-значения в дереве.
+    auto all_vals = db.search_node_strings( "" );
+    std::printf( "search_node_strings(\"\") — всего string-узлов: %zu\n", all_vals.size() );
 
-    // Пустой pattern — все string-значения.
-    auto all_strings = db.search_node_strings( "" );
-    std::printf( "search_node_strings(\"\"): всего string-узлов = %zu\n", all_strings.size() );
+    // search_strings() — поиск по словарю интернированных ключей (pstringview).
+    auto key_results = db.search_strings( "name" );
+    std::printf( "search_strings(\"name\") — ключей в словаре: %zu\n", key_results.size() );
+}
+
+// ---------------------------------------------------------------------------
+// Демо 8: удаление и resolve_all_refs()
+// ---------------------------------------------------------------------------
+
+static void demo_erase_and_resolve( pjson_db& db )
+{
+    print_separator( "Демо 8: удаление и resolve_all_refs()" );
+
+    // Создаём узел и удаляем его.
+    db.put( "/temp/value", static_cast<int64_t>( 42 ) );
+    std::printf( "exists(\"/temp/value\") before erase = %s\n",
+                 db.exists( "/temp/value" ) ? "true" : "false" );
+
+    db.erase( "/temp/value" );
+    std::printf( "exists(\"/temp/value\") after erase  = %s\n",
+                 db.exists( "/temp/value" ) ? "true" : "false" );
+
+    // resolve_all_refs() — разрешает все $ref-узлы в дереве (полезно после загрузки образа).
+    db.resolve_all_refs();
+    std::printf( "resolve_all_refs() — выполнено\n" );
 }
 
 // ---------------------------------------------------------------------------
@@ -422,24 +273,24 @@ static void demo_pjson_db_phase8()
 
 int main()
 {
-    std::printf( "=== BinDiffSynchronizer — персистная инфраструктура ===\n" );
+    std::printf( "=== BinDiffSynchronizer — pjson_db демонстрация ===\n" );
 
-    // Инициализируем персистное адресное пространство из файла (Тр.3).
-    // При первом запуске создаётся новый файл; при последующих — загружается.
-    PersistentAddressSpace::Init( "demo.pam" );
-    auto& pam = PersistentAddressSpace::Get();
+    // Открываем (или создаём) базу данных через высокоуровневый API.
+    // При первом запуске создаётся новый файл demo.pam,
+    // при последующих — загружается существующий.
+    pjson_db db = pjson_db::open( "demo.pam" );
 
-    // Запускаем все демо-примеры
-    demo_counter( pam );
-    demo_pstring( pam );
-    demo_pvector( pam );
-    demo_pmap( pam );
-    demo_pjson( pam );
-    demo_pallocator();
-    demo_pjson_db_phase8();
+    demo_open_and_put_get( db );
+    demo_nested_objects( db );
+    demo_ref( db );
+    demo_base64( db );
+    demo_metrics( db );
+    demo_hierarchical( db );
+    demo_search( db );
+    demo_erase_and_resolve( db );
 
-    // Сохраняем ПАП в файл для следующего запуска.
-    pam.Save();
+    // Сохраняем БД в файл для следующего запуска.
+    db.save();
 
     std::printf( "\n=== Данные сохранены в demo.pam ===\n" );
     return 0;
