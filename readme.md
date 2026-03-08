@@ -28,7 +28,8 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Path-адресация** | Доступ к узлам через строковые пути вида `/a/b/0/c` |
 | **$ref как указатели** | `{ "$ref": "/path" }` при разборе становится прямым указателем в ПАП |
 | **Метрики** | Персистная структура `db_metrics` в ПАМ; обновляется при каждой мутации; доступ через `/$metrics/...` (Фаза 7) |
-| **Поиск по строкам** | Сквозной поиск по всем строкам словаря ПАП |
+| **pmap-интерфейс** | `operator[]`, `find`, `insert` для доступа по пути без явного указания типа (Фаза 8) |
+| **Поиск по строкам** | `search_strings` — по словарю ключей (pstringview); `search_node_strings` — по значениям узлов (pstring) (Фаза 8) |
 
 ---
 
@@ -67,9 +68,10 @@ C++17 header-only библиотека для работы с JSON в перси
 
 ```
 ┌─────────────────────────────────────────────┐
-│   Слой D: pjson_db (Фазы 6–7) ✅            │
+│   Слой D: pjson_db (Фазы 6–8) ✅            │
 │   (path-адресация, $ref, метрики, API)      │
 │   db_metrics: персистные метрики в ПАП      │
+│   operator[], find, insert, search_node_strings │
 ├─────────────────────────────────────────────┤
 │   Слой C: pjson_node + pjson_pool           │
 │   (модель узлов, пул аллокации)             │
@@ -105,7 +107,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pjson_node_pool.h` | C | Пул узлов (старый API, для `pjson`; устарел в пользу `pjson_pool.h`) |
 | `pjson_serializer.h` | C | Сериализация/десериализация pjson (старый API) |
 | `pjson_codec.h` | C | Новая сериализация/десериализация (Фаза 5): парсер/сериализатор для `node_id`-модели; поддержка `$ref` и `$base64`; Base64 кодек; функции: `node_to_string()`, `node_from_string()`, `node_parse()` |
-| `pjson_db.h` | D | Менеджер персистной JSON-БД (Фазы 6–7): единственный заголовок для конечного пользователя (Тр.18); path-адресация (`/a/b/0/c`), `put`/`get`/`erase`/`exists`, разыменование `$ref`, `resolve_all_refs()`, персистные метрики (`db_metrics`) через `/$metrics`, `update_metrics()`, поиск строк, сериализация |
+| `pjson_db.h` | D | Менеджер персистной JSON-БД (Фазы 6–8): единственный заголовок для конечного пользователя (Тр.18); path-адресация (`/a/b/0/c`), `put`/`get`/`erase`/`exists`, разыменование `$ref`, `resolve_all_refs()`, персистные метрики (`db_metrics`) через `/$metrics`, `update_metrics()`, pmap-интерфейс (`operator[]`, `find`, `insert`), сквозной поиск по строкам (`search_strings`, `search_node_strings`), сериализация |
 | `main.cpp` | — | Демонстрационная программа |
 | `tests/` | — | Тесты на Catch2 |
 | `CMakeLists.txt` | — | Система сборки (CMake 3.16+, C++17) |
@@ -250,13 +252,37 @@ for (const auto& r : all) {
 На уровне pjson_db (целевой API, фаза 6):
 
 ```cpp
-// Найти все строки, содержащие подстроку
+// Найти все строки, содержащие подстроку (поиск по словарю интернированных ключей)
 auto results = db.search_strings("alice");
 
 // Перебрать весь словарь строк
 for (auto sv : db.all_strings()) {
     // sv — pstringview
 }
+```
+
+### Иерархический доступ и поиск по значениям (Фаза 8)
+
+```cpp
+// Задача 8.1: operator[] — доступ по пути; создаёт null-узел если путь не существует
+node_view v = db["/config/host"]; // как std::map::operator[]
+
+// Задача 8.1: find() — поиск без создания, без разыменования ref
+node_view found = db.find("/config/host"); // node_view(0) если не найдено
+
+// Задача 8.1: insert() — вставка JSON-значения по пути
+node_view inserted = db.insert("/config/port", "8080");
+node_view obj      = db.insert("/config/auth", R"({"enabled":true,"method":"jwt"})");
+
+// Задача 8.2: search_node_strings() — поиск по pstring-ЗНАЧЕНИЯМ узлов (readwrite)
+// (в отличие от search_strings(), который ищет по словарю КЛЮЧЕЙ pstringview)
+auto val_results = db.search_node_strings("Alice");
+for (node_id id : val_results) {
+    std::string_view sv = node_view{id}.as_string(); // "Alice Smith" и т.п.
+}
+
+// Пустой pattern — все string-узлы в дереве
+auto all_vals = db.search_node_strings("");
 ```
 
 ---

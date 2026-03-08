@@ -832,3 +832,300 @@ TEST_CASE( "pjson_db: put_null creates null node", "[pjson_db]" )
     REQUIRE( v.valid() );
     REQUIRE( v.is_null() );
 }
+
+// ===========================================================================
+// Фаза 8: Иерархический интерфейс pmap и расширенный поиск по строкам
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Задача 8.1: оператор [] — доступ к узлу по пути
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "pjson_db: operator[] returns valid node_view for existing path", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/city", "Moscow" );
+
+    node_view v = db["/city"];
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_string() );
+    REQUIRE( v.as_string() == "Moscow" );
+}
+
+TEST_CASE( "pjson_db: operator[] creates null node for non-existing path", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    // Путь не существует — operator[] создаёт его как null-узел.
+    node_view v = db["/newkey"];
+    REQUIRE( v.valid() );
+    // Узел создан (null — начальное состояние нового слота).
+}
+
+TEST_CASE( "pjson_db: operator[] on metrics path returns metrics node", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/x", static_cast<int64_t>( 1 ) );
+
+    node_view v = db["/$metrics/pam_bump_offset"];
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_uinteger() );
+    REQUIRE( v.as_uint() > 0u );
+}
+
+// ---------------------------------------------------------------------------
+// Задача 8.1: find() — поиск без создания
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "pjson_db: find returns valid node_view for existing path", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/name", "Alice" );
+
+    node_view v = db.find( "/name" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.as_string() == "Alice" );
+}
+
+TEST_CASE( "pjson_db: find returns invalid for non-existing path", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v = db.find( "/nonexistent" );
+    REQUIRE( !v.valid() );
+}
+
+TEST_CASE( "pjson_db: find does not create nodes", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    // find не должен создавать новые узлы.
+    db.find( "/missing/path/here" );
+    REQUIRE( !db.exists( "/missing" ) );
+}
+
+TEST_CASE( "pjson_db: find does not dereference ref nodes", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/target", "hello" );
+    db.put_ref( "/link", "/target" );
+    db.resolve_all_refs();
+
+    // find возвращает сам ref-узел, не его цель.
+    node_view v = db.find( "/link" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_ref() );
+}
+
+// ---------------------------------------------------------------------------
+// Задача 8.1: insert() — вставка JSON-значения по пути
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "pjson_db: insert creates node from JSON string", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v = db.insert( "/data", "\"hello world\"" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_string() );
+    REQUIRE( v.as_string() == "hello world" );
+}
+
+TEST_CASE( "pjson_db: insert creates node from JSON number", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v = db.insert( "/count", "42" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.as_int() == 42 );
+}
+
+TEST_CASE( "pjson_db: insert creates node from JSON object", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v = db.insert( "/cfg", R"({"debug":true,"level":3})" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_object() );
+    REQUIRE( v.at( "debug" ).as_bool() == true );
+    REQUIRE( v.at( "level" ).as_int() == 3 );
+}
+
+TEST_CASE( "pjson_db: insert overwrites existing value", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/val", "old" );
+
+    node_view v = db.insert( "/val", "\"new\"" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.as_string() == "new" );
+}
+
+TEST_CASE( "pjson_db: insert into metrics path returns invalid", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v = db.insert( "/$metrics/node_count_total", "999" );
+    REQUIRE( !v.valid() );
+}
+
+// ---------------------------------------------------------------------------
+// Задача 8.2: search_node_strings() — поиск по pstring значениям узлов
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "pjson_db: search_node_strings finds string nodes containing pattern", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/users/alice/name", "Alice Smith" );
+    db.put( "/users/bob/name", "Bob Jones" );
+    db.put( "/users/alice/city", "Springfield" );
+
+    // Ищем строки, содержащие "Smith".
+    auto results = db.search_node_strings( "Smith" );
+    REQUIRE( results.size() == 1u );
+
+    // Ищем строки, содержащие "alice" — нет (Alice с заглавной).
+    auto results2 = db.search_node_strings( "alice" );
+    REQUIRE( results2.empty() );
+}
+
+TEST_CASE( "pjson_db: search_node_strings with empty pattern returns all string nodes", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/a", "hello" );
+    db.put( "/b", "world" );
+    db.put( "/c", static_cast<int64_t>( 42 ) ); // не строка
+
+    // Пустой pattern — все string-узлы.
+    auto results = db.search_node_strings( "" );
+    REQUIRE( results.size() >= 2u ); // как минимум /a и /b
+}
+
+TEST_CASE( "pjson_db: search_node_strings finds values in nested objects", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.parse_into( "/config", R"({"host":"localhost","port":8080,"desc":"main server"})" );
+
+    // Ищем строки, содержащие "server".
+    auto results = db.search_node_strings( "server" );
+    REQUIRE( results.size() == 1u );
+
+    // Проверяем, что нашли нужный узел.
+    REQUIRE( node_view{ results[0] }.as_string() == "main server" );
+}
+
+TEST_CASE( "pjson_db: search_node_strings finds values in arrays", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.parse_into( "/tags", R"(["persistent","json","database","persistent-db"])" );
+
+    // Ищем строки, содержащие "persistent".
+    auto results = db.search_node_strings( "persistent" );
+    REQUIRE( results.size() == 2u ); // "persistent" и "persistent-db"
+}
+
+TEST_CASE( "pjson_db: search_node_strings returns empty for non-matching pattern", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/greeting", "Hello" );
+    db.put( "/farewell", "Goodbye" );
+
+    auto results = db.search_node_strings( "xyz_not_found" );
+    REQUIRE( results.empty() );
+}
+
+TEST_CASE( "pjson_db: search_strings (pstringview) and search_node_strings (pstring) are complementary",
+           "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+    // Ключи объектов интернируются как pstringview.
+    // Значения строк хранятся как pstring.
+    db.put( "/user", "Alice" );
+    db.put( "/city", "Wonderland" );
+
+    // search_strings ищет по словарю ключей (pstringview).
+    auto key_results = db.search_strings( "user" );
+    REQUIRE( !key_results.empty() );
+
+    // search_node_strings ищет по значениям узлов (pstring).
+    auto val_results = db.search_node_strings( "Alice" );
+    REQUIRE( val_results.size() == 1u );
+    REQUIRE( node_view{ val_results[0] }.as_string() == "Alice" );
+}
+
+// ---------------------------------------------------------------------------
+// Задача 8.3: интеграционные тесты (operator[] + find + insert + search)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "pjson_db: phase8 integration - build DB with operator[] and query with find", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    // Строим базу данных через insert.
+    db.insert( "/employees/1/name", "\"Ivan\"" );
+    db.insert( "/employees/1/dept", "\"Engineering\"" );
+    db.insert( "/employees/2/name", "\"Maria\"" );
+    db.insert( "/employees/2/dept", "\"Marketing\"" );
+
+    // Читаем через find (без разыменования ref).
+    node_view n1 = db.find( "/employees/1/name" );
+    REQUIRE( n1.valid() );
+    REQUIRE( n1.as_string() == "Ivan" );
+
+    node_view n2 = db.find( "/employees/2/dept" );
+    REQUIRE( n2.valid() );
+    REQUIRE( n2.as_string() == "Marketing" );
+}
+
+TEST_CASE( "pjson_db: phase8 integration - search_node_strings finds values across nested structure",
+           "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    db.put( "/product/name", "WidgetPro" );
+    db.put( "/product/version", "2.0" );
+    db.put( "/product/desc", "Advanced widget for professionals" );
+    db.put( "/product/vendor", "WidgetCorp" );
+
+    // Ищем "Widget" — должны найти "WidgetPro" и "WidgetCorp".
+    auto results = db.search_node_strings( "Widget" );
+    REQUIRE( results.size() == 2u );
+}
+
+TEST_CASE( "pjson_db: phase8 integration - operator[] creates path then insert populates it", "[pjson_db][phase8]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    // Создаём путь через operator[].
+    node_view slot = db["/settings/theme"];
+    REQUIRE( slot.valid() );
+
+    // Записываем значение через insert.
+    node_view v = db.insert( "/settings/theme", "\"dark\"" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.as_string() == "dark" );
+
+    // Проверяем доступность через get.
+    REQUIRE( db.get( "/settings/theme" ).as_string() == "dark" );
+}
