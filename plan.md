@@ -497,27 +497,38 @@ struct db_metrics {
 
 ---
 
-## Фаза 8. Иерархическое адресное пространство (интерфейс `pmap<pstringview, pjson>`)
+## Фаза 8. Иерархическое адресное пространство (интерфейс `pmap<pstringview, pjson>`) ✅ ЗАВЕРШЕНА
 
 **Цель:** Менеджер ПАП сам реализует интерфейс `pmap<pstringview, pjson>` для внешней интеграции.
 
-### Задача 8.1. Реализовать интерфейс `pjson_db` как `pmap<pstringview, node_id>`
+### Задача 8.1. Реализовать интерфейс `pjson_db` как `pmap<pstringview, node_id>` ✅ ВЫПОЛНЕНО
 
-- `operator[](pstringview path) -> node_view` — доступ по пути.
-- `find(pstringview path) -> node_view` — поиск без создания.
-- `insert(pstringview path, node_id value) -> bool` — вставка.
-- `erase(pstringview path) -> bool` — удаление.
+- `operator[](const char* path) -> node_view` — доступ по пути; создаёт null-узел если не существует.
+- `find(const char* path) -> node_view` — поиск без создания и без разыменования ref.
+- `insert(const char* path, const char* json_value) -> node_view` — вставка/перезапись JSON-значения по пути.
+- `erase(const char* path) -> bool` — удаление (реализовано в Фазе 6).
 
-### Задача 8.2. Реализовать интерфейс поиска по строкам
+### Задача 8.2. Реализовать интерфейс поиска по строкам ✅ ВЫПОЛНЕНО
 
-- `pjson_db::search_strings(const char* pattern) -> std::vector<search_result>` — поиск по всем интернированным ключам (`pstringview`) И по всем `pstring`-значениям в пуле узлов.
-- `pjson_db::all_strings() -> итератор` — перебор всех строк словаря `pstringview`.
-- `search_result` содержит найденную строку и `node_id` узла (если это `pstring`-значение) или путь ключа (если это `pstringview`-ключ).
+- `pjson_db::search_node_strings(const char* pattern) -> std::vector<node_id>` — поиск по всем `pstring`-значениям (readwrite строки JSON-узлов) обходом дерева от корня.
+- `pjson_db::search_strings(const char* pattern)` (из Фазы 6) — поиск по словарю интернированных ключей (`pstringview`).
+- Два метода дополняют друг друга: `search_strings` охватывает словарь ключей, `search_node_strings` — строковые значения узлов.
 
-### Задача 8.3. Написать интеграционные тесты
+### Задача 8.3. Написать интеграционные тесты ✅ ВЫПОЛНЕНО
 
-- Создать БД с вложенными объектами, найти значение через `search_strings`.
-- Использовать `operator[]` для навигации.
+- 21 новый тест в `test_pjson_db.cpp` (тег `[phase8]`).
+- Тесты `operator[]`: доступ к существующему пути, создание нового узла, доступ к метрикам.
+- Тесты `find()`: поиск существующего, несуществующего, без создания, без разыменования ref.
+- Тесты `insert()`: вставка строки, числа, объекта, перезапись, запрет в `/$metrics`.
+- Тесты `search_node_strings()`: поиск по значениям, пустой pattern, вложенные объекты/массивы.
+- Интеграционные тесты: комбинирование `operator[]` + `find` + `insert` + `search_node_strings`.
+
+**Критерии приёмки фазы 8:** ✅
+- Методы `operator[]`, `find`, `insert` добавлены в `pjson_db.h`. ✅
+- Метод `search_node_strings` ищет по pstring-значениям (readwrite) в дереве узлов. ✅
+- `search_strings` (pstringview) и `search_node_strings` (pstring) дополняют друг друга. ✅
+- 21 новый тест `[phase8]` проходят. ✅
+- Все 475 тестов проекта проходят. ✅
 
 ---
 

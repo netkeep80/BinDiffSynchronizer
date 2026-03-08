@@ -490,6 +490,75 @@ class pjson_db
     std::vector<pstringview_search_result> all_strings() const { return pam_all_strings(); }
 
     // -----------------------------------------------------------------------
+    // Фаза 8.2: Расширенный поиск по строкам (pstringview + pstring узлы)
+    // -----------------------------------------------------------------------
+
+    /// Найти все узлы типа string (pstring), значение которых содержит подстроку pattern.
+    /// В отличие от search_strings(), который ищет только в словаре интернированных ключей,
+    /// данный метод ищет по строковым ЗНАЧЕНИЯМ JSON (readwrite pstring-узлы).
+    ///
+    /// Обходит всё дерево от корня и возвращает node_id всех string-узлов,
+    /// чьё значение содержит pattern.
+    std::vector<node_id> search_node_strings( const char* pattern ) const
+    {
+        std::vector<node_id> results;
+        node_id              root = _find_root();
+        if ( root == 0 )
+            return results;
+        _search_node_strings_in_subtree( root, pattern != nullptr ? pattern : "", results );
+        return results;
+    }
+
+    // -----------------------------------------------------------------------
+    // Фаза 8.1: Интерфейс pmap<pstringview, node_id> для иерархического доступа
+    // -----------------------------------------------------------------------
+
+    /// Доступ к узлу по пути (аналог operator[] для map).
+    /// Если узел не существует — создаёт пустой object-узел по пути.
+    /// Эквивалентно: если exists(path) — возвращает get(path), иначе put(path, {}).
+    node_view operator[]( const char* path )
+    {
+        if ( path == nullptr )
+            return node_view{};
+        if ( _is_metrics_path( path ) )
+            return _get_metrics( path );
+        // Если узел уже существует — возвращаем его.
+        node_view existing = get( path, /*deref_refs=*/false );
+        if ( existing.valid() )
+            return existing;
+        // Создаём промежуточные узлы и возвращаем финальный слот.
+        node_id slot = _ensure_path( path );
+        if ( slot == 0 )
+            return node_view{};
+        // Финальный слот инициализирован как null — оставляем null (как std::map).
+        _update_metrics_after_mutation();
+        return node_view{ slot };
+    }
+
+    /// Найти узел по пути без создания.
+    /// Возвращает node_view(0) если не существует.
+    /// Не разыменовывает ref-узлы.
+    node_view find( const char* path ) const { return get( path, /*deref_refs=*/false ); }
+
+    /// Вставить значение по пути.
+    /// Если узел уже существует — перезаписывает значение.
+    /// Возвращает node_view на созданный/обновлённый узел.
+    node_view insert( const char* path, const char* json_value )
+    {
+        if ( path == nullptr || json_value == nullptr )
+            return node_view{};
+        if ( _is_metrics_path( path ) )
+            return node_view{};
+        node_id slot = _ensure_path( path );
+        if ( slot == 0 )
+            return node_view{};
+        bool ok = node_from_string( json_value, slot );
+        if ( ok )
+            _update_metrics_after_mutation();
+        return ok ? node_view{ slot } : node_view{};
+    }
+
+    // -----------------------------------------------------------------------
     // Доступ к ПАП напрямую
     // -----------------------------------------------------------------------
 
@@ -1169,6 +1238,76 @@ class pjson_db
         if ( m == nullptr )
             return;
         _fill_metrics( m );
+    }
+
+    // -----------------------------------------------------------------------
+    // Вспомогательные методы: разрешение ref
+    // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Вспомогательные методы: поиск по значениям pstring-узлов (Фаза 8.2)
+    // -----------------------------------------------------------------------
+
+    /// Рекурсивный обход поддерева для поиска string-узлов (pstring, readwrite)
+    /// чьё значение содержит подстроку pattern.
+    ///
+    /// Заполняет results списком node_id найденных string-узлов.
+    void _search_node_strings_in_subtree( node_id id, const char* pattern, std::vector<node_id>& results ) const
+    {
+        if ( id == 0 )
+            return;
+        const node_view v{ id };
+        if ( !v.valid() )
+            return;
+
+        switch ( v.tag() )
+        {
+        case node_tag::string:
+        {
+            // Проверяем, содержит ли pstring-значение подстроку pattern.
+            std::string_view sv = v.as_string();
+            if ( pattern[0] == '\0' )
+            {
+                // Пустой pattern — возвращаем все string-узлы.
+                results.push_back( id );
+            }
+            else if ( !sv.empty() )
+            {
+                // Поиск подстроки через std::strstr (безопасно: sv нуль-терминирована pstring).
+                const char* s = sv.data();
+                if ( s != nullptr && std::strstr( s, pattern ) != nullptr )
+                    results.push_back( id );
+            }
+            break;
+        }
+        case node_tag::array:
+        {
+            uintptr_t sz = v.size();
+            for ( uintptr_t i = 0; i < sz; ++i )
+            {
+                node_view elem = v.at( i );
+                if ( elem.valid() )
+                    _search_node_strings_in_subtree( elem.id, pattern, results );
+            }
+            break;
+        }
+        case node_tag::object:
+        {
+            uintptr_t sz = v.size();
+            for ( uintptr_t i = 0; i < sz; ++i )
+            {
+                node_view val = v.value_at( i );
+                if ( val.valid() )
+                    _search_node_strings_in_subtree( val.id, pattern, results );
+            }
+            break;
+        }
+        case node_tag::ref:
+            // Не обходим цель ref (избегаем дублирования).
+            break;
+        default:
+            break;
+        }
     }
 
     // -----------------------------------------------------------------------

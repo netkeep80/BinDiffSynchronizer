@@ -28,6 +28,7 @@
 #include "pmap.h"
 #include "pjson.h"
 #include "pallocator.h"
+#include "pjson_db.h"
 
 // ---------------------------------------------------------------------------
 // Вспомогательные функции для вывода
@@ -366,6 +367,56 @@ static void demo_pallocator()
 }
 
 // ---------------------------------------------------------------------------
+// Демо 7: pjson_db — Фаза 8 (иерархический интерфейс pmap + расширенный поиск)
+// ---------------------------------------------------------------------------
+
+static void demo_pjson_db_phase8()
+{
+    print_separator( "Демо 7: pjson_db Фаза 8 — operator[], find(), insert(), search_node_strings()" );
+
+    // Сбрасываем ПАМ для демонстрации в чистом состоянии.
+    pstringview_manager::reset();
+    PersistentAddressSpace::Get().Reset();
+
+    pjson_db db;
+
+    // Задача 8.1: вставка через insert() (JSON-значения по пути).
+    db.insert( "/employees/1/name", "\"Иван Петров\"" );
+    db.insert( "/employees/1/dept", "\"Разработка\"" );
+    db.insert( "/employees/1/salary", "120000" );
+    db.insert( "/employees/2/name", "\"Мария Сидорова\"" );
+    db.insert( "/employees/2/dept", "\"Маркетинг\"" );
+    db.insert( "/employees/2/salary", "95000" );
+
+    // Задача 8.1: поиск через find() (без создания, без разыменования ref).
+    std::printf( "find(\"/employees/1/name\") = \"%s\"\n",
+                 std::string( db.find( "/employees/1/name" ).as_string() ).c_str() );
+    std::printf( "find(\"/employees/2/dept\") = \"%s\"\n",
+                 std::string( db.find( "/employees/2/dept" ).as_string() ).c_str() );
+    std::printf( "find(\"/nonexistent\").valid() = %s\n", db.find( "/nonexistent" ).valid() ? "true" : "false" );
+
+    // Задача 8.1: доступ через operator[] (создаёт узел если не существует).
+    node_view existing = db["/employees/1/name"];
+    std::printf( "operator[](\"/employees/1/name\") = \"%s\"\n", std::string( existing.as_string() ).c_str() );
+
+    // Задача 8.2: search_node_strings() — поиск по значениям pstring-узлов.
+    auto name_results = db.search_node_strings( "Петров" );
+    std::printf( "search_node_strings(\"Петров\"): найдено %zu узла(ов)\n", name_results.size() );
+    for ( node_id id : name_results )
+    {
+        std::printf( "  -> \"%s\"\n", std::string( node_view{ id }.as_string() ).c_str() );
+    }
+
+    // Сравнение: search_strings ищет по словарю ключей (pstringview).
+    auto key_results = db.search_strings( "name" );
+    std::printf( "search_strings(\"name\"): найдено %zu ключа(ей) в словаре\n", key_results.size() );
+
+    // Пустой pattern — все string-значения.
+    auto all_strings = db.search_node_strings( "" );
+    std::printf( "search_node_strings(\"\"): всего string-узлов = %zu\n", all_strings.size() );
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -385,6 +436,7 @@ int main()
     demo_pmap( pam );
     demo_pjson( pam );
     demo_pallocator();
+    demo_pjson_db_phase8();
 
     // Сохраняем ПАП в файл для следующего запуска.
     pam.Save();
