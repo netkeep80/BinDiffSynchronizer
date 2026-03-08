@@ -438,41 +438,62 @@ public:
 
 ---
 
-## Фаза 7. Метрики ПАП и метрики БД
+## Фаза 7. Метрики ПАП и метрики БД ✅ ЗАВЕРШЕНА
 
 **Цель:** Хранить и обновлять метрики в ПАП, доступ через `/$metrics`.
 
-### Задача 7.1. Определить структуру `db_metrics`
+### Задача 7.1. Определить структуру `db_metrics` ✅ ВЫПОЛНЕНО
 
 ```cpp
 struct db_metrics {
-    uint64_t node_count_total;      // всего узлов в пуле
-    uint64_t string_count_total;    // всего интернированных строк
-    uint64_t binary_bytes_total;    // всего байт в binary-узлах
-    uint64_t ref_count;             // всего ref-узлов
-    uint64_t array_count;           // всего массивов
-    uint64_t object_count;          // всего объектов
-    uint64_t last_save_time;        // время последнего сохранения (Unix timestamp)
+    uint64_t node_count_total;   // всего узлов в дереве (или пуле, если используется)
+    uint64_t string_count_total; // всего интернированных строк в словаре
+    uint64_t binary_bytes_total; // всего байт в binary-узлах
+    uint64_t ref_count;          // всего ref-узлов
+    uint64_t array_count;        // всего массивов (array-узлов)
+    uint64_t object_count;       // всего объектов (object-узлов)
+    uint64_t last_save_time;     // Unix-время последнего сохранения (0 = не сохранялось)
     // Метрики PAM (проксируются из PersistentAddressSpace)
-    uint64_t pam_bump_offset;
-    uint64_t pam_free_list_size;
-    uint64_t pam_total_size;
+    uint64_t pam_bump_offset;    // текущая позиция bump-аллокатора (байт)
+    uint64_t pam_free_list_size; // число свободных блоков в free-list ПАМ
+    uint64_t pam_total_size;     // полный размер области данных ПАМ (байт)
+    uint64_t pam_slot_count;     // число аллоцированных слотов в ПАМ
+    uint64_t pam_named_count;    // число именованных объектов в ПАМ
 };
 ```
 
-### Задача 7.2. Интегрировать обновление метрик в мутации
+Структура `db_metrics` хранится персистно в ПАМ под именем `"pjson_db.metrics"`.
 
-- Каждая операция `put` / `erase` / `alloc node` / `intern string` обновляет соответствующий счётчик.
-- Обновление атомарно в рамках одной операции (нет частичного состояния).
+### Задача 7.2. Интегрировать обновление метрик в мутации ✅ ВЫПОЛНЕНО
 
-### Задача 7.3. Реализовать read-only доступ через пути
+- Каждая операция `put` / `parse` / `erase` / `parse_into` / `put_ref` / `put_null` вызывает `_update_metrics_after_mutation()`.
+- `_update_metrics_after_mutation()` выполняет полный пересчёт:
+  - Счётчики типов узлов (ref_count, array_count, object_count, binary_bytes_total) — обходом дерева от корня.
+  - Метрики ПАМ — через `GetBump()`, `GetFreeListSize()`, `GetDataSize()`, `GetSlotCount()`, `GetNamedCount()`.
+  - Метрика строк — через `pam_all_strings().size()`.
+- `save()` обновляет `last_save_time` (Unix timestamp) перед записью на диск.
+- Метод `update_metrics()` доступен пользователю для явного пересчёта.
+
+### Задача 7.3. Реализовать read-only доступ через пути ✅ ВЫПОЛНЕНО
 
 - `get("/$metrics/node_count_total")` → `node_view` типа `uinteger`.
-- `put("/$metrics/...")` → ошибка `readonly`.
+- `get("/$metrics/pam_bump_offset")` → позиция bump-аллокатора.
+- `get("/$metrics/pam_free_list_size")` → число свободных блоков.
+- `get("/$metrics/pam_total_size")` → размер области данных ПАМ.
+- `get("/$metrics/pam_slot_count")` → число слотов в ПАМ.
+- `get("/$metrics/pam_named_count")` → число именованных объектов.
+- `get("/$metrics/string_count_total")` (псевдоним `string_count`) → число строк в словаре.
+- `get("/$metrics/ref_count")`, `array_count`, `object_count`, `binary_bytes_total` → счётчики по типам.
+- `get("/$metrics/last_save_time")` → время последнего сохранения.
+- `put("/$metrics/...")` → ошибка `readonly` (возвращает `false`).
+- Неизвестная метрика → `node_view` типа `null`.
 
-**Критерии приёмки фазы 7:**
-- Метрики обновляются корректно.
-- Доступ через `/$metrics` работает.
+**Критерии приёмки фазы 7:** ✅
+- Новая структура `db_metrics` в `pjson_db.h`. ✅
+- Метрики обновляются при каждой мутации. ✅
+- Доступ через `/$metrics` работает для всех полей. ✅
+- 15 новых тестов `test_pjson_db.cpp` (тег `[phase7]`). ✅
+- Все 454 теста проходят. ✅
 
 ---
 

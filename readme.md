@@ -27,7 +27,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **jsonRVM-совместимость** | `pstring`-узлы могут модифицироваться непосредственно в БД библиотекой [jsonRVM](https://github.com/netkeep80/jsonRVM) |
 | **Path-адресация** | Доступ к узлам через строковые пути вида `/a/b/0/c` |
 | **$ref как указатели** | `{ "$ref": "/path" }` при разборе становится прямым указателем в ПАП |
-| **Метрики** | Статистика БД доступна через `/$metrics/...` |
+| **Метрики** | Персистная структура `db_metrics` в ПАМ; обновляется при каждой мутации; доступ через `/$metrics/...` (Фаза 7) |
 | **Поиск по строкам** | Сквозной поиск по всем строкам словаря ПАП |
 
 ---
@@ -67,8 +67,9 @@ C++17 header-only библиотека для работы с JSON в перси
 
 ```
 ┌─────────────────────────────────────────────┐
-│   Слой D: pjson_db (Фаза 6) ✅              │
+│   Слой D: pjson_db (Фазы 6–7) ✅            │
 │   (path-адресация, $ref, метрики, API)      │
+│   db_metrics: персистные метрики в ПАП      │
 ├─────────────────────────────────────────────┤
 │   Слой C: pjson_node + pjson_pool           │
 │   (модель узлов, пул аллокации)             │
@@ -104,7 +105,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pjson_node_pool.h` | C | Пул узлов (старый API, для `pjson`; устарел в пользу `pjson_pool.h`) |
 | `pjson_serializer.h` | C | Сериализация/десериализация pjson (старый API) |
 | `pjson_codec.h` | C | Новая сериализация/десериализация (Фаза 5): парсер/сериализатор для `node_id`-модели; поддержка `$ref` и `$base64`; Base64 кодек; функции: `node_to_string()`, `node_from_string()`, `node_parse()` |
-| `pjson_db.h` | D | Менеджер персистной JSON-БД (Фаза 6): единственный заголовок для конечного пользователя (Тр.18); path-адресация (`/a/b/0/c`), `put`/`get`/`erase`/`exists`, разыменование `$ref`, `resolve_all_refs()`, метрики через `/$metrics`, поиск строк, сериализация |
+| `pjson_db.h` | D | Менеджер персистной JSON-БД (Фазы 6–7): единственный заголовок для конечного пользователя (Тр.18); path-адресация (`/a/b/0/c`), `put`/`get`/`erase`/`exists`, разыменование `$ref`, `resolve_all_refs()`, персистные метрики (`db_metrics`) через `/$metrics`, `update_metrics()`, поиск строк, сериализация |
 | `main.cpp` | — | Демонстрационная программа |
 | `tests/` | — | Тесты на Catch2 |
 | `CMakeLists.txt` | — | Система сборки (CMake 3.16+, C++17) |
@@ -190,15 +191,38 @@ std::string json = db.dump("/data");
 // json == {"$base64":"AAEC"}
 ```
 
-### Метрики
+### Метрики (Фаза 7)
+
+Метрики хранятся персистно в структуре `db_metrics` в ПАМ и обновляются при каждой мутации.
 
 ```cpp
-// Метрики доступны через зарезервированное пространство /$metrics
-node_view node_count = db.get("/$metrics/node_count_total");
-node_view str_count  = db.get("/$metrics/string_count_total");
+// Метрики узлов
+node_view node_count  = db.get("/$metrics/node_count_total");   // всего узлов в дереве
+node_view free_count  = db.get("/$metrics/free_node_count");    // узлов в free-list пула
+node_view used_count  = db.get("/$metrics/used_node_count");    // занятых узлов в пуле
+node_view ref_cnt     = db.get("/$metrics/ref_count");          // ref-узлов
+node_view arr_cnt     = db.get("/$metrics/array_count");        // array-узлов
+node_view obj_cnt     = db.get("/$metrics/object_count");       // object-узлов
+node_view bin_bytes   = db.get("/$metrics/binary_bytes_total"); // байт в binary-узлах
+
+// Метрики строк
+node_view str_count   = db.get("/$metrics/string_count_total"); // интернированных строк
+
+// Метрики ПАМ
+node_view bump        = db.get("/$metrics/pam_bump_offset");    // позиция bump-аллокатора
+node_view free_blocks = db.get("/$metrics/pam_free_list_size"); // свободных блоков в ПАМ
+node_view total_size  = db.get("/$metrics/pam_total_size");     // размер области данных ПАМ
+node_view slot_cnt    = db.get("/$metrics/pam_slot_count");     // аллоцированных слотов
+node_view named_cnt   = db.get("/$metrics/pam_named_count");    // именованных объектов
+
+// Время сохранения
+node_view save_time   = db.get("/$metrics/last_save_time");     // Unix timestamp последнего save()
+
+// Явный пересчёт метрик (автоматически вызывается после каждой мутации)
+db.update_metrics();
 
 // Попытка записи в метрики — ошибка readonly
-db.put("/$metrics/node_count_total", 0); // ошибка!
+db.put("/$metrics/node_count_total", 0); // ошибка! возвращает false
 ```
 
 ### Поиск по строкам
@@ -441,7 +465,8 @@ REQUIRE( node_view{ id }.as_string() == "hello" );
   [name_map]          — карта имён объектов
   [free_list]         — список свободных областей (reuse)
   [string_table]      — словарь интернированных строк (pstringview_table, фаза 2)
-  [node_pool]         — пул узлов JSON
+  [node_pool]         — пул узлов JSON (pjson_pool)
+  [db_metrics]        — персистная структура метрик БД (db_metrics, фаза 7)
   [пользовательские данные]
 ```
 

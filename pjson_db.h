@@ -1,10 +1,10 @@
 #pragma once
-// pjson_db.h — Менеджер персистной JSON-базы данных (Фаза 6).
+// pjson_db.h — Менеджер персистной JSON-базы данных (Фазы 6–7).
 //
 // pjson_db — высокоуровневый API для работы с персистной JSON-БД:
 //   - Path-адресация через строковые пути вида /a/b/0/c
 //   - Поддержка $ref (разыменование ссылок, обнаружение циклов)
-//   - Метрики через зарезервированное пространство /$metrics
+//   - Метрики через зарезервированное пространство /$metrics (Фаза 7)
 //   - Полнотекстовый поиск по всем строкам словаря
 //   - Сохранение/загрузка образа ПАП
 //
@@ -18,15 +18,49 @@
 #include <cstring>
 #include <cstdint>
 #include <cassert>
+#include <ctime>
 
 // ===========================================================================
 // Имена именованных объектов в ПАП
 // ===========================================================================
 
 /// Имя пула узлов в ПАМ.
-static constexpr const char* PJSON_DB_POOL_NAME = "pjson_db.pool";
+static constexpr const char* PJSON_DB_POOL_NAME    = "pjson_db.pool";
 /// Имя корневого узла в ПАМ.
-static constexpr const char* PJSON_DB_ROOT_NAME = "pjson_db.root";
+static constexpr const char* PJSON_DB_ROOT_NAME    = "pjson_db.root";
+/// Имя структуры метрик в ПАМ (Фаза 7).
+static constexpr const char* PJSON_DB_METRICS_NAME = "pjson_db.metrics";
+
+// ===========================================================================
+// db_metrics — структура метрик персистной JSON-БД (Задача 7.1)
+// ===========================================================================
+
+/// Метрики базы данных и ПАП, хранящиеся персистно в ПАМ.
+///
+/// Обновляются при каждой мутирующей операции (put/alloc/intern/erase).
+/// Доступ только на чтение через путь /$metrics/<имя_поля>.
+///
+/// Все поля тривиально копируемы; структура живёт в ПАП.
+struct db_metrics
+{
+    uint64_t node_count_total;   ///< Всего узлов в пуле (включая свободные)
+    uint64_t string_count_total; ///< Всего интернированных строк в словаре
+    uint64_t binary_bytes_total; ///< Всего байт в binary-узлах (приближённо)
+    uint64_t ref_count;          ///< Всего ref-узлов в пуле
+    uint64_t array_count;        ///< Всего массивов (array-узлов) в пуле
+    uint64_t object_count;       ///< Всего объектов (object-узлов) в пуле
+    uint64_t last_save_time;     ///< Unix-время последнего сохранения (0 = не сохранялось)
+
+    // Метрики ПАМ (проксируются из PersistentAddressSpace)
+    uint64_t pam_bump_offset;   ///< Текущая позиция bump-аллокатора в ПАП (байт)
+    uint64_t pam_free_list_size; ///< Число свободных блоков в free-list ПАМ
+    uint64_t pam_total_size;     ///< Полный размер области данных ПАМ (байт)
+    uint64_t pam_slot_count;     ///< Число аллоцированных слотов в ПАМ
+    uint64_t pam_named_count;    ///< Число именованных объектов в ПАМ
+};
+
+static_assert( std::is_trivially_copyable<db_metrics>::value,
+               "db_metrics должен быть тривиально копируемым" );
 
 // ===========================================================================
 // pjson_db — менеджер персистной JSON-базы данных (Задача 6.1)
@@ -65,6 +99,8 @@ class pjson_db
     {
         _ensure_pool();
         _ensure_root();
+        // Инициализируем структуру метрик (Фаза 7).
+        _get_metrics_struct(); // создаёт при необходимости
     }
 
     // -----------------------------------------------------------------------
@@ -175,6 +211,7 @@ class pjson_db
         if ( slot == 0 )
             return false;
         node_init_null( slot );
+        _update_metrics_after_mutation();
         return true;
     }
 
@@ -188,6 +225,7 @@ class pjson_db
         if ( slot == 0 )
             return false;
         node_set_bool( slot, value );
+        _update_metrics_after_mutation();
         return true;
     }
 
@@ -200,6 +238,7 @@ class pjson_db
         if ( slot == 0 )
             return false;
         node_set_int( slot, value );
+        _update_metrics_after_mutation();
         return true;
     }
 
@@ -212,6 +251,7 @@ class pjson_db
         if ( slot == 0 )
             return false;
         node_set_uint( slot, value );
+        _update_metrics_after_mutation();
         return true;
     }
 
@@ -224,6 +264,7 @@ class pjson_db
         if ( slot == 0 )
             return false;
         node_set_real( slot, value );
+        _update_metrics_after_mutation();
         return true;
     }
 
@@ -236,6 +277,7 @@ class pjson_db
         if ( slot == 0 )
             return false;
         node_set_string( slot, value );
+        _update_metrics_after_mutation();
         return true;
     }
 
@@ -251,6 +293,7 @@ class pjson_db
         if ( slot == 0 )
             return false;
         node_set_ref( slot, ref_path );
+        _update_metrics_after_mutation();
         return true;
     }
 
@@ -262,7 +305,10 @@ class pjson_db
         node_id slot = _ensure_path( path );
         if ( slot == 0 )
             return false;
-        return node_from_string( json, slot );
+        bool ok = node_from_string( json, slot );
+        if ( ok )
+            _update_metrics_after_mutation();
+        return ok;
     }
 
     // -----------------------------------------------------------------------
@@ -309,7 +355,10 @@ class pjson_db
             // Рекурсивно удаляем поддерево (без target ref).
             _free_node_tree( child.id );
             // Удаляем запись из объекта.
-            return _object_erase( parent_id, last_seg.c_str() );
+            bool ok = _object_erase( parent_id, last_seg.c_str() );
+            if ( ok )
+                _update_metrics_after_mutation();
+            return ok;
         }
         else if ( parent.is_array() )
         {
@@ -321,7 +370,10 @@ class pjson_db
             if ( !elem.valid() )
                 return false;
             _free_node_tree( elem.id );
-            return _array_erase_at( parent_id, idx );
+            bool ok = _array_erase_at( parent_id, idx );
+            if ( ok )
+                _update_metrics_after_mutation();
+            return ok;
         }
         return false;
     }
@@ -376,7 +428,10 @@ class pjson_db
         node_id root = _find_root();
         if ( root == 0 )
             return false;
-        return node_from_string( json, root );
+        bool ok = node_from_string( json, root );
+        if ( ok )
+            _update_metrics_after_mutation();
+        return ok;
     }
 
     // -----------------------------------------------------------------------
@@ -384,10 +439,21 @@ class pjson_db
     // -----------------------------------------------------------------------
 
     /// Сохранить образ ПАП в файл.
-    void save() { PersistentAddressSpace::Get().Save(); }
+    /// Перед сохранением обновляет поле last_save_time в метриках (Задача 7.2).
+    void save()
+    {
+        // Обновляем время сохранения перед записью на диск.
+        db_metrics* m = _get_metrics_struct();
+        if ( m != nullptr )
+        {
+            _fill_metrics( m );
+            m->last_save_time = static_cast<uint64_t>( std::time( nullptr ) );
+        }
+        PersistentAddressSpace::Get().Save();
+    }
 
     // -----------------------------------------------------------------------
-    // Метрики (Задача 6.1 / Фаза 7 — базовая реализация)
+    // Метрики (Фаза 7: персистные метрики в ПАП)
     // -----------------------------------------------------------------------
 
     /// Получить метрики ПАП/БД как node_view (read-only).
@@ -399,6 +465,16 @@ class pjson_db
         std::string full = "/$metrics/";
         full += subpath;
         return _get_metrics( full.c_str() );
+    }
+
+    /// Пересчитать все метрики из текущего состояния ПАМ и пула.
+    /// Вызывается автоматически при каждой мутации; можно вызвать явно.
+    void update_metrics()
+    {
+        db_metrics* m = _get_metrics_struct();
+        if ( m == nullptr )
+            return;
+        _fill_metrics( m );
     }
 
     // -----------------------------------------------------------------------
@@ -490,8 +566,9 @@ class pjson_db
         return std::strncmp( path, "/$metrics", 9 ) == 0;
     }
 
-    /// Получить метрику по пути (только чтение).
-    /// Метрики вычисляются динамически из состояния ПАМ и пула.
+    /// Получить метрику по пути (только чтение, Задача 7.3).
+    /// Все значения берутся из персистной структуры db_metrics в ПАП,
+    /// которая обновляется при каждой мутации (Задача 7.2).
     node_view _get_metrics( const char* path ) const
     {
         // Извлекаем имя метрики из пути: /$metrics/<name>
@@ -499,27 +576,19 @@ class pjson_db
         if ( *key == '/' )
             ++key;
 
-        // Создаём временный узел для хранения значения метрики.
-        // Использует персистную аллокацию для возврата node_view.
-        // Примечание: метрики возвращаются как временные объекты.
-        // Для полноценной реализации (Фаза 7)
-        // метрики следует хранить в персистном узле.
-        // В данной реализации (Фаза 6) метрики возвращаются как
-        // временные node_id из вновь созданных узлов.
-
-        // Аллоцируем временный узел для метрики.
+        // Аллоцируем временный узел для возврата значения метрики.
+        // (Временный узел не хранится долго; используется только для возврата node_view.)
         fptr<node> tmp_node;
         tmp_node.New();
         uintptr_t tmp_off = tmp_node.addr();
 
+        // Читаем актуальные данные из db_metrics (персистная структура, Задача 7.1).
+        // Дополнительно обогащаем данными из ПАМ (pam_bump_offset, pam_total_size, etc.)
+        // для метрик, которые нельзя закэшировать статически (они меняются постоянно).
+        const auto& pam  = PersistentAddressSpace::Get();
         pjson_pool* pool = _get_pool();
 
-        if ( std::strcmp( key, "node_count_total" ) == 0 )
-        {
-            uint64_t val = ( pool != nullptr ) ? static_cast<uint64_t>( pool->total_count() ) : 0u;
-            node_set_uint( tmp_off, val );
-            return node_view{ tmp_off };
-        }
+        // Метрики пула узлов (свободные/занятые; node_count_total обрабатывается ниже)
         if ( std::strcmp( key, "free_node_count" ) == 0 )
         {
             uint64_t val = ( pool != nullptr ) ? static_cast<uint64_t>( pool->free_in_pool() ) : 0u;
@@ -532,20 +601,82 @@ class pjson_db
             node_set_uint( tmp_off, val );
             return node_view{ tmp_off };
         }
-        if ( std::strcmp( key, "pam_bump_offset" ) == 0 )
-        {
-            // Используем PtrToOffset для получения текущего bump.
-            // В pam_core.h нет прямого доступа к _bump снаружи,
-            // но мы можем получить размер через GetStringTableOffset косвенно.
-            // Для базовой реализации возвращаем 0.
-            node_set_uint( tmp_off, 0u );
-            return node_view{ tmp_off };
-        }
-        if ( std::strcmp( key, "string_count" ) == 0 )
+
+        // Метрики строк
+        if ( std::strcmp( key, "string_count_total" ) == 0 || std::strcmp( key, "string_count" ) == 0 )
         {
             uint64_t val = static_cast<uint64_t>( pam_all_strings().size() );
             node_set_uint( tmp_off, val );
             return node_view{ tmp_off };
+        }
+
+        // Метрики ПАМ (читаются напрямую из PersistentAddressSpace)
+        if ( std::strcmp( key, "pam_bump_offset" ) == 0 )
+        {
+            node_set_uint( tmp_off, static_cast<uint64_t>( pam.GetBump() ) );
+            return node_view{ tmp_off };
+        }
+        if ( std::strcmp( key, "pam_free_list_size" ) == 0 )
+        {
+            node_set_uint( tmp_off, static_cast<uint64_t>( pam.GetFreeListSize() ) );
+            return node_view{ tmp_off };
+        }
+        if ( std::strcmp( key, "pam_total_size" ) == 0 )
+        {
+            node_set_uint( tmp_off, static_cast<uint64_t>( pam.GetDataSize() ) );
+            return node_view{ tmp_off };
+        }
+        if ( std::strcmp( key, "pam_slot_count" ) == 0 )
+        {
+            node_set_uint( tmp_off, static_cast<uint64_t>( pam.GetSlotCount() ) );
+            return node_view{ tmp_off };
+        }
+        if ( std::strcmp( key, "pam_named_count" ) == 0 )
+        {
+            node_set_uint( tmp_off, static_cast<uint64_t>( pam.GetNamedCount() ) );
+            return node_view{ tmp_off };
+        }
+
+        // Метрики типов узлов: вычисляются обходом дерева в реальном времени (Задача 7.3).
+        // Это гарантирует актуальность даже без явного вызова update_metrics().
+        if ( std::strcmp( key, "ref_count" ) == 0 ||
+             std::strcmp( key, "array_count" ) == 0 ||
+             std::strcmp( key, "object_count" ) == 0 ||
+             std::strcmp( key, "binary_bytes_total" ) == 0 ||
+             std::strcmp( key, "node_count_total" ) == 0 )
+        {
+            uint64_t node_cnt = 0, ref_cnt = 0, array_cnt = 0, object_cnt = 0, binary_bytes = 0;
+            node_id  root = _find_root();
+            if ( root != 0 )
+                _count_nodes_in_subtree( root, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
+
+            if ( std::strcmp( key, "node_count_total" ) == 0 )
+            {
+                // Если пул не используется — считаем узлы в дереве.
+                uint64_t pool_total = ( pool != nullptr ) ? static_cast<uint64_t>( pool->total_count() ) : 0u;
+                node_set_uint( tmp_off, pool_total > 0 ? pool_total : node_cnt );
+            }
+            else if ( std::strcmp( key, "ref_count" ) == 0 )
+                node_set_uint( tmp_off, ref_cnt );
+            else if ( std::strcmp( key, "array_count" ) == 0 )
+                node_set_uint( tmp_off, array_cnt );
+            else if ( std::strcmp( key, "object_count" ) == 0 )
+                node_set_uint( tmp_off, object_cnt );
+            else
+                node_set_uint( tmp_off, binary_bytes );
+
+            return node_view{ tmp_off };
+        }
+
+        // Метрики из персистной структуры db_metrics (только last_save_time, Задача 7.1)
+        const db_metrics* m = _get_metrics_struct_const();
+        if ( m != nullptr )
+        {
+            if ( std::strcmp( key, "last_save_time" ) == 0 )
+            {
+                node_set_uint( tmp_off, m->last_save_time );
+                return node_view{ tmp_off };
+            }
         }
 
         // Неизвестная метрика — возвращаем null.
@@ -891,6 +1022,160 @@ class pjson_db
             n->array_val.size--;
 
         return true;
+    }
+
+    // -----------------------------------------------------------------------
+    // Вспомогательные методы: метрики (Фаза 7)
+    // -----------------------------------------------------------------------
+
+    /// Получить указатель на персистную структуру db_metrics.
+    /// Создаёт структуру в ПАМ при первом обращении.
+    db_metrics* _get_metrics_struct()
+    {
+        auto& pam = PersistentAddressSpace::Get();
+
+        uintptr_t off = pam.Find( PJSON_DB_METRICS_NAME );
+        if ( off == 0 )
+        {
+            // Создаём структуру метрик в ПАМ.
+            fptr<db_metrics> m;
+            m.New( PJSON_DB_METRICS_NAME );
+            off = pam.Find( PJSON_DB_METRICS_NAME );
+            if ( off == 0 )
+                return nullptr;
+            // Инициализируем нулями.
+            db_metrics* mp = pam.Resolve<db_metrics>( off );
+            if ( mp != nullptr )
+                std::memset( mp, 0, sizeof( db_metrics ) );
+        }
+
+        return pam.Resolve<db_metrics>( off );
+    }
+
+    /// Получить константный указатель на структуру db_metrics (без создания).
+    const db_metrics* _get_metrics_struct_const() const
+    {
+        const auto& pam = PersistentAddressSpace::Get();
+        uintptr_t   off = pam.Find( PJSON_DB_METRICS_NAME );
+        if ( off == 0 )
+            return nullptr;
+        return pam.Resolve<db_metrics>( off );
+    }
+
+    /// Заполнить структуру db_metrics актуальными данными из ПАМ.
+    /// Пересчитывает все поля путём обхода дерева узлов от корня (Задача 7.2).
+    void _fill_metrics( db_metrics* m ) const
+    {
+        if ( m == nullptr )
+            return;
+
+        const auto& pam  = PersistentAddressSpace::Get();
+        pjson_pool* pool = _get_pool();
+
+        // Базовые метрики пула
+        m->node_count_total = ( pool != nullptr ) ? static_cast<uint64_t>( pool->total_count() ) : 0u;
+
+        // Метрики ПАМ
+        m->pam_bump_offset    = static_cast<uint64_t>( pam.GetBump() );
+        m->pam_free_list_size = static_cast<uint64_t>( pam.GetFreeListSize() );
+        m->pam_total_size     = static_cast<uint64_t>( pam.GetDataSize() );
+        m->pam_slot_count     = static_cast<uint64_t>( pam.GetSlotCount() );
+        m->pam_named_count    = static_cast<uint64_t>( pam.GetNamedCount() );
+
+        // Метрики строк
+        m->string_count_total = static_cast<uint64_t>( pam_all_strings().size() );
+
+        // Подсчёт по типам узлов: обходим дерево от корня (Задача 7.2).
+        // pjson_db размещает узлы через fptr<node>::New() в ПАМ напрямую,
+        // не через pjson_pool — поэтому считаем обходом дерева.
+        uint64_t binary_bytes = 0;
+        uint64_t ref_cnt      = 0;
+        uint64_t array_cnt    = 0;
+        uint64_t object_cnt   = 0;
+        uint64_t node_cnt     = 0;
+
+        node_id root = _find_root();
+        if ( root != 0 )
+            _count_nodes_in_subtree( root, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
+
+        // node_count_total: если пул не используется — считаем узлы в дереве.
+        if ( pool == nullptr || pool->total_count() == 0 )
+            m->node_count_total = node_cnt;
+
+        m->binary_bytes_total = binary_bytes;
+        m->ref_count          = ref_cnt;
+        m->array_count        = array_cnt;
+        m->object_count       = object_cnt;
+    }
+
+    /// Рекурсивный обход поддерева для подсчёта узлов по типам (Задача 7.2).
+    void _count_nodes_in_subtree( node_id id,
+                                  uint64_t& node_cnt,
+                                  uint64_t& ref_cnt,
+                                  uint64_t& array_cnt,
+                                  uint64_t& object_cnt,
+                                  uint64_t& binary_bytes ) const
+    {
+        if ( id == 0 )
+            return;
+        const node_view v{ id };
+        if ( !v.valid() )
+            return;
+
+        ++node_cnt;
+
+        switch ( v.tag() )
+        {
+        case node_tag::array:
+            ++array_cnt;
+            {
+                uintptr_t sz = v.size();
+                for ( uintptr_t i = 0; i < sz; ++i )
+                {
+                    node_view elem = v.at( i );
+                    if ( elem.valid() )
+                        _count_nodes_in_subtree( elem.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
+                }
+            }
+            break;
+        case node_tag::object:
+            ++object_cnt;
+            {
+                uintptr_t sz = v.size();
+                for ( uintptr_t i = 0; i < sz; ++i )
+                {
+                    node_view val = v.value_at( i );
+                    if ( val.valid() )
+                        _count_nodes_in_subtree( val.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
+                }
+            }
+            break;
+        case node_tag::ref:
+            ++ref_cnt;
+            // Не обходим цель ref (избегаем дублирования счёта).
+            break;
+        case node_tag::binary:
+            // Считаем байты из binary_val.size.
+            {
+                const auto& pam = PersistentAddressSpace::Get();
+                const node* n   = pam.Resolve<node>( id );
+                if ( n != nullptr )
+                    binary_bytes += static_cast<uint64_t>( n->binary_val.size );
+            }
+            break;
+        default:
+            break;
+        }
+    }
+
+    /// Быстрое обновление метрик после мутации (Задача 7.2).
+    /// Пересчитывает метрики и сохраняет их в персистной структуре.
+    void _update_metrics_after_mutation()
+    {
+        db_metrics* m = _get_metrics_struct();
+        if ( m == nullptr )
+            return;
+        _fill_metrics( m );
     }
 
     // -----------------------------------------------------------------------
