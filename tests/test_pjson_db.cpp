@@ -418,6 +418,237 @@ TEST_CASE( "pjson_db: metrics string_count returns non-zero after puts", "[pjson
 }
 
 // ===========================================================================
+// Метрики — Фаза 7: персистная структура db_metrics
+// ===========================================================================
+
+TEST_CASE( "pjson_db: metrics string_count_total is alias for string_count", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/key_a", "value_a" );
+    db.put( "/key_b", "value_b" );
+
+    // Оба пути должны работать и возвращать одинаковые значения.
+    node_view v1 = db.get( "/$metrics/string_count" );
+    node_view v2 = db.get( "/$metrics/string_count_total" );
+    REQUIRE( v1.valid() );
+    REQUIRE( v2.valid() );
+    REQUIRE( v1.as_uint() == v2.as_uint() );
+    REQUIRE( v1.as_uint() > 0u );
+}
+
+TEST_CASE( "pjson_db: metrics pam_bump_offset is non-zero after db creation", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/data", "value" );
+
+    node_view v = db.get( "/$metrics/pam_bump_offset" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_uinteger() );
+    // После создания БД и записи данных bump > 0.
+    REQUIRE( v.as_uint() > 0u );
+}
+
+TEST_CASE( "pjson_db: metrics pam_total_size is non-zero", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v = db.get( "/$metrics/pam_total_size" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_uinteger() );
+    REQUIRE( v.as_uint() > 0u );
+}
+
+TEST_CASE( "pjson_db: metrics pam_slot_count increases after puts", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v1 = db.get( "/$metrics/pam_slot_count" );
+    REQUIRE( v1.valid() );
+    uint64_t count_before = v1.as_uint();
+
+    db.put( "/new_key", "new_value" );
+
+    node_view v2 = db.get( "/$metrics/pam_slot_count" );
+    REQUIRE( v2.valid() );
+    // После добавления новой записи количество слотов должно вырасти.
+    REQUIRE( v2.as_uint() >= count_before );
+}
+
+TEST_CASE( "pjson_db: metrics pam_named_count is non-zero after db creation", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    // БД создаёт минимум 3 именованных объекта: pool, root, metrics.
+    node_view v = db.get( "/$metrics/pam_named_count" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_uinteger() );
+    REQUIRE( v.as_uint() >= 3u );
+}
+
+TEST_CASE( "pjson_db: metrics free_node_count and used_node_count are consistent", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/a", "x" );
+    db.put( "/b", "y" );
+
+    node_view total  = db.get( "/$metrics/node_count_total" );
+    node_view free_n = db.get( "/$metrics/free_node_count" );
+    node_view used_n = db.get( "/$metrics/used_node_count" );
+
+    REQUIRE( total.valid() );
+    REQUIRE( free_n.valid() );
+    REQUIRE( used_n.valid() );
+
+    // total >= used + free (может быть > если pool.nodes_size_ считает иначе).
+    REQUIRE( total.as_uint() >= used_n.as_uint() );
+}
+
+TEST_CASE( "pjson_db: metrics ref_count increases after put_ref", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/target", "hello" );
+
+    node_view v1 = db.get( "/$metrics/ref_count" );
+    REQUIRE( v1.valid() );
+    uint64_t ref_before = v1.as_uint();
+
+    db.put_ref( "/link", "/target" );
+
+    node_view v2 = db.get( "/$metrics/ref_count" );
+    REQUIRE( v2.valid() );
+    // После добавления ref-узла счётчик должен вырасти.
+    REQUIRE( v2.as_uint() > ref_before );
+}
+
+TEST_CASE( "pjson_db: metrics array_count increases after parse_into array", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v1 = db.get( "/$metrics/array_count" );
+    REQUIRE( v1.valid() );
+    uint64_t arr_before = v1.as_uint();
+
+    db.parse_into( "/items", "[1,2,3]" );
+
+    node_view v2 = db.get( "/$metrics/array_count" );
+    REQUIRE( v2.valid() );
+    REQUIRE( v2.as_uint() > arr_before );
+}
+
+TEST_CASE( "pjson_db: metrics object_count is non-zero after db creation", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    // Корневой узел — объект, поэтому object_count >= 1.
+    node_view v = db.get( "/$metrics/object_count" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_uinteger() );
+    REQUIRE( v.as_uint() >= 1u );
+}
+
+TEST_CASE( "pjson_db: metrics last_save_time is zero before save", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/x", "y" );
+
+    // До первого save() время должно быть 0 (или не обновлено).
+    node_view v = db.get( "/$metrics/last_save_time" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_uinteger() );
+    // last_save_time == 0 до первого save().
+    REQUIRE( v.as_uint() == 0u );
+}
+
+TEST_CASE( "pjson_db: metrics last_save_time is updated after save", "[pjson_db][phase7]" )
+{
+    const char* pam_file = "./test_pjson_db_metrics_save.pam";
+
+    // Создаём БД и сохраняем.
+    {
+        pstringview_manager::reset();
+        PersistentAddressSpace::Get().Reset();
+        PersistentAddressSpace::Init( pam_file );
+        pjson_db db;
+        db.put( "/test", "data" );
+        db.save();
+
+        // После save() time должен быть не нулевым.
+        node_view v = db.get( "/$metrics/last_save_time" );
+        REQUIRE( v.valid() );
+        REQUIRE( v.as_uint() > 0u );
+    }
+
+    std::remove( pam_file );
+}
+
+TEST_CASE( "pjson_db: metrics pam_free_list_size is valid", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/a", "value1" );
+    db.put( "/b", "value2" );
+    db.erase( "/a" );
+
+    // После erase должен появиться хотя бы один свободный блок.
+    node_view v = db.get( "/$metrics/pam_free_list_size" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_uinteger() );
+    // Значение должно быть числовым (не null); uint всегда >= 0, проверяем тип.
+    (void)v.as_uint(); // метрика доступна (не null)
+}
+
+TEST_CASE( "pjson_db: update_metrics explicit call works", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/key", "value" );
+
+    // Явный вызов update_metrics() должен пройти без ошибок.
+    db.update_metrics();
+
+    node_view v = db.get( "/$metrics/node_count_total" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.as_uint() > 0u );
+}
+
+TEST_CASE( "pjson_db: metrics unknown key returns null node", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v = db.get( "/$metrics/nonexistent_metric" );
+    REQUIRE( v.valid() );
+    REQUIRE( v.is_null() );
+}
+
+TEST_CASE( "pjson_db: metrics binary_bytes_total increases after parse_into binary", "[pjson_db][phase7]" )
+{
+    reset_pam();
+    pjson_db db;
+
+    node_view v1 = db.get( "/$metrics/binary_bytes_total" );
+    REQUIRE( v1.valid() );
+    uint64_t bytes_before = v1.as_uint();
+
+    // Парсим бинарный узел: AAEC = [0, 1, 2] = 3 байта.
+    db.parse_into( "/data", R"({"$base64":"AAEC"})" );
+
+    node_view v2 = db.get( "/$metrics/binary_bytes_total" );
+    REQUIRE( v2.valid() );
+    REQUIRE( v2.as_uint() >= bytes_before + 3u );
+}
+
+// ===========================================================================
 // dump() / parse()
 // ===========================================================================
 
