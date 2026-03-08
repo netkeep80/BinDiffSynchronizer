@@ -73,11 +73,11 @@ static void demo_nested_objects( pjson_db& db )
 
     // Создаём вложенную структуру через parse_into().
     db.parse_into( "/users/alice", R"({"age": 30, "active": true})" );
-    db.parse_into( "/users/bob",   R"({"age": 25, "active": false})" );
-    db.parse_into( "/tags",        R"(["persistent", "header-only", "c++17"])" );
+    db.parse_into( "/users/bob", R"({"age": 25, "active": false})" );
+    db.parse_into( "/tags", R"(["persistent", "header-only", "c++17"])" );
 
     // Чтение вложенных полей.
-    int64_t alice_age = db.get( "/users/alice/age" ).as_int();
+    int64_t alice_age  = db.get( "/users/alice/age" ).as_int();
     bool    bob_active = db.get( "/users/bob/active" ).as_bool();
 
     std::printf( "users.alice.age   = %lld\n", static_cast<long long>( alice_age ) );
@@ -124,9 +124,7 @@ static void demo_ref( pjson_db& db )
     // Чтение без разыменования: get(..., deref_ref=false).
     node_view ref_node = db.get( "/config/timeout", /*deref_refs=*/false );
     std::printf( "config.timeout (raw ref) is_ref = %s\n", ref_node.is_ref() ? "true" : "false" );
-    std::printf( "ref path = \"%.*s\"\n",
-                 static_cast<int>( ref_node.ref_path().size() ),
-                 ref_node.ref_path().data() );
+    std::printf( "ref path = \"%.*s\"\n", static_cast<int>( ref_node.ref_path().size() ), ref_node.ref_path().data() );
 
     // Явное разыменование через resolve_ref().
     node_view resolved = db.resolve_ref( ref_node.id );
@@ -161,16 +159,16 @@ static void demo_metrics( pjson_db& db )
 {
     print_separator( "Демо 5: персистные метрики (/$metrics)" );
 
-    uint64_t node_count  = db.get( "/$metrics/node_count_total" ).as_uint();
-    uint64_t str_count   = db.get( "/$metrics/string_count_total" ).as_uint();
-    uint64_t ref_cnt     = db.get( "/$metrics/ref_count" ).as_uint();
-    uint64_t arr_cnt     = db.get( "/$metrics/array_count" ).as_uint();
-    uint64_t obj_cnt     = db.get( "/$metrics/object_count" ).as_uint();
-    uint64_t bin_bytes   = db.get( "/$metrics/binary_bytes_total" ).as_uint();
-    uint64_t bump        = db.get( "/$metrics/pam_bump_offset" ).as_uint();
-    uint64_t total_size  = db.get( "/$metrics/pam_total_size" ).as_uint();
-    uint64_t slot_cnt    = db.get( "/$metrics/pam_slot_count" ).as_uint();
-    uint64_t named_cnt   = db.get( "/$metrics/pam_named_count" ).as_uint();
+    uint64_t node_count = db.get( "/$metrics/node_count_total" ).as_uint();
+    uint64_t str_count  = db.get( "/$metrics/string_count_total" ).as_uint();
+    uint64_t ref_cnt    = db.get( "/$metrics/ref_count" ).as_uint();
+    uint64_t arr_cnt    = db.get( "/$metrics/array_count" ).as_uint();
+    uint64_t obj_cnt    = db.get( "/$metrics/object_count" ).as_uint();
+    uint64_t bin_bytes  = db.get( "/$metrics/binary_bytes_total" ).as_uint();
+    uint64_t bump       = db.get( "/$metrics/pam_bump_offset" ).as_uint();
+    uint64_t total_size = db.get( "/$metrics/pam_total_size" ).as_uint();
+    uint64_t slot_cnt   = db.get( "/$metrics/pam_slot_count" ).as_uint();
+    uint64_t named_cnt  = db.get( "/$metrics/pam_named_count" ).as_uint();
 
     std::printf( "node_count_total   = %llu\n", static_cast<unsigned long long>( node_count ) );
     std::printf( "string_count_total = %llu\n", static_cast<unsigned long long>( str_count ) );
@@ -197,25 +195,22 @@ static void demo_hierarchical( pjson_db& db )
     print_separator( "Демо 6: иерархический интерфейс (Фаза 8)" );
 
     // insert() — вставка/перезапись JSON-значения по пути.
-    db.insert( "/employees/1/name",   "\"Иван Петров\"" );
-    db.insert( "/employees/1/dept",   "\"Разработка\"" );
+    db.insert( "/employees/1/name", "\"Иван Петров\"" );
+    db.insert( "/employees/1/dept", "\"Разработка\"" );
     db.insert( "/employees/1/salary", "120000" );
-    db.insert( "/employees/2/name",   "\"Мария Сидорова\"" );
-    db.insert( "/employees/2/dept",   "\"Маркетинг\"" );
+    db.insert( "/employees/2/name", "\"Мария Сидорова\"" );
+    db.insert( "/employees/2/dept", "\"Маркетинг\"" );
     db.insert( "/employees/2/salary", "95000" );
 
     // find() — поиск без создания нового узла, без разыменования ref.
     node_view found = db.find( "/employees/1/name" );
-    std::printf( "find(\"/employees/1/name\") = \"%.*s\"\n",
-                 static_cast<int>( found.as_string().size() ),
+    std::printf( "find(\"/employees/1/name\") = \"%.*s\"\n", static_cast<int>( found.as_string().size() ),
                  found.as_string().data() );
-    std::printf( "find(\"/nonexistent\").valid() = %s\n",
-                 db.find( "/nonexistent" ).valid() ? "true" : "false" );
+    std::printf( "find(\"/nonexistent\").valid() = %s\n", db.find( "/nonexistent" ).valid() ? "true" : "false" );
 
     // operator[] — доступ по пути, создаёт null-узел если не существует.
     node_view existing = db["/employees/1/dept"];
-    std::printf( "operator[](\"/employees/1/dept\") = \"%.*s\"\n",
-                 static_cast<int>( existing.as_string().size() ),
+    std::printf( "operator[](\"/employees/1/dept\") = \"%.*s\"\n", static_cast<int>( existing.as_string().size() ),
                  existing.as_string().data() );
 }
 
@@ -255,12 +250,10 @@ static void demo_erase_and_resolve( pjson_db& db )
 
     // Создаём узел и удаляем его.
     db.put( "/temp/value", static_cast<int64_t>( 42 ) );
-    std::printf( "exists(\"/temp/value\") before erase = %s\n",
-                 db.exists( "/temp/value" ) ? "true" : "false" );
+    std::printf( "exists(\"/temp/value\") before erase = %s\n", db.exists( "/temp/value" ) ? "true" : "false" );
 
     db.erase( "/temp/value" );
-    std::printf( "exists(\"/temp/value\") after erase  = %s\n",
-                 db.exists( "/temp/value" ) ? "true" : "false" );
+    std::printf( "exists(\"/temp/value\") after erase  = %s\n", db.exists( "/temp/value" ) ? "true" : "false" );
 
     // resolve_all_refs() — разрешает все $ref-узлы в дереве (полезно после загрузки образа).
     db.resolve_all_refs();
