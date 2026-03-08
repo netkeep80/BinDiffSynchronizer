@@ -43,7 +43,7 @@ static constexpr const char* PJSON_DB_ROOT_NAME = "pjson_db.root";
 ///   db.save();
 class pjson_db
 {
-public:
+  public:
     // -----------------------------------------------------------------------
     // Открытие/создание БД (Задача 6.1)
     // -----------------------------------------------------------------------
@@ -72,16 +72,10 @@ public:
     // -----------------------------------------------------------------------
 
     /// Получить node_id корневого узла.
-    node_id root_id() const
-    {
-        return _find_root();
-    }
+    node_id root_id() const { return _find_root(); }
 
     /// Получить node_view корневого узла.
-    node_view root() const
-    {
-        return node_view{ _find_root() };
-    }
+    node_view root() const { return node_view{ _find_root() }; }
 
     // -----------------------------------------------------------------------
     // Path-адресация: get (Задача 6.3)
@@ -148,8 +142,8 @@ public:
             else if ( cur_v.is_array() )
             {
                 // Интерпретируем сегмент как числовой индекс.
-                char* end_ptr = nullptr;
-                uintptr_t idx = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );
+                char*     end_ptr = nullptr;
+                uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );
                 if ( end_ptr == seg.c_str() || *end_ptr != '\0' )
                     return node_view{};
                 node_view elem = cur_v.at( idx );
@@ -246,10 +240,7 @@ public:
     }
 
     /// Записать int-значение по пути path (удобная перегрузка для int).
-    bool put( const char* path, int value )
-    {
-        return put( path, static_cast<int64_t>( value ) );
-    }
+    bool put( const char* path, int value ) { return put( path, static_cast<int64_t>( value ) ); }
 
     /// Записать ref-узел по пути path (указатель на другой путь).
     bool put_ref( const char* path, const char* ref_path )
@@ -374,16 +365,10 @@ public:
     // -----------------------------------------------------------------------
 
     /// Сериализовать узел в JSON-строку.
-    std::string dump( node_id id ) const
-    {
-        return node_to_string( id );
-    }
+    std::string dump( node_id id ) const { return node_to_string( id ); }
 
     /// Сериализовать весь граф от корневого узла.
-    std::string dump() const
-    {
-        return node_to_string( _find_root() );
-    }
+    std::string dump() const { return node_to_string( _find_root() ); }
 
     /// Разобрать JSON-строку и записать в корень БД.
     bool parse( const char* json )
@@ -399,10 +384,7 @@ public:
     // -----------------------------------------------------------------------
 
     /// Сохранить образ ПАП в файл.
-    void save()
-    {
-        PersistentAddressSpace::Get().Save();
-    }
+    void save() { PersistentAddressSpace::Get().Save(); }
 
     // -----------------------------------------------------------------------
     // Метрики (Задача 6.1 / Фаза 7 — базовая реализация)
@@ -430,31 +412,22 @@ public:
     }
 
     /// Получить все интернированные строки словаря.
-    std::vector<pstringview_search_result> all_strings() const
-    {
-        return pam_all_strings();
-    }
+    std::vector<pstringview_search_result> all_strings() const { return pam_all_strings(); }
 
     // -----------------------------------------------------------------------
     // Доступ к ПАП напрямую
     // -----------------------------------------------------------------------
 
     /// Получить ссылку на персистный адресный менеджер.
-    PersistentAddressSpace& pam() const
-    {
-        return PersistentAddressSpace::Get();
-    }
+    PersistentAddressSpace& pam() const { return PersistentAddressSpace::Get(); }
 
-private:
+  private:
     // -----------------------------------------------------------------------
     // Вспомогательные методы: пул и корень
     // -----------------------------------------------------------------------
 
     /// Получить смещение пула узлов (или 0 если не создан).
-    uintptr_t _find_pool_offset() const
-    {
-        return PersistentAddressSpace::Get().Find( PJSON_DB_POOL_NAME );
-    }
+    uintptr_t _find_pool_offset() const { return PersistentAddressSpace::Get().Find( PJSON_DB_POOL_NAME ); }
 
     /// Получить указатель на пул (или nullptr).
     pjson_pool* _get_pool() const
@@ -474,8 +447,8 @@ private:
         pool.New( PJSON_DB_POOL_NAME );
         // После New пул инициализирован нулями (конструктор = default).
         // Инициализируем поля пула вручную.
-        auto& pam = PersistentAddressSpace::Get();
-        pjson_pool* p = pam.Resolve<pjson_pool>( pam.Find( PJSON_DB_POOL_NAME ) );
+        auto&       pam = PersistentAddressSpace::Get();
+        pjson_pool* p   = pam.Resolve<pjson_pool>( pam.Find( PJSON_DB_POOL_NAME ) );
         if ( p != nullptr )
         {
             p->nodes_size_     = 0;
@@ -874,8 +847,8 @@ private:
             return false; // ключ не найден
 
         // Сдвигаем элементы влево, удаляя запись del_idx.
-        uintptr_t      data_off = n->object_val.data_off;
-        object_entry*  entries  = pam.Resolve<object_entry>( data_off );
+        uintptr_t     data_off = n->object_val.data_off;
+        object_entry* entries  = pam.Resolve<object_entry>( data_off );
         if ( entries == nullptr )
             return false;
         for ( uintptr_t i = del_idx; i + 1 < sz; ++i )
@@ -903,8 +876,8 @@ private:
         if ( idx >= sz )
             return false;
 
-        uintptr_t  data_off = n->array_val.data_off;
-        node_id*   arr      = pam.Resolve<node_id>( data_off );
+        uintptr_t data_off = n->array_val.data_off;
+        node_id*  arr      = pam.Resolve<node_id>( data_off );
         if ( arr == nullptr )
             return false;
 

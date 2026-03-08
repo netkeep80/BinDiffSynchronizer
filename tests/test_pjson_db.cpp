@@ -39,7 +39,7 @@ static void reset_pam()
 TEST_CASE( "pjson_db: default constructor creates root object", "[pjson_db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db  db;
     node_view root = db.root();
     REQUIRE( root.valid() );
     REQUIRE( root.is_object() );
@@ -178,7 +178,7 @@ TEST_CASE( "pjson_db: put multiple nested keys", "[pjson_db]" )
 TEST_CASE( "pjson_db: get returns invalid view for missing path", "[pjson_db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db  db;
     node_view v = db.get( "/nonexistent/path" );
     REQUIRE( !v.valid() );
 }
@@ -492,7 +492,7 @@ TEST_CASE( "pjson_db: all_strings returns non-empty list after puts", "[pjson_db
 
 TEST_CASE( "pjson_db: save and reload preserves data", "[pjson_db]" )
 {
-    const char* pam_file = "/tmp/test_pjson_db_persist.pam";
+    const char* pam_file = "./test_pjson_db_persist.pam";
 
     // Создаём и заполняем БД.
     {
@@ -510,7 +510,7 @@ TEST_CASE( "pjson_db: save and reload preserves data", "[pjson_db]" )
         pstringview_manager::reset();
         PersistentAddressSpace::Get().Reset();
         PersistentAddressSpace::Init( pam_file );
-        pjson_db db;
+        pjson_db  db;
         node_view greeting = db.get( "/greeting" );
         REQUIRE( greeting.is_string() );
         REQUIRE( greeting.as_string() == "hello" );
