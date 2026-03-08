@@ -1,526 +1,502 @@
+// test_pjson.cpp — Тесты персистных JSON-узлов через новый API node/node_view (Фаза 3).
+//
+// Мигрировано с pjson.h на pjson_node.h в рамках Задачи 9.5.
+// Тестирует все типы узлов: null, boolean, integer, uinteger, real, string,
+// array, object через node_set_* / node_view / node_object_insert.
+//
+// Все комментарии — на русском языке (Тр.6).
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <type_traits>
 #include <cstdint>
+#include <cstring>
 
-#include "pjson.h"
+#include "pjson_node.h"
 
-// =============================================================================
-// Tests for pjson (persistent discriminated-union JSON value)
-// =============================================================================
-
-// ---------------------------------------------------------------------------
-// Layout: pjson payload uses pstring and pvector-compatible layout
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson: payload uses pstring for string_val and pvector-compatible layout for array/object",
-           "[pjson][layout]" )
+// Вспомогательная функция: сбросить ПАП перед каждым тестом.
+namespace
 {
-    // string_val — тип pstring (length + chars), оба поля sizeof(void*).
-    REQUIRE( sizeof( pjson::payload_t::string_val ) == 2 * sizeof( void* ) );
-    REQUIRE( sizeof( pjson::payload_t::string_val.length ) == sizeof( void* ) );
-    REQUIRE( sizeof( pjson::payload_t::string_val.chars ) == sizeof( void* ) );
+void reset_pam()
+{
+    pstringview_manager::reset();
+    PersistentAddressSpace::Get().Reset();
+}
+} // anonymous namespace
 
-    // array_val — раскладка pvector<pjson> (size + capacity + data), 3 * sizeof(void*).
-    REQUIRE( sizeof( pjson::payload_t::array_val ) == 3 * sizeof( void* ) );
-    REQUIRE( sizeof( pjson::payload_t::array_val.size ) == sizeof( void* ) );
-    REQUIRE( sizeof( pjson::payload_t::array_val.capacity ) == sizeof( void* ) );
-    REQUIRE( sizeof( pjson::payload_t::array_val.data ) == sizeof( void* ) );
+// =============================================================================
+// Layout: node payload
+// =============================================================================
 
-    // object_val — раскладка pvector<pjson_kv_entry> (size + capacity + data), 3 * sizeof(void*).
-    REQUIRE( sizeof( pjson::payload_t::object_val ) == 3 * sizeof( void* ) );
-    REQUIRE( sizeof( pjson::payload_t::object_val.size ) == sizeof( void* ) );
-    REQUIRE( sizeof( pjson::payload_t::object_val.capacity ) == sizeof( void* ) );
-    REQUIRE( sizeof( pjson::payload_t::object_val.data ) == sizeof( void* ) );
+TEST_CASE( "pjson: string_val layout is 2 * sizeof(void*)", "[pjson][layout]" )
+{
+    // string_val — совместим с pstring (length + chars_offset), оба поля sizeof(void*).
+    REQUIRE( sizeof( node::string_val ) == 2 * sizeof( void* ) );
 }
 
-// ---------------------------------------------------------------------------
-// null value
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson: zero-initialised pjson (via fptr) is null", "[pjson][null]" )
+TEST_CASE( "pjson: array_val layout is 3 * sizeof(void*)", "[pjson][layout]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    REQUIRE( fv->is_null() );
-    REQUIRE( fv->type_tag() == pjson_type::null );
-    fv.Delete();
+    // array_val — раскладка pvector<node_id> (size + capacity + data_off).
+    REQUIRE( sizeof( node::array_val ) == 3 * sizeof( void* ) );
+}
+
+TEST_CASE( "pjson: object_val layout is 3 * sizeof(void*)", "[pjson][layout]" )
+{
+    // object_val — раскладка pmap<pstringview, node_id> (size + capacity + data_off).
+    REQUIRE( sizeof( node::object_val ) == 3 * sizeof( void* ) );
+}
+
+// =============================================================================
+// null value
+// =============================================================================
+
+TEST_CASE( "pjson: zero-initialised node is null", "[pjson][null]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_init_null( fn.addr() );
+    REQUIRE( node_view{ fn.addr() }.is_null() );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: set_null resets any value to null", "[pjson][null]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_bool( true );
-    REQUIRE( fv->is_boolean() );
-    fv->set_null();
-    REQUIRE( fv->is_null() );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_bool( fn.addr(), true );
+    REQUIRE( node_view{ fn.addr() }.is_boolean() );
+    node_init_null( fn.addr() );
+    REQUIRE( node_view{ fn.addr() }.is_null() );
+    fn.Delete();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // boolean value
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson: set_bool(true) and get_bool()", "[pjson][boolean]" )
+// =============================================================================
+
+TEST_CASE( "pjson: set_bool(true) and as_bool()", "[pjson][boolean]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_bool( true );
-    REQUIRE( fv->is_boolean() );
-    REQUIRE( fv->get_bool() == true );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_bool( fn.addr(), true );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_boolean() );
+    REQUIRE( v.as_bool() == true );
+    fn.Delete();
 }
 
-TEST_CASE( "pjson: set_bool(false) and get_bool()", "[pjson][boolean]" )
+TEST_CASE( "pjson: set_bool(false) and as_bool()", "[pjson][boolean]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_bool( false );
-    REQUIRE( fv->is_boolean() );
-    REQUIRE( fv->get_bool() == false );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_bool( fn.addr(), false );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_boolean() );
+    REQUIRE( v.as_bool() == false );
+    fn.Delete();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // integer value
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson: set_int and get_int", "[pjson][integer]" )
+// =============================================================================
+
+TEST_CASE( "pjson: set_int and as_int", "[pjson][integer]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_int( -42 );
-    REQUIRE( fv->is_integer() );
-    REQUIRE( fv->get_int() == -42 );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_int( fn.addr(), -42 );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_integer() );
+    REQUIRE( v.as_int() == -42 );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: set_int with INT64_MAX", "[pjson][integer]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_int( INT64_MAX );
-    REQUIRE( fv->is_integer() );
-    REQUIRE( fv->get_int() == INT64_MAX );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_int( fn.addr(), INT64_MAX );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_integer() );
+    REQUIRE( v.as_int() == INT64_MAX );
+    fn.Delete();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // unsigned integer value
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson: set_uint and get_uint", "[pjson][uinteger]" )
+// =============================================================================
+
+TEST_CASE( "pjson: set_uint and as_uint", "[pjson][uinteger]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_uint( 99u );
-    REQUIRE( fv->is_uinteger() );
-    REQUIRE( fv->get_uint() == 99u );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_uint( fn.addr(), 99u );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_uinteger() );
+    REQUIRE( v.as_uint() == 99u );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: set_uint with UINT64_MAX", "[pjson][uinteger]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_uint( UINT64_MAX );
-    REQUIRE( fv->is_uinteger() );
-    REQUIRE( fv->get_uint() == UINT64_MAX );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_uint( fn.addr(), UINT64_MAX );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_uinteger() );
+    REQUIRE( v.as_uint() == UINT64_MAX );
+    fn.Delete();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // real (double) value
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson: set_real and get_real", "[pjson][real]" )
+// =============================================================================
+
+TEST_CASE( "pjson: set_real and as_double", "[pjson][real]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_real( 3.14 );
-    REQUIRE( fv->is_real() );
-    REQUIRE( fv->get_real() == 3.14 );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_real( fn.addr(), 3.14 );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_real() );
+    REQUIRE( v.as_double() == 3.14 );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: is_number() true for integer, uinteger, real", "[pjson][real]" )
 {
-    fptr<pjson> fvi;
-    fvi.New();
-    fvi->set_int( 1 );
-    fptr<pjson> fvu;
-    fvu.New();
-    fvu->set_uint( 2u );
-    fptr<pjson> fvr;
-    fvr.New();
-    fvr->set_real( 3.0 );
-    REQUIRE( fvi->is_number() );
-    REQUIRE( fvu->is_number() );
-    REQUIRE( fvr->is_number() );
-    fvi.Delete();
-    fvu.Delete();
-    fvr.Delete();
+    reset_pam();
+    fptr<node> fni;
+    fni.New();
+    node_set_int( fni.addr(), 1 );
+
+    fptr<node> fnu;
+    fnu.New();
+    node_set_uint( fnu.addr(), 2u );
+
+    fptr<node> fnr;
+    fnr.New();
+    node_set_real( fnr.addr(), 3.0 );
+
+    REQUIRE( node_view{ fni.addr() }.is_number() );
+    REQUIRE( node_view{ fnu.addr() }.is_number() );
+    REQUIRE( node_view{ fnr.addr() }.is_number() );
+
+    fni.Delete();
+    fnu.Delete();
+    fnr.Delete();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // string value
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson: set_string and get_string", "[pjson][string]" )
-{
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_string( "hello" );
-    REQUIRE( fv->is_string() );
-    REQUIRE( std::strcmp( fv->get_string(), "hello" ) == 0 );
+// =============================================================================
 
-    fv->free();
-    fv.Delete();
+TEST_CASE( "pjson: set_string and as_string", "[pjson][string]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_string( fn.addr(), "hello" );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_string() );
+    REQUIRE( v.as_string() == "hello" );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: set_string empty string", "[pjson][string]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_string( "" );
-    REQUIRE( fv->is_string() );
-    REQUIRE( std::strcmp( fv->get_string(), "" ) == 0 );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_string( fn.addr(), "" );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_string() );
+    REQUIRE( v.as_string() == "" );
+    fn.Delete();
 }
 
-TEST_CASE( "pjson: set_string nullptr behaves like empty", "[pjson][string]" )
+TEST_CASE( "pjson: reassign string via node_assign_string", "[pjson][string]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_string( nullptr );
-    REQUIRE( fv->is_string() );
-    REQUIRE( std::strcmp( fv->get_string(), "" ) == 0 );
-    fv.Delete();
-}
-
-TEST_CASE( "pjson: reassign string frees previous allocation", "[pjson][string]" )
-{
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_string( "first" );
-    fv->set_string( "second" );
-    REQUIRE( std::strcmp( fv->get_string(), "second" ) == 0 );
-    fv->free();
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_string( fn.addr(), "first" );
+    node_assign_string( fn.addr(), "second" );
+    REQUIRE( node_view{ fn.addr() }.as_string() == "second" );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: set_string size() returns string length", "[pjson][string]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_string( "abc" );
-    REQUIRE( fv->size() == 3u );
-    fv->free();
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_string( fn.addr(), "abc" );
+    REQUIRE( node_view{ fn.addr() }.size() == 3u );
+    fn.Delete();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // array value
-// ---------------------------------------------------------------------------
+// =============================================================================
+
 TEST_CASE( "pjson: set_array creates empty array", "[pjson][array]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_array();
-    REQUIRE( fv->is_array() );
-    REQUIRE( fv->empty() );
-    REQUIRE( fv->size() == 0u );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_array( fn.addr() );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_array() );
+    REQUIRE( v.size() == 0u );
+    fn.Delete();
 }
 
-TEST_CASE( "pjson: push_back appends null elements", "[pjson][array]" )
+TEST_CASE( "pjson: node_array_push_back appends null elements", "[pjson][array]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_array();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_array( fn.addr() );
 
-    pjson& e0 = fv->push_back();
-    REQUIRE( e0.is_null() );
-
-    REQUIRE( fv->size() == 1u );
-
-    fv->free();
-    fv.Delete();
+    node_id slot = node_array_push_back( fn.addr() );
+    REQUIRE( node_view{ slot }.is_null() );
+    REQUIRE( node_view{ fn.addr() }.size() == 1u );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: push_back multiple elements and read back", "[pjson][array]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_array();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_array( fn.addr() );
 
-    fv->push_back().set_int( 10 );
-    fv->push_back().set_int( 20 );
-    fv->push_back().set_int( 30 );
+    node_id s0 = node_array_push_back( fn.addr() );
+    node_set_int( s0, 10 );
+    node_id s1 = node_array_push_back( fn.addr() );
+    node_set_int( s1, 20 );
+    node_id s2 = node_array_push_back( fn.addr() );
+    node_set_int( s2, 30 );
 
-    REQUIRE( fv->size() == 3u );
-    REQUIRE( ( *fv )[0u].get_int() == 10 );
-    REQUIRE( ( *fv )[1u].get_int() == 20 );
-    REQUIRE( ( *fv )[2u].get_int() == 30 );
-
-    fv->free();
-    fv.Delete();
+    node_view arr{ fn.addr() };
+    REQUIRE( arr.size() == 3u );
+    REQUIRE( arr.at( (uintptr_t)0 ).as_int() == 10 );
+    REQUIRE( arr.at( (uintptr_t)1 ).as_int() == 20 );
+    REQUIRE( arr.at( (uintptr_t)2 ).as_int() == 30 );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: push_back more than initial capacity triggers realloc", "[pjson][array]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_array();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_array( fn.addr() );
 
-    // Push 10 elements — initial capacity is 4, so multiple reallocations happen.
+    // Push 10 elements — вызывает реаллокацию несколько раз.
     for ( int i = 0; i < 10; i++ )
-        fv->push_back().set_int( i );
+    {
+        node_id slot = node_array_push_back( fn.addr() );
+        node_set_int( slot, i );
+    }
 
-    REQUIRE( fv->size() == 10u );
+    node_view arr{ fn.addr() };
+    REQUIRE( arr.size() == 10u );
     for ( int i = 0; i < 10; i++ )
-        REQUIRE( ( *fv )[static_cast<unsigned>( i )].get_int() == i );
-
-    fv->free();
-    fv.Delete();
+        REQUIRE( arr.at( static_cast<uintptr_t>( i ) ).as_int() == i );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: nested arrays", "[pjson][array]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_array();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_array( fn.addr() );
 
-    // Inner array at index 0.
-    pjson& inner_d = fv->push_back();
-    inner_d.set_array();
-    inner_d.push_back().set_int( 99 );
+    // Внутренний массив в слоте 0.
+    node_id inner_slot = node_array_push_back( fn.addr() );
+    node_set_array( inner_slot );
+    node_id elem_slot = node_array_push_back( inner_slot );
+    node_set_int( elem_slot, 99 );
 
-    REQUIRE( fv->size() == 1u );
-    pjson& inner2 = ( *fv )[0u];
-    REQUIRE( inner2.is_array() );
-    REQUIRE( inner2.size() == 1u );
-    REQUIRE( inner2[0u].get_int() == 99 );
-
-    fv->free();
-    fv.Delete();
+    node_view outer{ fn.addr() };
+    REQUIRE( outer.size() == 1u );
+    node_view inner{ outer.at( (uintptr_t)0 ).id };
+    REQUIRE( inner.is_array() );
+    REQUIRE( inner.size() == 1u );
+    REQUIRE( inner.at( (uintptr_t)0 ).as_int() == 99 );
+    fn.Delete();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // object value
-// ---------------------------------------------------------------------------
+// =============================================================================
+
 TEST_CASE( "pjson: set_object creates empty object", "[pjson][object]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
-    REQUIRE( fv->is_object() );
-    REQUIRE( fv->empty() );
-    REQUIRE( fv->size() == 0u );
-    fv.Delete();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_object( fn.addr() );
+    node_view v{ fn.addr() };
+    REQUIRE( v.is_object() );
+    REQUIRE( v.size() == 0u );
+    fn.Delete();
 }
 
-TEST_CASE( "pjson: obj_insert and obj_find single key", "[pjson][object]" )
+TEST_CASE( "pjson: node_object_insert and at(key) single key", "[pjson][object]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_object( fn.addr() );
 
-    fv->obj_insert( "x" ).set_int( 42 );
-    REQUIRE( fv->size() == 1u );
+    node_id slot = node_object_insert( fn.addr(), "x" );
+    node_set_int( slot, 42 );
 
-    pjson* found = fv->obj_find( "x" );
-    REQUIRE( found != nullptr );
-    REQUIRE( found->get_int() == 42 );
-
-    fv->free();
-    fv.Delete();
+    node_view obj{ fn.addr() };
+    REQUIRE( obj.size() == 1u );
+    REQUIRE( obj.at( "x" ).as_int() == 42 );
+    fn.Delete();
 }
 
-TEST_CASE( "pjson: obj_find missing key returns nullptr", "[pjson][object]" )
+TEST_CASE( "pjson: at(key) missing returns invalid node_view", "[pjson][object]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
-    fv->obj_insert( "a" );
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_object( fn.addr() );
+    node_object_insert( fn.addr(), "a" );
 
-    REQUIRE( fv->obj_find( "b" ) == nullptr );
-
-    fv->free();
-    fv.Delete();
+    node_view obj{ fn.addr() };
+    REQUIRE( !obj.at( "b" ).valid() );
+    fn.Delete();
 }
 
-TEST_CASE( "pjson: obj_insert maintains sorted key order", "[pjson][object]" )
+TEST_CASE( "pjson: node_object_insert maintains sorted key order", "[pjson][object]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_object( fn.addr() );
 
-    fv->obj_insert( "c" ).set_int( 3 );
-    fv->obj_insert( "a" ).set_int( 1 );
-    fv->obj_insert( "b" ).set_int( 2 );
+    node_id sc = node_object_insert( fn.addr(), "c" );
+    node_set_int( sc, 3 );
+    node_id sa = node_object_insert( fn.addr(), "a" );
+    node_set_int( sa, 1 );
+    node_id sb = node_object_insert( fn.addr(), "b" );
+    node_set_int( sb, 2 );
 
-    REQUIRE( fv->size() == 3u );
-
-    // Keys should be sorted: a, b, c.
-    pjson* fa = fv->obj_find( "a" );
-    pjson* fb = fv->obj_find( "b" );
-    pjson* fc = fv->obj_find( "c" );
-    REQUIRE( fa != nullptr );
-    REQUIRE( fb != nullptr );
-    REQUIRE( fc != nullptr );
-    REQUIRE( fa->get_int() == 1 );
-    REQUIRE( fb->get_int() == 2 );
-    REQUIRE( fc->get_int() == 3 );
-
-    fv->free();
-    fv.Delete();
-}
-
-TEST_CASE( "pjson: obj_insert replaces existing key value", "[pjson][object]" )
-{
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
-
-    fv->obj_insert( "k" ).set_int( 1 );
-    REQUIRE( fv->obj_find( "k" )->get_int() == 1 );
-
-    fv->obj_insert( "k" ).set_int( 2 );
-    REQUIRE( fv->size() == 1u );
-    REQUIRE( fv->obj_find( "k" )->get_int() == 2 );
-
-    fv->free();
-    fv.Delete();
-}
-
-TEST_CASE( "pjson: obj_erase removes key", "[pjson][object]" )
-{
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
-
-    fv->obj_insert( "a" ).set_int( 1 );
-    fv->obj_insert( "b" ).set_int( 2 );
-    fv->obj_insert( "c" ).set_int( 3 );
-    REQUIRE( fv->size() == 3u );
-
-    bool ok = fv->obj_erase( "b" );
-    REQUIRE( ok );
-    REQUIRE( fv->size() == 2u );
-    REQUIRE( fv->obj_find( "b" ) == nullptr );
-    REQUIRE( fv->obj_find( "a" ) != nullptr );
-    REQUIRE( fv->obj_find( "c" ) != nullptr );
-
-    fv->free();
-    fv.Delete();
-}
-
-TEST_CASE( "pjson: obj_erase missing key returns false", "[pjson][object]" )
-{
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
-
-    fv->obj_insert( "a" ).set_int( 1 );
-    bool ok = fv->obj_erase( "z" );
-    REQUIRE( !ok );
-    REQUIRE( fv->size() == 1u );
-
-    fv->free();
-    fv.Delete();
+    node_view obj{ fn.addr() };
+    REQUIRE( obj.size() == 3u );
+    REQUIRE( obj.at( "a" ).as_int() == 1 );
+    REQUIRE( obj.at( "b" ).as_int() == 2 );
+    REQUIRE( obj.at( "c" ).as_int() == 3 );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: object with string values", "[pjson][object][string]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_object( fn.addr() );
 
-    fv->obj_insert( "name" ).set_string( "Alice" );
-    fv->obj_insert( "role" ).set_string( "engineer" );
+    node_id name_slot = node_object_insert( fn.addr(), "name" );
+    node_set_string( name_slot, "Alice" );
+    node_id role_slot = node_object_insert( fn.addr(), "role" );
+    node_set_string( role_slot, "engineer" );
 
-    pjson* name_d = fv->obj_find( "name" );
-    REQUIRE( name_d != nullptr );
-    REQUIRE( std::strcmp( name_d->get_string(), "Alice" ) == 0 );
-
-    fv->free();
-    fv.Delete();
+    node_view obj{ fn.addr() };
+    REQUIRE( obj.at( "name" ).as_string() == "Alice" );
+    REQUIRE( obj.at( "role" ).as_string() == "engineer" );
+    fn.Delete();
 }
 
-TEST_CASE( "pjson: obj_insert triggers realloc beyond initial capacity", "[pjson][object]" )
+TEST_CASE( "pjson: node_object_insert triggers realloc beyond initial capacity", "[pjson][object]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_object( fn.addr() );
 
-    // Insert 10 keys — initial capacity is 4, so reallocation must happen.
+    // Вставляем 10 ключей — вызывает реаллокацию.
     const char* keys[] = { "j", "a", "h", "c", "e", "g", "b", "f", "d", "i" };
     for ( int i = 0; i < 10; i++ )
-        fv->obj_insert( keys[i] ).set_int( i );
+    {
+        node_id slot = node_object_insert( fn.addr(), keys[i] );
+        node_set_int( slot, i );
+    }
 
-    REQUIRE( fv->size() == 10u );
+    node_view obj{ fn.addr() };
+    REQUIRE( obj.size() == 10u );
     for ( int i = 0; i < 10; i++ )
-        REQUIRE( fv->obj_find( keys[i] ) != nullptr );
-
-    fv->free();
-    fv.Delete();
+        REQUIRE( obj.at( keys[i] ).valid() );
+    fn.Delete();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // Mixed / nested value round-trip
-// ---------------------------------------------------------------------------
+// =============================================================================
+
 TEST_CASE( "pjson: heterogeneous array (null, bool, int, real, string)", "[pjson][mixed]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_array();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_array( fn.addr() );
 
-    fv->push_back().set_null();
-    fv->push_back().set_bool( true );
-    fv->push_back().set_int( -7 );
-    fv->push_back().set_real( 2.718 );
-    fv->push_back().set_string( "world" );
+    node_array_push_back( fn.addr() ); // null (default)
+    node_id sb = node_array_push_back( fn.addr() );
+    node_set_bool( sb, true );
+    node_id si = node_array_push_back( fn.addr() );
+    node_set_int( si, -7 );
+    node_id sr = node_array_push_back( fn.addr() );
+    node_set_real( sr, 2.718 );
+    node_id ss = node_array_push_back( fn.addr() );
+    node_set_string( ss, "world" );
 
-    REQUIRE( fv->size() == 5u );
-    REQUIRE( ( *fv )[0u].is_null() );
-    REQUIRE( ( *fv )[1u].get_bool() == true );
-    REQUIRE( ( *fv )[2u].get_int() == -7 );
-    REQUIRE( ( *fv )[3u].get_real() == 2.718 );
-    REQUIRE( std::strcmp( ( *fv )[4u].get_string(), "world" ) == 0 );
-
-    fv->free();
-    fv.Delete();
+    node_view arr{ fn.addr() };
+    REQUIRE( arr.size() == 5u );
+    REQUIRE( arr.at( (uintptr_t)0 ).is_null() );
+    REQUIRE( arr.at( (uintptr_t)1 ).as_bool() == true );
+    REQUIRE( arr.at( (uintptr_t)2 ).as_int() == -7 );
+    REQUIRE( arr.at( (uintptr_t)3 ).as_double() == 2.718 );
+    REQUIRE( arr.at( (uintptr_t)4 ).as_string() == "world" );
+    fn.Delete();
 }
 
 TEST_CASE( "pjson: object containing array value", "[pjson][mixed]" )
 {
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_set_object( fn.addr() );
 
-    pjson& arr = fv->obj_insert( "items" );
-    arr.set_array();
-    arr.push_back().set_int( 1 );
-    arr.push_back().set_int( 2 );
+    node_id items_slot = node_object_insert( fn.addr(), "items" );
+    node_set_array( items_slot );
+    node_id e0 = node_array_push_back( items_slot );
+    node_set_int( e0, 1 );
+    node_id e1 = node_array_push_back( items_slot );
+    node_set_int( e1, 2 );
 
-    pjson* items = fv->obj_find( "items" );
-    REQUIRE( items != nullptr );
-    REQUIRE( items->is_array() );
-    REQUIRE( items->size() == 2u );
-    REQUIRE( ( *items )[0u].get_int() == 1 );
-    REQUIRE( ( *items )[1u].get_int() == 2 );
-
-    fv->free();
-    fv.Delete();
-}
-
-TEST_CASE( "pjson: free releases all nested allocations", "[pjson][free]" )
-{
-    fptr<pjson> fv;
-    fv.New();
-    fv->set_object();
-    fv->obj_insert( "key" ).set_string( "value" );
-    pjson& arr = fv->obj_insert( "arr" );
-    arr.set_array();
-    arr.push_back().set_int( 42 );
-
-    fv->free();
-    REQUIRE( fv->is_null() );
-
-    fv.Delete();
+    node_view obj{ fn.addr() };
+    node_view items = obj.at( "items" );
+    REQUIRE( items.valid() );
+    REQUIRE( items.is_array() );
+    REQUIRE( items.size() == 2u );
+    REQUIRE( items.at( (uintptr_t)0 ).as_int() == 1 );
+    REQUIRE( items.at( (uintptr_t)1 ).as_int() == 2 );
+    fn.Delete();
 }

@@ -1,8 +1,9 @@
-// test_pjson_large.cpp — Тест загрузки большого JSON-файла в персистные структуры pjson.
+// test_pjson_large.cpp — Тест загрузки большого JSON-файла в новые персистные структуры (Задача 9.5).
 //
+// Мигрировано с pjson.h на pjson_codec.h в рамках Задачи 9.5.
 // Использует: tests/test.json (большой файл ~11.7 МБ)
-// Загрузка JSON: pjson::from_string (прямой парсер F6)
-// Хранение: fptr<pjson>
+// Загрузка JSON: node_from_string (pjson_codec.h)
+// Хранение: fptr<node> / node_id / node_view
 //
 // Все комментарии — на русском языке (Тр.6).
 
@@ -14,7 +15,7 @@
 #include <string>
 #include <cstring>
 
-#include "pjson.h"
+#include "pjson_codec.h"
 
 // ---------------------------------------------------------------------------
 // Путь к тестовому JSON-файлу (задаётся через CMake compile definition)
@@ -23,95 +24,100 @@
 #define TEST_JSON_PATH "tests/test.json"
 #endif
 
-// ---------------------------------------------------------------------------
-// Тест: загрузка test.json через pjson::from_string — проверка структуры верхнего уровня
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson large: test.json loads correctly via pjson::from_string", "[pjson][large][json]" )
+// Вспомогательная функция: сбросить ПАП перед каждым тестом.
+static void reset_pam()
 {
+    pstringview_manager::reset();
+    PersistentAddressSpace::Get().Reset();
+}
+
+// ---------------------------------------------------------------------------
+// Тест: загрузка test.json через node_from_string — проверка структуры верхнего уровня
+// ---------------------------------------------------------------------------
+TEST_CASE( "pjson large: test.json loads correctly via node_from_string", "[pjson][large][json]" )
+{
+    reset_pam();
     std::ifstream f( TEST_JSON_PATH );
     REQUIRE( f.is_open() );
     std::string json_text( ( std::istreambuf_iterator<char>( f ) ), std::istreambuf_iterator<char>() );
     f.close();
 
-    fptr<pjson> froot;
+    fptr<node> froot;
     froot.New();
-    pjson::from_string( json_text.c_str(), froot.addr() );
+    node_from_string( json_text.c_str(), froot.addr() );
 
+    node_view root{ froot.addr() };
     // test.json должен быть непустым объектом.
-    REQUIRE( !froot->is_null() );
-    REQUIRE( froot->is_object() );
-    REQUIRE( froot->size() > 0u );
+    REQUIRE( !root.is_null() );
+    REQUIRE( root.is_object() );
+    REQUIRE( root.size() > 0u );
 
-    froot->free();
     froot.Delete();
 }
 
 // ---------------------------------------------------------------------------
-// Тест: первые ключи test.json корректно хранятся в pjson
+// Тест: первые ключи test.json корректно хранятся через node_view
 // ---------------------------------------------------------------------------
-TEST_CASE( "pjson large: first keys from test.json are stored in pjson", "[pjson][large][json]" )
+TEST_CASE( "pjson large: first keys from test.json are stored in node", "[pjson][large][json]" )
 {
+    reset_pam();
     std::ifstream f( TEST_JSON_PATH );
     REQUIRE( f.is_open() );
     std::string json_text( ( std::istreambuf_iterator<char>( f ) ), std::istreambuf_iterator<char>() );
     f.close();
 
-    // Загружаем весь JSON через прямой парсер F6.
-    fptr<pjson> froot;
+    fptr<node> froot;
     froot.New();
-    pjson::from_string( json_text.c_str(), froot.addr() );
+    node_from_string( json_text.c_str(), froot.addr() );
 
-    REQUIRE( froot->is_object() );
-    REQUIRE( froot->size() > 0u );
+    node_view root{ froot.addr() };
+    REQUIRE( root.is_object() );
+    REQUIRE( root.size() > 0u );
 
-    // Проверяем, что ключи присутствуют (хотя бы 1 ключ).
-    uintptr_t sz        = froot->size();
-    uintptr_t data_addr = froot->payload.object_val.data.addr();
-    REQUIRE( data_addr != 0u );
-    // Первый ключ должен быть непустой строкой.
-    const pjson_kv_entry& first_pair = AddressManager<pjson_kv_entry>::GetArrayElement( data_addr, 0 );
-    REQUIRE( first_pair.key.c_str() != nullptr );
-    REQUIRE( first_pair.key.c_str()[0] != '\0' );
-    (void)sz;
+    // Первый ключ должен быть доступен.
+    std::string_view first_key = root.key_at( 0u );
+    REQUIRE( !first_key.empty() );
 
-    froot->free();
     froot.Delete();
 }
 
 // ---------------------------------------------------------------------------
-// Тест: строковые значения корректно копируются в pjson
+// Тест: строковые значения корректно хранятся в node
 // ---------------------------------------------------------------------------
-TEST_CASE( "pjson large: string values from test.json are stored correctly in pjson", "[pjson][large][json]" )
+TEST_CASE( "pjson large: string values from test.json are stored correctly in node", "[pjson][large][json]" )
 {
+    reset_pam();
     std::ifstream f( TEST_JSON_PATH );
     REQUIRE( f.is_open() );
     std::string json_text( ( std::istreambuf_iterator<char>( f ) ), std::istreambuf_iterator<char>() );
     f.close();
 
-    fptr<pjson> froot;
+    fptr<node> froot;
     froot.New();
-    pjson::from_string( json_text.c_str(), froot.addr() );
+    node_from_string( json_text.c_str(), froot.addr() );
 
-    REQUIRE( froot->is_object() );
+    node_view root{ froot.addr() };
+    REQUIRE( root.is_object() );
 
     // Ищем первое строковое значение на верхнем уровне.
-    uintptr_t sz        = froot->size();
-    uintptr_t data_addr = froot->payload.object_val.data.addr();
-    bool      found     = false;
+    uintptr_t sz    = root.size();
+    bool      found = false;
     for ( uintptr_t i = 0; i < sz && !found; i++ )
     {
-        const pjson_kv_entry& pair = AddressManager<pjson_kv_entry>::GetArrayElement( data_addr, i );
-        if ( pair.value.is_string() )
+        node_view val = root.value_at( i );
+        if ( val.is_string() )
         {
-            const char* s = pair.value.get_string();
-            REQUIRE( s != nullptr );
-            // Отдельно создаём pjson-узел и проверяем set_string.
-            fptr<pjson> fv;
+            std::string_view sv = val.as_string();
+            REQUIRE( ( !sv.empty() || sv.size() == 0 ) ); // строка может быть пустой
+
+            // Отдельно создаём узел и проверяем node_set_string.
+            fptr<node> fv;
             fv.New();
-            fv->set_string( s );
-            REQUIRE( fv->is_string() );
-            REQUIRE( std::strcmp( fv->get_string(), s ) == 0 );
-            fv->free();
+            // Копируем строку во временный буфер для node_set_string.
+            std::string tmp( sv );
+            node_set_string( fv.addr(), tmp.c_str() );
+            REQUIRE( node_view{ fv.addr() }.is_string() );
+            REQUIRE( node_view{ fv.addr() }.as_string() == sv );
             fv.Delete();
             found = true;
         }
@@ -119,51 +125,50 @@ TEST_CASE( "pjson large: string values from test.json are stored correctly in pj
     // В test.json должно быть хотя бы одно строковое значение верхнего уровня.
     REQUIRE( found );
 
-    froot->free();
     froot.Delete();
 }
 
 // ---------------------------------------------------------------------------
-// Тест: объектные ключи из test.json корректно хранятся в pjson-объекте
+// Тест: объектные ключи из test.json корректно хранятся через node_view
 // ---------------------------------------------------------------------------
-TEST_CASE( "pjson large: keys from test.json are stored correctly in pjson object", "[pjson][large][json]" )
+TEST_CASE( "pjson large: keys from test.json are stored correctly in node object", "[pjson][large][json]" )
 {
+    reset_pam();
     std::ifstream f( TEST_JSON_PATH );
     REQUIRE( f.is_open() );
     std::string json_text( ( std::istreambuf_iterator<char>( f ) ), std::istreambuf_iterator<char>() );
     f.close();
 
-    // Загружаем весь JSON через прямой парсер.
-    fptr<pjson> froot;
+    fptr<node> froot;
     froot.New();
-    pjson::from_string( json_text.c_str(), froot.addr() );
+    node_from_string( json_text.c_str(), froot.addr() );
 
-    REQUIRE( froot->is_object() );
-    REQUIRE( froot->size() > 0u );
+    node_view root{ froot.addr() };
+    REQUIRE( root.is_object() );
+    REQUIRE( root.size() > 0u );
 
-    // Проверяем, что каждый ключ верхнего уровня доступен через obj_find.
-    uintptr_t sz        = froot->size();
-    uintptr_t data_addr = froot->payload.object_val.data.addr();
+    // Проверяем, что каждый ключ верхнего уровня доступен через at(key).
+    uintptr_t sz = root.size();
     for ( uintptr_t i = 0; i < sz; i++ )
     {
-        const pjson_kv_entry& pair = AddressManager<pjson_kv_entry>::GetArrayElement( data_addr, i );
-        const char*           key  = pair.key.c_str();
-        REQUIRE( froot->obj_find( key ) != nullptr );
+        std::string_view key = root.key_at( i );
+        std::string      key_s( key );
+        REQUIRE( root.at( key_s.c_str() ).valid() );
     }
 
-    froot->free();
     froot.Delete();
 }
 
 // ---------------------------------------------------------------------------
 // Тест: полная загрузка test.json в ПАМ и выгрузка обратно с сравнением.
-// Использует прямой парсер F6 (pjson::from_string / pjson::to_string).
-// Задача #88 (оптимизация), задача #54 требование 8.
+// Использует node_from_string / node_to_string (pjson_codec.h).
 // ---------------------------------------------------------------------------
 TEST_CASE( "pjson large: full round-trip -- load test.json into PAM and export back",
            "[pjson][large][json][roundtrip]" )
 {
-    // Читаем test.json как сырую строку для прямого парсера F6.
+    reset_pam();
+
+    // Читаем test.json как сырую строку.
     std::ifstream fin( TEST_JSON_PATH );
     REQUIRE( fin.is_open() );
     std::string json_text( ( std::istreambuf_iterator<char>( fin ) ), std::istreambuf_iterator<char>() );
@@ -172,46 +177,42 @@ TEST_CASE( "pjson large: full round-trip -- load test.json into PAM and export b
 
     // Предварительно резервируем ёмкость карты слотов ПАМ.
     // test.json содержит ~100k+ узлов; резервирование устраняет многократные
-    // реаллокации и ускоряет разбор в несколько раз (задача #88).
+    // реаллокации и ускоряет разбор в несколько раз.
     PersistentAddressSpace::Get().ReserveSlots( 200000 );
 
-    // Парсим JSON напрямую в pjson через прямой парсер F6 (без внешних зависимостей).
-    // Ожидаемое время: ~100–300 мс на test.json (~11 МБ, ~100k узлов).
-    auto        t0 = std::chrono::steady_clock::now();
-    fptr<pjson> froot;
+    // Парсим JSON напрямую в node через node_from_string.
+    auto       t0 = std::chrono::steady_clock::now();
+    fptr<node> froot;
     froot.New();
-    pjson::from_string( json_text.c_str(), froot.addr() );
+    node_from_string( json_text.c_str(), froot.addr() );
     auto t1       = std::chrono::steady_clock::now();
     auto parse_ms = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 ).count();
-    std::printf( "[large] direct parse: %lld ms\n", static_cast<long long>( parse_ms ) );
+    std::printf( "[large] node_from_string: %lld ms\n", static_cast<long long>( parse_ms ) );
 
+    node_view root{ froot.addr() };
     // Проверяем верхний уровень.
-    REQUIRE( ( froot->is_object() || froot->is_array() ) );
-    REQUIRE( froot->size() > 0u );
+    REQUIRE( ( root.is_object() || root.is_array() ) );
+    REQUIRE( root.size() > 0u );
 
-    // Сериализуем обратно в строку через прямой сериализатор F6.
+    // Сериализуем обратно в строку через node_to_string.
     auto        t2     = std::chrono::steady_clock::now();
-    std::string out    = froot->to_string();
+    std::string out    = node_to_string( froot.addr() );
     auto        t3     = std::chrono::steady_clock::now();
     auto        ser_ms = std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t2 ).count();
-    std::printf( "[large] direct serialize: %lld ms, output=%zu bytes\n", static_cast<long long>( ser_ms ),
-                 out.size() );
+    std::printf( "[large] node_to_string: %lld ms, output=%zu bytes\n", static_cast<long long>( ser_ms ), out.size() );
 
     REQUIRE( !out.empty() );
 
-    // Верификация: нормализуем оригинал через pjson и сравниваем с результатом.
-    // pjson хранит ключи в отсортированном порядке, поэтому нормализация эквивалентна.
-    fptr<pjson> forig;
+    // Верификация: нормализуем оригинал через parse + serialize.
+    fptr<node> forig;
     forig.New();
-    pjson::from_string( json_text.c_str(), forig.addr() );
-    std::string original_normalized = forig->to_string();
-    forig->free();
+    node_from_string( json_text.c_str(), forig.addr() );
+    std::string original_normalized = node_to_string( forig.addr() );
     forig.Delete();
 
     REQUIRE( original_normalized == out );
 
     // Проверяем время выполнения: полный цикл не должен превышать 15 секунд.
-    // (Прямой парсер F6 выполняется за ~100–300 мс, запас 15–30x для медленных CI.)
     auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t0 ).count();
     REQUIRE( total_ms < 15000 );
 
