@@ -25,9 +25,9 @@
 // ===========================================================================
 
 /// Имя пула узлов в ПАМ.
-static constexpr const char* PJSON_DB_POOL_NAME    = "pjson_db.pool";
+static constexpr const char* PJSON_DB_POOL_NAME = "pjson_db.pool";
 /// Имя корневого узла в ПАМ.
-static constexpr const char* PJSON_DB_ROOT_NAME    = "pjson_db.root";
+static constexpr const char* PJSON_DB_ROOT_NAME = "pjson_db.root";
 /// Имя структуры метрик в ПАМ (Фаза 7).
 static constexpr const char* PJSON_DB_METRICS_NAME = "pjson_db.metrics";
 
@@ -49,18 +49,17 @@ struct db_metrics
     uint64_t ref_count;          ///< Всего ref-узлов в пуле
     uint64_t array_count;        ///< Всего массивов (array-узлов) в пуле
     uint64_t object_count;       ///< Всего объектов (object-узлов) в пуле
-    uint64_t last_save_time;     ///< Unix-время последнего сохранения (0 = не сохранялось)
+    uint64_t last_save_time; ///< Unix-время последнего сохранения (0 = не сохранялось)
 
     // Метрики ПАМ (проксируются из PersistentAddressSpace)
-    uint64_t pam_bump_offset;   ///< Текущая позиция bump-аллокатора в ПАП (байт)
+    uint64_t pam_bump_offset;    ///< Текущая позиция bump-аллокатора в ПАП (байт)
     uint64_t pam_free_list_size; ///< Число свободных блоков в free-list ПАМ
     uint64_t pam_total_size;     ///< Полный размер области данных ПАМ (байт)
     uint64_t pam_slot_count;     ///< Число аллоцированных слотов в ПАМ
     uint64_t pam_named_count;    ///< Число именованных объектов в ПАМ
 };
 
-static_assert( std::is_trivially_copyable<db_metrics>::value,
-               "db_metrics должен быть тривиально копируемым" );
+static_assert( std::is_trivially_copyable<db_metrics>::value, "db_metrics должен быть тривиально копируемым" );
 
 // ===========================================================================
 // pjson_db — менеджер персистной JSON-базы данных (Задача 6.1)
@@ -639,10 +638,8 @@ class pjson_db
 
         // Метрики типов узлов: вычисляются обходом дерева в реальном времени (Задача 7.3).
         // Это гарантирует актуальность даже без явного вызова update_metrics().
-        if ( std::strcmp( key, "ref_count" ) == 0 ||
-             std::strcmp( key, "array_count" ) == 0 ||
-             std::strcmp( key, "object_count" ) == 0 ||
-             std::strcmp( key, "binary_bytes_total" ) == 0 ||
+        if ( std::strcmp( key, "ref_count" ) == 0 || std::strcmp( key, "array_count" ) == 0 ||
+             std::strcmp( key, "object_count" ) == 0 || std::strcmp( key, "binary_bytes_total" ) == 0 ||
              std::strcmp( key, "node_count_total" ) == 0 )
         {
             uint64_t node_cnt = 0, ref_cnt = 0, array_cnt = 0, object_cnt = 0, binary_bytes = 0;
@@ -1109,12 +1106,8 @@ class pjson_db
     }
 
     /// Рекурсивный обход поддерева для подсчёта узлов по типам (Задача 7.2).
-    void _count_nodes_in_subtree( node_id id,
-                                  uint64_t& node_cnt,
-                                  uint64_t& ref_cnt,
-                                  uint64_t& array_cnt,
-                                  uint64_t& object_cnt,
-                                  uint64_t& binary_bytes ) const
+    void _count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64_t& ref_cnt, uint64_t& array_cnt,
+                                  uint64_t& object_cnt, uint64_t& binary_bytes ) const
     {
         if ( id == 0 )
             return;
