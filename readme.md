@@ -167,8 +167,14 @@ node_view age = db.get("/users/alice/age");
 ### Работа с `$ref`
 
 ```cpp
-// Создать ссылку (парсинг JSON)
-db.parse(R"({"link": {"$ref": "/users/alice"}})");
+// Создать ссылку через put_ref()
+db.put_ref("/link", "/users/alice");
+
+// Или через parse_into() с JSON
+db.parse_into("/link2", R"({"$ref": "/users/alice"})");
+
+// Разрешить все $ref-узлы (устанавливает node_id цели по пути)
+db.resolve_all_refs();
 
 // Чтение автоматически разыменовывает ссылки
 node_view linked_user = db.get("/link"); // → узел /users/alice
@@ -186,7 +192,7 @@ db.parse(R"({"data": {"$base64": "AAEC"}})");
 // Получение бинарного узла
 node_view bin = db.get("/data");
 // bin.tag() == node_tag::binary
-// bin.binary_size() == 3, данные: [0x00, 0x01, 0x02]
+// bin.size() == 3, данные: [0x00, 0x01, 0x02]
 
 // Сериализация обратно в JSON с $base64
 std::string json = db.dump("/data");
