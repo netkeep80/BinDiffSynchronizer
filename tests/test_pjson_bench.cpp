@@ -1,10 +1,12 @@
-// test_pjson_bench.cpp — Бенчмарки для оптимизаций pjson из задачи #84.
+// test_pjson_bench.cpp — Бенчмарки для новых оптимизаций pjson_db (Задача 9.5).
+//
+// Мигрировано с pjson.h на pjson_codec.h и pjson_pool.h в рамках Задачи 9.5.
 //
 // Измеряет производительность:
-//   - to_string (прямой F6) — сериализация pjson в строку
-//   - from_string (прямой F6) — десериализация строки в pjson
-//   - set_string vs set_string_interned (дедупликация)
-//   - pjson_node_pool::alloc vs fptr<pjson>::New
+//   - node_to_string — сериализация узла в строку (pjson_codec)
+//   - node_from_string — десериализация строки в узел (pjson_codec)
+//   - pam_intern_string — интернирование строк (pstringview_table)
+//   - pjson_pool::alloc vs fptr<node>::New
 //
 // Все бенчмарки выводят измеренное время.
 // Тест ПРОХОДИТ всегда — бенчмарки информационные, не требования.
@@ -20,7 +22,8 @@
 #include <cstdio>
 #include <fstream>
 
-#include "pjson.h"
+#include "pjson_codec.h"
+#include "pjson_pool.h"
 
 using bench_clk = std::chrono::high_resolution_clock;
 using bench_ms  = std::chrono::milliseconds;
@@ -31,64 +34,67 @@ template <typename T> static long long bench_elapsed_ms( const T& start )
     return std::chrono::duration_cast<bench_ms>( bench_clk::now() - start ).count();
 }
 
+// Вспомогательная функция: сбросить ПАП перед каждым тестом.
+static void reset_pam()
+{
+    pstringview_manager::reset();
+    PersistentAddressSpace::Get().Reset();
+}
+
 // ============================================================================
-// Бенчмарк: to_string (прямой F6)
+// Бенчмарк: node_to_string
 // ============================================================================
 
 TEST_CASE( "pjson bench: to_string direct", "[pjson][bench][serial]" )
 {
+    reset_pam();
+
     // Создаём достаточно сложный JSON-документ.
-    // Важно: после каждой операции аллокации в ПАМ указатели могут инвалидироваться.
-    // Поэтому сохраняем смещение и каждый раз переразрешаем через obj_find.
-    auto&       pam = PersistentAddressSpace::Get();
-    fptr<pjson> froot;
+    // После каждой аллокации указатели в ПАМ могут инвалидироваться.
+    // Сохраняем смещение и работаем через node_id.
+    fptr<node> froot;
     froot.New();
-    froot->set_object();
+    node_set_object( froot.addr() );
     for ( int i = 0; i < 100; i++ )
     {
         char key[16];
         std::snprintf( key, sizeof( key ), "key_%03d", i );
-        froot->obj_insert( key );
-        // Переразрешаем указатель после возможной реаллокации ПАМ.
-        pjson* val = pam.Resolve<pjson>( froot.addr() )->obj_find( key );
+        node_id val_slot = node_object_insert( froot.addr(), key );
         if ( i % 5 == 0 )
         {
-            uintptr_t val_off = pam.PtrToOffset( val );
-            pam.Resolve<pjson>( val_off )->set_array();
+            node_set_array( val_slot );
             for ( int j = 0; j < 10; j++ )
             {
-                // Переразрешаем val_off после каждого push_back.
-                pam.Resolve<pjson>( val_off )->push_back().set_int( j );
+                node_id e = node_array_push_back( val_slot );
+                node_set_int( e, j );
             }
         }
         else if ( i % 3 == 0 )
         {
-            val->set_string( "hello world string value" );
+            node_set_string( val_slot, "hello world string value" );
         }
         else if ( i % 2 == 0 )
         {
-            val->set_real( 3.14159 * i );
+            node_set_real( val_slot, 3.14159 * i );
         }
         else
         {
-            val->set_int( i * 42 );
+            node_set_int( val_slot, i * 42 );
         }
     }
 
     constexpr int ITERATIONS = 500;
 
-    // Прямая сериализация (F6).
     auto t1 = bench_clk::now();
     for ( int n = 0; n < ITERATIONS; n++ )
     {
-        std::string s = froot->to_string();
+        std::string s = node_to_string( froot.addr() );
         (void)s;
     }
     long long direct_ms = bench_elapsed_ms( t1 );
 
-    std::printf( "[bench] to_string %d iter: direct=%lld ms\n", ITERATIONS, direct_ms );
+    std::printf( "[bench] node_to_string %d iter: direct=%lld ms\n", ITERATIONS, direct_ms );
 
-    froot->free();
     froot.Delete();
 
     // Бенчмарк информационный — тест всегда проходит.
@@ -96,7 +102,7 @@ TEST_CASE( "pjson bench: to_string direct", "[pjson][bench][serial]" )
 }
 
 // ============================================================================
-// Бенчмарк: from_string (прямой F6)
+// Бенчмарк: node_from_string
 // ============================================================================
 
 TEST_CASE( "pjson bench: from_string direct", "[pjson][bench][parse]" )
@@ -108,145 +114,117 @@ TEST_CASE( "pjson bench: from_string direct", "[pjson][bench][parse]" )
 
     constexpr int ITERATIONS = 1000;
 
-    // Прямой парсер (F6).
     auto t1 = bench_clk::now();
     for ( int n = 0; n < ITERATIONS; n++ )
     {
-        fptr<pjson> fv;
-        fv.New();
-        pjson::from_string( test_json.c_str(), fv.addr() );
-        fv->free();
-        fv.Delete();
+        reset_pam();
+        fptr<node> fn;
+        fn.New();
+        node_from_string( test_json.c_str(), fn.addr() );
+        fn.Delete();
     }
     long long direct_ms = bench_elapsed_ms( t1 );
 
-    std::printf( "[bench] from_string %d iter: direct=%lld ms\n", ITERATIONS, direct_ms );
+    std::printf( "[bench] node_from_string %d iter: direct=%lld ms\n", ITERATIONS, direct_ms );
 
     REQUIRE( true );
 }
 
 // ============================================================================
-// Бенчмарк: set_string vs set_string_interned
+// Бенчмарк: pam_intern_string (интернирование строк)
 // ============================================================================
 
-TEST_CASE( "pjson bench: set_string vs set_string_interned", "[pjson][bench][interning]" )
+TEST_CASE( "pjson bench: pam_intern_string vs plain node_set_string", "[pjson][bench][interning]" )
 {
     const char*   keys[] = { "name", "age", "city", "country", "email", "phone", "address", "zip", "active", "score" };
     constexpr int N_KEYS = 10;
     constexpr int REPEAT = 100;
     constexpr int TOTAL  = N_KEYS * REPEAT;
 
-    // Бенчмарк set_string (обычный).
+    // Бенчмарк node_set_string (обычный, без дедупликации).
     {
+        reset_pam();
         auto                   t1 = bench_clk::now();
         std::vector<uintptr_t> offsets;
         offsets.reserve( TOTAL );
         for ( int i = 0; i < TOTAL; i++ )
         {
-            fptr<pjson> fv;
-            fv.New();
-            fv->set_string( keys[i % N_KEYS] );
-            offsets.push_back( fv.addr() );
+            fptr<node> fn;
+            fn.New();
+            node_set_string( fn.addr(), keys[i % N_KEYS] );
+            offsets.push_back( fn.addr() );
         }
         long long alloc_ms = bench_elapsed_ms( t1 );
-
-        for ( uintptr_t off : offsets )
-        {
-            fptr<pjson> fv;
-            fv.set_addr( off );
-            fv->free();
-            fv.Delete();
-        }
-        std::printf( "[bench] set_string %d nodes: %lld ms\n", TOTAL, alloc_ms );
+        std::printf( "[bench] node_set_string %d nodes: %lld ms\n", TOTAL, alloc_ms );
     }
 
-    // Бенчмарк set_string_interned (с дедупликацией).
+    // Бенчмарк pam_intern_string (с дедупликацией через pstringview_table).
     {
-        fptr<pjson_string_table> tbl;
-        tbl.New();
-        uintptr_t tbl_off = tbl.addr();
-
-        auto                   t2 = bench_clk::now();
-        std::vector<uintptr_t> offsets;
-        offsets.reserve( TOTAL );
+        reset_pam();
+        auto t2 = bench_clk::now();
         for ( int i = 0; i < TOTAL; i++ )
-        {
-            fptr<pjson> fv;
-            fv.New();
-            fv->set_string_interned( keys[i % N_KEYS], tbl_off );
-            offsets.push_back( fv.addr() );
-        }
+            pam_intern_string( keys[i % N_KEYS] );
         long long interned_ms = bench_elapsed_ms( t2 );
-
-        for ( uintptr_t off : offsets )
-        {
-            fptr<pjson> fv;
-            fv.set_addr( off );
-            fv->free();
-            fv.Delete();
-        }
-        tbl.Delete();
-        std::printf( "[bench] set_string_interned %d nodes: %lld ms\n", TOTAL, interned_ms );
+        std::printf( "[bench] pam_intern_string %d calls: %lld ms\n", TOTAL, interned_ms );
     }
 
     REQUIRE( true );
 }
 
 // ============================================================================
-// Бенчмарк: pjson_node_pool::alloc vs fptr<pjson>::New
+// Бенчмарк: pjson_pool::alloc vs fptr<node>::New
 // ============================================================================
 
 TEST_CASE( "pjson bench: pool alloc vs fptr New", "[pjson][bench][pool]" )
 {
     constexpr int N = 500;
 
-    auto& pam = PersistentAddressSpace::Get();
-
-    // Бенчмарк fptr<pjson>::New (обычная аллокация через ПАМ).
+    // Бенчмарк fptr<node>::New (обычная аллокация через ПАМ).
     {
+        reset_pam();
         auto                   t1 = bench_clk::now();
         std::vector<uintptr_t> offsets;
         offsets.reserve( N );
         for ( int i = 0; i < N; i++ )
         {
-            fptr<pjson> fv;
-            fv.New();
-            offsets.push_back( fv.addr() );
+            fptr<node> fn;
+            fn.New();
+            offsets.push_back( fn.addr() );
         }
         long long alloc_ms = bench_elapsed_ms( t1 );
 
         for ( uintptr_t off : offsets )
         {
-            fptr<pjson> fv;
-            fv.set_addr( off );
-            fv.Delete();
+            fptr<node> fn;
+            fn.set_addr( off );
+            fn.Delete();
         }
-        std::printf( "[bench] fptr<pjson>::New %d allocs: %lld ms\n", N, alloc_ms );
+        std::printf( "[bench] fptr<node>::New %d allocs: %lld ms\n", N, alloc_ms );
     }
 
-    // Бенчмарк pjson_node_pool::alloc (пул узлов F2).
+    // Бенчмарк pjson_pool::alloc (пул узлов).
     {
-        fptr<pjson_node_pool> pool;
+        reset_pam();
+        fptr<pjson_pool> pool;
         pool.New();
 
-        auto                   t2 = bench_clk::now();
-        std::vector<uintptr_t> offsets;
+        auto                 t2 = bench_clk::now();
+        std::vector<node_id> offsets;
         offsets.reserve( N );
         for ( int i = 0; i < N; i++ )
         {
-            uintptr_t off = pool->alloc();
+            node_id off = pool->alloc();
             offsets.push_back( off );
         }
         long long pool_alloc_ms = bench_elapsed_ms( t2 );
 
-        for ( uintptr_t off : offsets )
-            pool->dealloc( off );
+        for ( node_id off : offsets )
+            pool->free( off );
         pool.Delete();
 
-        std::printf( "[bench] pjson_node_pool::alloc %d allocs: %lld ms\n", N, pool_alloc_ms );
+        std::printf( "[bench] pjson_pool::alloc %d allocs: %lld ms\n", N, pool_alloc_ms );
     }
 
-    (void)pam;
     REQUIRE( true );
 }
 
@@ -272,21 +250,25 @@ TEST_CASE( "pjson bench: round-trip test.json direct", "[pjson][bench][roundtrip
 
     std::printf( "[bench] test.json size: %zu bytes\n", json_text.size() );
 
-    // Прямой парсер + прямой сериализатор (F6).
-    auto        t1 = bench_clk::now();
-    fptr<pjson> fv;
-    fv.New();
-    pjson::from_string( json_text.c_str(), fv.addr() );
+    reset_pam();
+    PersistentAddressSpace::Get().ReserveSlots( 200000 );
+
+    // Парсинг через node_from_string.
+    auto       t1 = bench_clk::now();
+    fptr<node> fn;
+    fn.New();
+    node_from_string( json_text.c_str(), fn.addr() );
     long long parse_ms = bench_elapsed_ms( t1 );
 
+    // Сериализация через node_to_string.
     auto        t2     = bench_clk::now();
-    std::string s_out  = fv->to_string();
+    std::string s_out  = node_to_string( fn.addr() );
     long long   ser_ms = bench_elapsed_ms( t2 );
 
-    fv->free();
-    fv.Delete();
-    std::printf( "[bench] direct F6: parse=%lld ms, serialize=%lld ms, output_size=%zu\n", parse_ms, ser_ms,
+    fn.Delete();
+    std::printf( "[bench] direct: parse=%lld ms, serialize=%lld ms, output_size=%zu\n", parse_ms, ser_ms,
                  s_out.size() );
 
+    PersistentAddressSpace::Get().Reset();
     REQUIRE( true );
 }
