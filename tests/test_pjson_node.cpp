@@ -974,3 +974,242 @@ TEST_CASE( "node: nested object with array and ref - complex scenario", "[pjson_
 
     fn_root.Delete();
 }
+
+// =============================================================================
+// Тесты Фазы 10 — Итераторы для обхода дерева JSON (Задача 10.1–10.2)
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// node_view_iterator — итератор элементов массива (Задача 10.1)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "node_view_iterator: range-based for over empty array", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id arr_off = fn.addr();
+    node_set_array( arr_off );
+
+    node_view arr_view{ arr_off };
+    int       count = 0;
+    for ( node_view elem : arr_view )
+    {
+        (void)elem;
+        ++count;
+    }
+    REQUIRE( count == 0 );
+    fn.Delete();
+}
+
+TEST_CASE( "node_view_iterator: range-based for over single-element array", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id arr_off = fn.addr();
+    node_set_array( arr_off );
+
+    // Добавляем один элемент.
+    node_id slot = node_array_push_back( arr_off );
+    node_set_int( slot, 42 );
+
+    node_view arr_view{ arr_off };
+    int       count = 0;
+    for ( node_view elem : arr_view )
+    {
+        REQUIRE( elem.is_integer() );
+        REQUIRE( elem.as_int() == 42 );
+        ++count;
+    }
+    REQUIRE( count == 1 );
+    fn.Delete();
+}
+
+TEST_CASE( "node_view_iterator: range-based for collects all elements in order", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id arr_off = fn.addr();
+    node_set_array( arr_off );
+
+    // Добавляем три элемента.
+    node_id s0 = node_array_push_back( arr_off );
+    node_id s1 = node_array_push_back( arr_off );
+    node_id s2 = node_array_push_back( arr_off );
+    node_set_int( s0, 10 );
+    node_set_int( s1, 20 );
+    node_set_int( s2, 30 );
+
+    node_view            arr_view{ arr_off };
+    std::vector<int64_t> values;
+    for ( node_view elem : arr_view )
+        values.push_back( elem.as_int() );
+
+    REQUIRE( values.size() == 3u );
+    REQUIRE( values[0] == 10 );
+    REQUIRE( values[1] == 20 );
+    REQUIRE( values[2] == 30 );
+    fn.Delete();
+}
+
+TEST_CASE( "node_view_iterator: begin == end for non-array node", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id off = fn.addr();
+    node_set_int( off, 99 );
+
+    node_view v{ off };
+    // Для не-массива begin() == end() (пустой диапазон).
+    REQUIRE( v.begin() == v.end() );
+    fn.Delete();
+}
+
+TEST_CASE( "node_view_iterator: postfix increment", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id arr_off = fn.addr();
+    node_set_array( arr_off );
+
+    node_id s0 = node_array_push_back( arr_off );
+    node_id s1 = node_array_push_back( arr_off );
+    node_set_int( s0, 1 );
+    node_set_int( s1, 2 );
+
+    node_view          arr_view{ arr_off };
+    node_view_iterator it     = arr_view.begin();
+    node_view_iterator it_old = it++; // постфиксный инкремент
+
+    REQUIRE( ( *it_old ).as_int() == 1 );
+    REQUIRE( ( *it ).as_int() == 2 );
+    fn.Delete();
+}
+
+// ---------------------------------------------------------------------------
+// object_iterator — итератор пар ключ-значение объекта (Задача 10.2)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "object_iterator: items() over empty object", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id obj_off = fn.addr();
+    node_set_object( obj_off );
+
+    node_view obj_view{ obj_off };
+    int       count = 0;
+    for ( auto item : obj_view.items() )
+    {
+        (void)item;
+        ++count;
+    }
+    REQUIRE( count == 0 );
+    fn.Delete();
+}
+
+TEST_CASE( "object_iterator: items() returns correct key-value pairs", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id obj_off = fn.addr();
+    node_set_object( obj_off );
+
+    // Вставляем пары (ключи сортируются лексикографически).
+    node_id name_slot = node_object_insert( obj_off, "name" );
+    node_set_string( name_slot, "Alice" );
+    node_id age_slot = node_object_insert( obj_off, "age" );
+    node_set_int( age_slot, 30 );
+
+    node_view                obj_view{ obj_off };
+    std::vector<std::string> keys;
+    std::vector<std::string> str_vals;
+    std::vector<int64_t>     int_vals;
+
+    for ( auto item : obj_view.items() )
+    {
+        keys.push_back( std::string( item.key ) );
+        if ( item.value.is_string() )
+            str_vals.push_back( std::string( item.value.as_string() ) );
+        else if ( item.value.is_integer() )
+            int_vals.push_back( item.value.as_int() );
+    }
+
+    // Объект хранит ключи в лексикографическом порядке: "age" < "name".
+    REQUIRE( keys.size() == 2u );
+    REQUIRE( keys[0] == "age" );
+    REQUIRE( keys[1] == "name" );
+    REQUIRE( int_vals.size() == 1u );
+    REQUIRE( int_vals[0] == 30 );
+    REQUIRE( str_vals.size() == 1u );
+    REQUIRE( str_vals[0] == "Alice" );
+    fn.Delete();
+}
+
+TEST_CASE( "object_iterator: items() returns empty range for non-object", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id off = fn.addr();
+    node_set_int( off, 1 );
+
+    node_view v{ off };
+    int       count = 0;
+    for ( auto item : v.items() )
+    {
+        (void)item;
+        ++count;
+    }
+    REQUIRE( count == 0 );
+    fn.Delete();
+}
+
+TEST_CASE( "object_iterator: structured binding key and value", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id obj_off = fn.addr();
+    node_set_object( obj_off );
+
+    node_id x_slot = node_object_insert( obj_off, "x" );
+    node_set_real( x_slot, 3.14 );
+
+    node_view obj_view{ obj_off };
+    for ( auto [key, val] : obj_view.items() )
+    {
+        REQUIRE( key == "x" );
+        REQUIRE( val.is_real() );
+        REQUIRE( val.as_double() == Catch::Approx( 3.14 ) );
+    }
+    fn.Delete();
+}
+
+TEST_CASE( "object_iterator: postfix increment", "[pjson_node][phase10][iterator]" )
+{
+    reset_pam();
+    fptr<node> fn;
+    fn.New();
+    node_id obj_off = fn.addr();
+    node_set_object( obj_off );
+
+    node_id a_slot = node_object_insert( obj_off, "a" );
+    node_set_int( a_slot, 1 );
+    node_id b_slot = node_object_insert( obj_off, "b" );
+    node_set_int( b_slot, 2 );
+
+    node_view       obj_view{ obj_off };
+    object_iterator it     = obj_view.items().begin();
+    object_iterator it_old = it++; // постфиксный инкремент
+
+    REQUIRE( ( *it_old ).key == "a" );
+    REQUIRE( ( *it ).key == "b" );
+    fn.Delete();
+}

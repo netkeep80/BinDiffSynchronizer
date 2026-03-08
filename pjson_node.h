@@ -172,6 +172,18 @@ static_assert(
     "object_entry должен занимать 3 * sizeof(void*) байт (совместимость с pmap_entry<pstringview, node_id>)" );
 
 // ---------------------------------------------------------------------------
+// Фаза 10: Предварительные объявления итераторов (Задача 10.1–10.2)
+// ---------------------------------------------------------------------------
+// Необходимы до объявления node_view, чтобы методы begin()/end()/items()
+// могли использовать эти типы как возвращаемые.
+
+struct node_view_iterator; ///< Итератор элементов array-узла
+struct object_item;        ///< Пара ключ-значение для object-итерации
+struct object_iterator;    ///< Итератор пар ключ-значение object-узла
+struct object_items_range; ///< Диапазон для items()
+struct array_range;        ///< Диапазон для range-based for по массиву
+
+// ---------------------------------------------------------------------------
 // node_view — безопасный accessor для чтения узлов (Задача 3.4)
 // ---------------------------------------------------------------------------
 //
@@ -488,6 +500,20 @@ struct node_view
 
     bool operator==( const node_view& other ) const { return id == other.id; }
     bool operator!=( const node_view& other ) const { return id != other.id; }
+
+    // ----------------------------------------------------------------
+    // Фаза 10: Поддержка range-based for (Задача 10.1–10.2)
+
+    /// Итератор начала для array-узла (для range-based for).
+    /// Использует node_view_iterator; для не-массивов возвращает end().
+    node_view_iterator begin() const;
+
+    /// Итератор конца для array-узла (для range-based for).
+    node_view_iterator end() const;
+
+    /// Диапазон для итерации по парам ключ-значение object-узла.
+    /// Использование: for (auto [key, val] : obj.items()) { ... }
+    object_items_range items() const;
 
   private:
     /// Разрешить указатель на узел в ПАП.
@@ -942,4 +968,174 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
 
     uint8_t& slot = pmem_array_push_back<uint8_t>( hdr_off );
     slot          = byte;
+}
+
+// ---------------------------------------------------------------------------
+// Фаза 10: Итераторы для обхода дерева JSON
+// ---------------------------------------------------------------------------
+//
+// Поддерживают range-based for для массивов и объектов node_view:
+//   for (node_view elem : arr_view) { ... }         // для array
+//   for (auto [key, val] : obj_view.items()) { ... } // для object
+//
+// Все итераторы — forward-only, read-only.
+// Комментарии — на русском языке (Тр.6).
+
+// ---------------------------------------------------------------------------
+// node_view_iterator — итератор элементов массива (Задача 10.1)
+// ---------------------------------------------------------------------------
+
+/// Итератор для обхода элементов array-узла.
+/// Возвращает node_view для каждого элемента массива по индексу.
+struct node_view_iterator
+{
+    node_id   arr_id; ///< node_id массива
+    uintptr_t idx;    ///< Текущий индекс
+
+    using iterator_category = std::forward_iterator_tag;
+    using value_type        = node_view;
+    using difference_type   = std::ptrdiff_t;
+    using pointer           = const node_view*;
+    using reference         = node_view;
+
+    node_view_iterator( node_id aid, uintptr_t i ) : arr_id( aid ), idx( i ) {}
+
+    /// Разыменование: возвращает node_view для текущего элемента.
+    node_view operator*() const { return node_view{ arr_id }.at( idx ); }
+
+    /// Инкремент (префиксный).
+    node_view_iterator& operator++()
+    {
+        ++idx;
+        return *this;
+    }
+
+    /// Инкремент (постфиксный).
+    node_view_iterator operator++( int )
+    {
+        node_view_iterator tmp = *this;
+        ++idx;
+        return tmp;
+    }
+
+    bool operator==( const node_view_iterator& other ) const { return arr_id == other.arr_id && idx == other.idx; }
+    bool operator!=( const node_view_iterator& other ) const { return !( *this == other ); }
+};
+
+// ---------------------------------------------------------------------------
+// object_item — пара ключ-значение для итерации по объекту (Задача 10.2)
+// ---------------------------------------------------------------------------
+
+/// Пара ключ-значение при итерации по object-узлу.
+struct object_item
+{
+    std::string_view key;   ///< Ключ (pstringview, readonly, интернированный)
+    node_view        value; ///< Значение (node_view на узел-значение)
+};
+
+// ---------------------------------------------------------------------------
+// object_iterator — итератор пар ключ-значение объекта (Задача 10.2)
+// ---------------------------------------------------------------------------
+
+/// Итератор для обхода пар ключ-значение object-узла.
+/// Возвращает object_item{key, value} для каждого поля объекта.
+struct object_iterator
+{
+    node_id   obj_id; ///< node_id объекта
+    uintptr_t idx;    ///< Текущий индекс
+
+    using iterator_category = std::forward_iterator_tag;
+    using value_type        = object_item;
+    using difference_type   = std::ptrdiff_t;
+    using pointer           = const object_item*;
+    using reference         = object_item;
+
+    object_iterator( node_id oid, uintptr_t i ) : obj_id( oid ), idx( i ) {}
+
+    /// Разыменование: возвращает object_item для текущего поля объекта.
+    object_item operator*() const
+    {
+        node_view v{ obj_id };
+        return object_item{ v.key_at( idx ), v.value_at( idx ) };
+    }
+
+    /// Инкремент (префиксный).
+    object_iterator& operator++()
+    {
+        ++idx;
+        return *this;
+    }
+
+    /// Инкремент (постфиксный).
+    object_iterator operator++( int )
+    {
+        object_iterator tmp = *this;
+        ++idx;
+        return tmp;
+    }
+
+    bool operator==( const object_iterator& other ) const { return obj_id == other.obj_id && idx == other.idx; }
+    bool operator!=( const object_iterator& other ) const { return !( *this == other ); }
+};
+
+// ---------------------------------------------------------------------------
+// object_items_range — вспомогательный диапазон для items() (Задача 10.2)
+// ---------------------------------------------------------------------------
+
+/// Диапазон для range-based for по парам ключ-значение объекта.
+/// Возвращается методом node_view::items().
+struct object_items_range
+{
+    node_id   obj_id; ///< node_id объекта
+    uintptr_t sz;     ///< Число элементов
+
+    object_items_range( node_id oid, uintptr_t n ) : obj_id( oid ), sz( n ) {}
+
+    object_iterator begin() const { return object_iterator{ obj_id, 0 }; }
+    object_iterator end() const { return object_iterator{ obj_id, sz }; }
+};
+
+// ---------------------------------------------------------------------------
+// array_range — вспомогательный диапазон для range-based for по массиву
+// ---------------------------------------------------------------------------
+
+/// Диапазон для range-based for по элементам array-узла.
+/// Используется при итерации через node_view::begin()/end().
+struct array_range
+{
+    node_id   arr_id; ///< node_id массива
+    uintptr_t sz;     ///< Число элементов
+
+    array_range( node_id aid, uintptr_t n ) : arr_id( aid ), sz( n ) {}
+
+    node_view_iterator begin() const { return node_view_iterator{ arr_id, 0 }; }
+    node_view_iterator end() const { return node_view_iterator{ arr_id, sz }; }
+};
+
+// ---------------------------------------------------------------------------
+// Фаза 10: Определения методов node_view для итерации (Задача 10.1–10.2)
+// ---------------------------------------------------------------------------
+// Определяются после полных объявлений итераторных структур.
+
+/// Итератор начала для array-узла.
+/// Для не-массивов возвращает end() (пустой диапазон).
+inline node_view_iterator node_view::begin() const
+{
+    return node_view_iterator{ id, 0 };
+}
+
+/// Итератор конца для array-узла.
+inline node_view_iterator node_view::end() const
+{
+    return node_view_iterator{ id, size() };
+}
+
+/// Диапазон для итерации по парам ключ-значение object-узла.
+/// Использование: for (auto& [key, val] : obj.items()) { ... }
+/// Для не-объектов возвращает пустой диапазон.
+inline object_items_range node_view::items() const
+{
+    if ( !is_object() )
+        return object_items_range{ 0, 0 };
+    return object_items_range{ id, size() };
 }
