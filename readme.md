@@ -30,6 +30,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Метрики** | Персистная структура `db_metrics` в ПАМ; обновляется при каждой мутации; доступ через `/$metrics/...` (Фаза 7) |
 | **pmap-интерфейс** | `operator[]`, `find`, `insert` для доступа по пути без явного указания типа (Фаза 8) |
 | **Поиск по строкам** | `search_strings` — по словарю ключей (pstringview); `search_node_strings` — по значениям узлов (pstring) (Фаза 8) |
+| **Итераторы** | `node_view` поддерживает range-based for: `begin()`/`end()` для массивов, `items()` для объектов (Фаза 10) |
 
 ---
 
@@ -73,6 +74,10 @@ C++17 header-only библиотека для работы с JSON в перси
 │   db_metrics: персистные метрики в ПАП      │
 │   operator[], find, insert, search_node_strings │
 ├─────────────────────────────────────────────┤
+│   Слой D: Итераторы (Фаза 10) ✅            │
+│   node_view_iterator: range-based for array │
+│   object_iterator: items() для объектов     │
+├─────────────────────────────────────────────┤
 │   Слой C: pjson_node + pjson_pool           │
 │   (модель узлов, пул аллокации)             │
 ├─────────────────────────────────────────────┤
@@ -100,7 +105,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pstring.h` | B | Персистная readwrite строка для JSON string-value узлов; нет SSO; `assign()` изменяет значение на месте |
 | `pstringview.h` | B | Интернированная read-only строка + персистный словарь (`pstringview_table`); смещение таблицы хранится в `pam_header.string_table_offset`; содержит `pam_intern_string()`, `pam_search_strings()`, `pam_all_strings()` |
 | `pallocator.h` | B | STL-совместимый аллокатор поверх ПАМ |
-| `pjson_node.h` | C | Новая модель узлов JSON (Фаза 3): `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; вспомогательные функции init/set/assign/push_back/insert |
+| `pjson_node.h` | C | Новая модель узлов JSON (Фаза 3): `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; вспомогательные функции init/set/assign/push_back/insert; итераторы: `node_view_iterator`, `object_iterator`, `object_items_range`, `array_range` (Фаза 10) |
 | `pjson_pool.h` | C | Пул узлов JSON (Фаза 4): `pjson_pool` — быстрая аллокация O(1) через `pvector<node>` + free-list на основе `node_tag::_free`; API: `alloc()`, `free()`, `get()` |
 | `pjson_codec.h` | C | Новая сериализация/десериализация (Фаза 5): парсер/сериализатор для `node_id`-модели; поддержка `$ref` и `$base64`; Base64 кодек; функции: `node_to_string()`, `node_from_string()`, `node_parse()` |
 | `pjson_db.h` | D | Менеджер персистной JSON-БД (Фазы 6–8): единственный заголовок для конечного пользователя (Тр.18); path-адресация (`/a/b/0/c`), `put`/`get`/`erase`/`exists`, разыменование `$ref`, `resolve_all_refs()`, персистные метрики (`db_metrics`) через `/$metrics`, `update_metrics()`, pmap-интерфейс (`operator[]`, `find`, `insert`), сквозной поиск по строкам (`search_strings`, `search_node_strings`), сериализация |
@@ -285,6 +290,24 @@ for (node_id id : val_results) {
 
 // Пустой pattern — все string-узлы в дереве
 auto all_vals = db.search_node_strings("");
+```
+
+### Итерация по дереву JSON (Фаза 10)
+
+```cpp
+// Итерация по элементам массива (range-based for)
+node_view scores = db.get("/user/scores");
+for (node_view elem : scores)
+    std::cout << elem.as_int() << "\n";
+
+// Итерация по полям объекта через items()
+node_view user = db.get("/user");
+for (auto item : user.items())
+    std::cout << item.key << ": " << item.value.as_string() << "\n";
+
+// Structured bindings (C++17)
+for (auto [key, val] : db.get("/config").items())
+    std::cout << key << " = " << val.as_string() << "\n";
 ```
 
 ---
