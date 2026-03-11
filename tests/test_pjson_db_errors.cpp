@@ -1,6 +1,8 @@
-// test_pjson_db_errors.cpp — Тесты для кодов ошибок node_view (Фаза 11).
+// test_pjson_db_errors.cpp — Тесты для кодов ошибок node_view (Фазы 11–12).
 //
 // Покрытие:
+//
+// Фаза 11:
 //   - node_error enum: все коды ошибок
 //   - node_view::is_error() / node_view::error()
 //   - node_view_error(): фабричная функция
@@ -10,6 +12,10 @@
 //     - wrong_type при навигации через скалярный узел
 //     - index_out_of_range при выходе индекса массива за границы
 //     - ref_cycle при обнаружении цикла в $ref
+//
+// Фаза 12:
+//   - node_error_message(): человекочитаемые сообщения об ошибках
+//   - node_view::error_message(): метод получения сообщения об ошибке
 //
 // Все комментарии — на русском языке (Тр.6).
 
@@ -145,4 +151,69 @@ TEST_CASE( "node_error: get existing path returns valid node without error", "[p
     REQUIRE( v.is_error() == false );
     REQUIRE( v.is_string() );
     REQUIRE( v.as_string() == "localhost" );
+}
+
+// ===========================================================================
+// Задача 12.1: node_error_message() — сообщения об ошибках
+// ===========================================================================
+
+TEST_CASE( "node_error_message: returns correct message for each error code", "[phase12][error]" )
+{
+    // Проверяем, что каждый код ошибки возвращает непустую строку.
+    REQUIRE( std::string( node_error_message( node_error::none ) ) == "no error" );
+    REQUIRE( std::string( node_error_message( node_error::not_found ) ) == "node not found" );
+    REQUIRE( std::string( node_error_message( node_error::wrong_type ) ) == "wrong node type for navigation" );
+    REQUIRE( std::string( node_error_message( node_error::index_out_of_range ) ) == "array index out of range" );
+    REQUIRE( std::string( node_error_message( node_error::readonly ) ) == "cannot modify read-only path" );
+    REQUIRE( std::string( node_error_message( node_error::ref_cycle ) ) ==
+             "cyclic $ref detected or max depth exceeded" );
+    REQUIRE( std::string( node_error_message( node_error::parse_error ) ) == "JSON parse error" );
+}
+
+TEST_CASE( "node_error_message: unknown error code returns default message", "[phase12][error]" )
+{
+    // Неизвестный код ошибки (например, 99) должен вернуть "unknown error".
+    node_error unknown = static_cast<node_error>( 99 );
+    REQUIRE( std::string( node_error_message( unknown ) ) == "unknown error" );
+}
+
+// ===========================================================================
+// Задача 12.2: node_view::error_message() — метод node_view
+// ===========================================================================
+
+TEST_CASE( "node_view::error_message: returns correct message for error views", "[phase12][error]" )
+{
+    // Проверяем, что метод error_message() возвращает правильное сообщение.
+    REQUIRE( std::string( node_view_error( node_error::not_found ).error_message() ) == "node not found" );
+    REQUIRE( std::string( node_view_error( node_error::wrong_type ).error_message() ) ==
+             "wrong node type for navigation" );
+    REQUIRE( std::string( node_view_error( node_error::index_out_of_range ).error_message() ) ==
+             "array index out of range" );
+    REQUIRE( std::string( node_view_error( node_error::ref_cycle ).error_message() ) ==
+             "cyclic $ref detected or max depth exceeded" );
+}
+
+TEST_CASE( "node_view::error_message: null node_view returns no error", "[phase12][error]" )
+{
+    node_view v{};
+    REQUIRE( std::string( v.error_message() ) == "no error" );
+}
+
+TEST_CASE( "node_view::error_message: valid node_view returns no error", "[phase12][error]" )
+{
+    reset_pam();
+    pjson_db db;
+    db.put( "/val", int64_t( 123 ) );
+    node_view v = db.get( "/val" );
+    REQUIRE( v.valid() );
+    REQUIRE( std::string( v.error_message() ) == "no error" );
+}
+
+TEST_CASE( "node_view::error_message: db.get error has correct message", "[phase12][error]" )
+{
+    reset_pam();
+    pjson_db  db;
+    node_view v = db.get( "/nonexistent" );
+    REQUIRE( v.is_error() );
+    REQUIRE( std::string( v.error_message() ) == "node not found" );
 }

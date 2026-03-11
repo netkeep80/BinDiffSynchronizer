@@ -66,6 +66,32 @@ enum class node_error : uintptr_t
 /// Ошибочный node_view имеет id = NODE_ERROR_BASE + static_cast<uintptr_t>(node_error).
 static constexpr uintptr_t NODE_ERROR_BASE = ~uintptr_t( 255 );
 
+/// Получить человекочитаемое сообщение для кода ошибки (Задача 12.1).
+/// Возвращает статическую строку (не требует освобождения).
+/// Для неизвестных кодов возвращает "unknown error".
+inline const char* node_error_message( node_error err )
+{
+    switch ( err )
+    {
+    case node_error::none:
+        return "no error";
+    case node_error::not_found:
+        return "node not found";
+    case node_error::wrong_type:
+        return "wrong node type for navigation";
+    case node_error::index_out_of_range:
+        return "array index out of range";
+    case node_error::readonly:
+        return "cannot modify read-only path";
+    case node_error::ref_cycle:
+        return "cyclic $ref detected or max depth exceeded";
+    case node_error::parse_error:
+        return "JSON parse error";
+    default:
+        return "unknown error";
+    }
+}
+
 // ---------------------------------------------------------------------------
 // node_id — идентификатор узла (смещение в ПАП)
 // ---------------------------------------------------------------------------
@@ -248,6 +274,10 @@ struct node_view
             return node_error::none;
         return static_cast<node_error>( id - NODE_ERROR_BASE );
     }
+
+    /// Получить человекочитаемое сообщение об ошибке (Задача 12.2).
+    /// Для обычных и null node_view возвращает "no error".
+    const char* error_message() const { return node_error_message( error() ); }
 
     /// Проверить, является ли node_view действительным (не null/invalid/error).
     bool valid() const { return id != 0 && !is_error(); }

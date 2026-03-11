@@ -776,6 +776,58 @@ enum class node_error : uintptr_t
 
 ---
 
+## Фаза 12. Сообщения об ошибках (`node_error_message`) ✅ ЗАВЕРШЕНА
+
+**Цель:** Добавить человекочитаемые сообщения для кодов ошибок `node_error`, позволяющие отображать пользователю понятное описание ошибки вместо числового кода.
+
+### Задача 12.1. Реализовать функцию `node_error_message` ✅ ВЫПОЛНЕНО
+
+```cpp
+// pjson_node.h
+const char* node_error_message( node_error err );
+```
+
+- Возвращает статическую C-строку (не требует освобождения памяти).
+- Для `node_error::none` → `"no error"`.
+- Для `node_error::not_found` → `"node not found"`.
+- Для `node_error::wrong_type` → `"wrong node type for navigation"`.
+- Для `node_error::index_out_of_range` → `"array index out of range"`.
+- Для `node_error::readonly` → `"cannot modify read-only path"`.
+- Для `node_error::ref_cycle` → `"cyclic $ref detected or max depth exceeded"`.
+- Для `node_error::parse_error` → `"JSON parse error"`.
+- Для неизвестных кодов → `"unknown error"`.
+
+### Задача 12.2. Добавить метод `node_view::error_message()` ✅ ВЫПОЛНЕНО
+
+```cpp
+// pjson_node.h
+struct node_view {
+    // ...
+    const char* error_message() const;  // Возвращает node_error_message(error())
+};
+```
+
+- Для обычных и null `node_view` возвращает `"no error"`.
+- Для ошибочных `node_view` возвращает описание соответствующей ошибки.
+
+### Задача 12.3. Написать тесты ✅ ВЫПОЛНЕНО
+
+- 6 новых тестов в `tests/test_pjson_db_errors.cpp` (тег `[phase12][error]`).
+- Тест `node_error_message`: возвращает правильное сообщение для каждого кода ошибки.
+- Тест `node_error_message`: возвращает `"unknown error"` для неизвестного кода.
+- Тест `node_view::error_message()`: возвращает правильное сообщение для ошибочных view.
+- Тест `node_view::error_message()`: возвращает `"no error"` для null view.
+- Тест `node_view::error_message()`: возвращает `"no error"` для valid view.
+- Тест `node_view::error_message()`: возвращает правильное сообщение для ошибки из `db.get()`.
+
+**Критерии приёмки фазы 12:** ✅
+- Функция `node_error_message()` определена в `pjson_node.h`. ✅
+- Метод `node_view::error_message()` работает. ✅
+- 6 новых тестов `[phase12][error]` проходят. ✅
+- Все 503 теста проекта проходят. ✅
+
+---
+
 ## Порядок выполнения фаз
 
 ```
@@ -794,6 +846,8 @@ enum class node_error : uintptr_t
                     Фаза 10 (итераторы) ✅
                           ↓
                     Фаза 11 (коды ошибок) ✅
+                          ↓
+                    Фаза 12 (сообщения об ошибках) ✅
 ```
 
 Фазы 1 и 3 можно выполнять параллельно (нет зависимостей между pmem_array и node model).
