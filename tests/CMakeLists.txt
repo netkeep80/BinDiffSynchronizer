@@ -29,6 +29,7 @@ set(TEST_SOURCES
     test_pjson_codec.cpp
     test_pjson_db.cpp
     test_pjson_db_perf.cpp
+    test_pjson_db_errors.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})

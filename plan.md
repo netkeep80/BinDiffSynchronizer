@@ -714,6 +714,68 @@ for (auto [key, val] : user.items())
 
 ---
 
+## Фаза 11. Коды ошибок в `node_view` (Error Codes) ✅ ЗАВЕРШЕНА
+
+**Цель:** Разграничить «узел не найден / ошибка» от «JSON null-значение». Сейчас `node_view(0)` используется и как «узел не существует», и как дефолтное возвращаемое значение при ошибках. Это затрудняет диагностику: нельзя узнать, почему `get()` вернул пустой результат. Ввести `node_error` enum и поддержку `is_error()` / `error()` в `node_view`.
+
+### Задача 11.1. Определить перечисление `node_error` ✅ ВЫПОЛНЕНО
+
+```cpp
+// pjson_node.h
+enum class node_error : uintptr_t
+{
+    none               = 0, ///< Нет ошибки
+    not_found          = 1, ///< Узел не найден по пути
+    wrong_type         = 2, ///< Неверный тип узла при навигации
+    index_out_of_range = 3, ///< Индекс массива вне диапазона
+    readonly           = 4, ///< Попытка записи в readonly-пространство (/$metrics)
+    ref_cycle          = 5, ///< Обнаружен цикл при разыменовании $ref
+    parse_error        = 6, ///< Ошибка парсинга JSON
+};
+```
+
+### Задача 11.2. Добавить поддержку ошибок в `node_view` ✅ ВЫПОЛНЕНО
+
+- `node_view::is_error() -> bool` — проверяет, является ли view ошибкой.
+- `node_view::error() -> node_error` — возвращает код ошибки.
+- Ошибочный `node_view` кодируется через специальные sentinel-значения `id`:
+  - `id == NODE_ERROR_BASE + static_cast<uintptr_t>(node_error::...)` — ошибочный view.
+  - `NODE_ERROR_BASE` = `~uintptr_t(255)` — область, недостижимая реальным ПАП.
+- Фабричная функция `node_view_error(node_error) -> node_view` определена в `pjson_node.h`.
+- `is_null()` и `valid()` для ошибочного `node_view` возвращают `false`.
+
+### Задача 11.3. Вернуть типизированные ошибки из `pjson_db::get()` ✅ ВЫПОЛНЕНО
+
+- При отсутствии узла → `node_view_error(node_error::not_found)`.
+- При неверном типе при навигации (попытка индекс в не-массив, ключ в не-объект) → `node_view_error(node_error::wrong_type)`.
+- При выходе индекса за границы массива → `node_view_error(node_error::index_out_of_range)`.
+- При обнаружении цикла ref → `node_view_error(node_error::ref_cycle)`.
+
+### Задача 11.4. Написать тесты ✅ ВЫПОЛНЕНО
+
+- 10 новых тестов в `tests/test_pjson_db_errors.cpp` (тег `[phase11][error]`).
+- Тест `node_view{}` (id==0) — не ошибка, `is_null()` == true, `is_error()` == false.
+- Тест `node_view_error(not_found).is_error()` == true.
+- Тест `node_view_error(X).error()` == X для всех кодов ошибок.
+- Тест все error views `is_error()` == true.
+- Тест valid node_view не является ошибкой.
+- Тест `db.get("/nonexistent").error()` == `node_error::not_found`.
+- Тест навигации через скалярный узел → `wrong_type`.
+- Тест индекс вне диапазона → `index_out_of_range`.
+- Тест цикл ref → `ref_cycle`.
+- Тест существующий путь → valid, no error.
+
+**Критерии приёмки фазы 11:** ✅
+- `node_error` enum определён в `pjson_node.h`. ✅
+- `node_view::is_error()` / `node_view::error()` работают. ✅
+- `node_view_error()` фабричная функция в `pjson_node.h`. ✅
+- `pjson_db::get()` возвращает типизированные ошибки при отсутствии пути или неверной навигации. ✅
+- Новый файл `tests/test_pjson_db_errors.cpp` (10 тестов). ✅
+- 10 новых тестов `[phase11][error]` проходят. ✅
+- Все 497 тестов проекта проходят. ✅
+
+---
+
 ## Порядок выполнения фаз
 
 ```
@@ -729,7 +791,9 @@ for (auto [key, val] : user.items())
                           ↓
                     Фаза 9 (финализация)
                           ↓
-                    Фаза 10 (итераторы)
+                    Фаза 10 (итераторы) ✅
+                          ↓
+                    Фаза 11 (коды ошибок) ✅
 ```
 
 Фазы 1 и 3 можно выполнять параллельно (нет зависимостей между pmem_array и node model).

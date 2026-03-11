@@ -43,6 +43,30 @@ enum class node_tag : uint32_t
 };
 
 // ---------------------------------------------------------------------------
+// node_error — код ошибки в node_view (Фаза 11)
+// ---------------------------------------------------------------------------
+
+/// Код ошибки, возвращаемый в node_view при неудачных операциях (Задача 11.1).
+///
+/// node_view с ненулевым кодом ошибки создаётся фабричной функцией node_view_error().
+/// Позволяет отличить «узел не найден» от «JSON null-значение».
+enum class node_error : uintptr_t
+{
+    none      = 0, ///< Нет ошибки
+    not_found = 1, ///< Узел не найден по пути
+    wrong_type = 2, ///< Неверный тип узла при навигации (не объект / не массив)
+    index_out_of_range = 3, ///< Индекс массива вне диапазона
+    readonly           = 4, ///< Попытка записи в readonly-пространство (/$metrics)
+    ref_cycle = 5, ///< Обнаружен цикл или превышена глубина при разыменовании $ref
+    parse_error = 6, ///< Ошибка парсинга JSON
+};
+
+/// Базовое значение sentinel-идентификаторов для ошибочных node_view (Задача 11.2).
+/// Область ~uintptr_t(255)..~uintptr_t(0) недостижима реальным ПАП.
+/// Ошибочный node_view имеет id = NODE_ERROR_BASE + static_cast<uintptr_t>(node_error).
+static constexpr uintptr_t NODE_ERROR_BASE = ~uintptr_t( 255 );
+
+// ---------------------------------------------------------------------------
 // node_id — идентификатор узла (смещение в ПАП)
 // ---------------------------------------------------------------------------
 
@@ -212,21 +236,39 @@ struct node_view
     // ----------------------------------------------------------------
     // Запросы типа
 
-    /// Проверить, является ли node_view действительным (не null/invalid).
-    bool valid() const { return id != 0; }
+    /// Проверить, является ли node_view ошибочным (Задача 11.2).
+    /// Ошибочный node_view создаётся через node_view_error(); имеет id >= NODE_ERROR_BASE.
+    bool is_error() const { return id >= NODE_ERROR_BASE && id != ~uintptr_t( 0 ); }
+
+    /// Получить код ошибки (Задача 11.2).
+    /// Возвращает node_error::none для обычных и null node_view.
+    node_error error() const
+    {
+        if ( !is_error() )
+            return node_error::none;
+        return static_cast<node_error>( id - NODE_ERROR_BASE );
+    }
+
+    /// Проверить, является ли node_view действительным (не null/invalid/error).
+    bool valid() const { return id != 0 && !is_error(); }
 
     /// Получить тег типа узла.
     node_tag tag() const
     {
         if ( id == 0 )
             return node_tag::null;
+        // Ошибочный node_view не является узлом — возвращаем _free как sentinel (Фаза 11).
+        if ( is_error() )
+            return node_tag::_free;
         const node* n = _resolve();
         if ( n == nullptr )
             return node_tag::null;
         return n->tag;
     }
 
-    bool is_null() const { return tag() == node_tag::null; }
+    /// Проверить, является ли узел JSON null-значением.
+    /// Возвращает true только для id==0 или узлов с tag==null (но не для ошибочных view).
+    bool is_null() const { return !is_error() && tag() == node_tag::null; }
     bool is_boolean() const { return tag() == node_tag::boolean; }
     bool is_integer() const { return tag() == node_tag::integer; }
     bool is_uinteger() const { return tag() == node_tag::uinteger; }
@@ -524,6 +566,18 @@ struct node_view
         return PersistentAddressSpace::Get().Resolve<node>( id );
     }
 };
+
+// ---------------------------------------------------------------------------
+// Фаза 11: Фабричная функция для создания ошибочного node_view (Задача 11.2)
+// ---------------------------------------------------------------------------
+
+/// Создать node_view с кодом ошибки err.
+/// Использование: return node_view_error(node_error::not_found);
+/// is_error() == true, valid() == false, is_null() == false.
+inline node_view node_view_error( node_error err )
+{
+    return node_view{ NODE_ERROR_BASE + static_cast<uintptr_t>( err ) };
+}
 
 // ---------------------------------------------------------------------------
 // Вспомогательные функции для работы с узлами в ПАП
