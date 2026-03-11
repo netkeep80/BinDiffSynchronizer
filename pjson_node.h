@@ -73,22 +73,22 @@ inline const char* node_error_message( node_error err )
 {
     switch ( err )
     {
-        case node_error::none:
-            return "no error";
-        case node_error::not_found:
-            return "node not found";
-        case node_error::wrong_type:
-            return "wrong node type for navigation";
-        case node_error::index_out_of_range:
-            return "array index out of range";
-        case node_error::readonly:
-            return "cannot modify read-only path";
-        case node_error::ref_cycle:
-            return "cyclic $ref detected or max depth exceeded";
-        case node_error::parse_error:
-            return "JSON parse error";
-        default:
-            return "unknown error";
+    case node_error::none:
+        return "no error";
+    case node_error::not_found:
+        return "node not found";
+    case node_error::wrong_type:
+        return "wrong node type for navigation";
+    case node_error::index_out_of_range:
+        return "array index out of range";
+    case node_error::readonly:
+        return "cannot modify read-only path";
+    case node_error::ref_cycle:
+        return "cyclic $ref detected or max depth exceeded";
+    case node_error::parse_error:
+        return "JSON parse error";
+    default:
+        return "unknown error";
     }
 }
 

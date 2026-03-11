@@ -165,7 +165,8 @@ TEST_CASE( "node_error_message: returns correct message for each error code", "[
     REQUIRE( std::string( node_error_message( node_error::wrong_type ) ) == "wrong node type for navigation" );
     REQUIRE( std::string( node_error_message( node_error::index_out_of_range ) ) == "array index out of range" );
     REQUIRE( std::string( node_error_message( node_error::readonly ) ) == "cannot modify read-only path" );
-    REQUIRE( std::string( node_error_message( node_error::ref_cycle ) ) == "cyclic $ref detected or max depth exceeded" );
+    REQUIRE( std::string( node_error_message( node_error::ref_cycle ) ) ==
+             "cyclic $ref detected or max depth exceeded" );
     REQUIRE( std::string( node_error_message( node_error::parse_error ) ) == "JSON parse error" );
 }
 
@@ -184,9 +185,12 @@ TEST_CASE( "node_view::error_message: returns correct message for error views", 
 {
     // Проверяем, что метод error_message() возвращает правильное сообщение.
     REQUIRE( std::string( node_view_error( node_error::not_found ).error_message() ) == "node not found" );
-    REQUIRE( std::string( node_view_error( node_error::wrong_type ).error_message() ) == "wrong node type for navigation" );
-    REQUIRE( std::string( node_view_error( node_error::index_out_of_range ).error_message() ) == "array index out of range" );
-    REQUIRE( std::string( node_view_error( node_error::ref_cycle ).error_message() ) == "cyclic $ref detected or max depth exceeded" );
+    REQUIRE( std::string( node_view_error( node_error::wrong_type ).error_message() ) ==
+             "wrong node type for navigation" );
+    REQUIRE( std::string( node_view_error( node_error::index_out_of_range ).error_message() ) ==
+             "array index out of range" );
+    REQUIRE( std::string( node_view_error( node_error::ref_cycle ).error_message() ) ==
+             "cyclic $ref detected or max depth exceeded" );
 }
 
 TEST_CASE( "node_view::error_message: null node_view returns no error", "[phase12][error]" )
