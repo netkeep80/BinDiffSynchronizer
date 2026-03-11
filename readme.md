@@ -32,6 +32,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Поиск по строкам** | `search_strings` — по словарю ключей (pstringview); `search_node_strings` — по значениям узлов (pstring) (Фаза 8) |
 | **Итераторы** | `node_view` поддерживает range-based for: `begin()`/`end()` для массивов, `items()` для объектов (Фаза 10) |
 | **Коды ошибок** | `node_error` enum + `is_error()` / `error()` в `node_view`; `get()` возвращает типизированные ошибки (`not_found`, `wrong_type`, `index_out_of_range`, `ref_cycle`) вместо `node_view(0)` (Фаза 11) |
+| **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок (Фаза 12) |
 
 ---
 
@@ -84,6 +85,10 @@ C++17 header-only библиотека для работы с JSON в перси
 │   index_out_of_range, ref_cycle, ...        │
 │   node_view::is_error() / error()           │
 ├─────────────────────────────────────────────┤
+│   Слой D: Сообщения об ошибках (Фаза 12) ✅ │
+│   node_error_message(): текст ошибки        │
+│   node_view::error_message()                │
+├─────────────────────────────────────────────┤
 │   Слой C: pjson_node + pjson_pool           │
 │   (модель узлов, пул аллокации)             │
 ├─────────────────────────────────────────────┤
@@ -111,7 +116,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pstring.h` | B | Персистная readwrite строка для JSON string-value узлов; нет SSO; `assign()` изменяет значение на месте |
 | `pstringview.h` | B | Интернированная read-only строка + персистный словарь (`pstringview_table`); смещение таблицы хранится в `pam_header.string_table_offset`; содержит `pam_intern_string()`, `pam_search_strings()`, `pam_all_strings()` |
 | `pallocator.h` | B | STL-совместимый аллокатор поверх ПАМ |
-| `pjson_node.h` | C | Новая модель узлов JSON (Фаза 3): `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; вспомогательные функции init/set/assign/push_back/insert; итераторы: `node_view_iterator`, `object_iterator`, `object_items_range`, `array_range` (Фаза 10); коды ошибок: `node_error`, `NODE_ERROR_BASE`, `node_view_error()`, `node_view::is_error()`, `node_view::error()` (Фаза 11) |
+| `pjson_node.h` | C | Новая модель узлов JSON (Фаза 3): `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; вспомогательные функции init/set/assign/push_back/insert; итераторы: `node_view_iterator`, `object_iterator`, `object_items_range`, `array_range` (Фаза 10); коды ошибок: `node_error`, `NODE_ERROR_BASE`, `node_view_error()`, `node_view::is_error()`, `node_view::error()` (Фаза 11); сообщения об ошибках: `node_error_message()`, `node_view::error_message()` (Фаза 12) |
 | `pjson_pool.h` | C | Пул узлов JSON (Фаза 4): `pjson_pool` — быстрая аллокация O(1) через `pvector<node>` + free-list на основе `node_tag::_free`; API: `alloc()`, `free()`, `get()` |
 | `pjson_codec.h` | C | Новая сериализация/десериализация (Фаза 5): парсер/сериализатор для `node_id`-модели; поддержка `$ref` и `$base64`; Base64 кодек; функции: `node_to_string()`, `node_from_string()`, `node_parse()` |
 | `pjson_db.h` | D | Менеджер персистной JSON-БД (Фазы 6–8): единственный заголовок для конечного пользователя (Тр.18); path-адресация (`/a/b/0/c`), `put`/`get`/`erase`/`exists`, разыменование `$ref`, `resolve_all_refs()`, персистные метрики (`db_metrics`) через `/$metrics`, `update_metrics()`, pmap-интерфейс (`operator[]`, `find`, `insert`), сквозной поиск по строкам (`search_strings`, `search_node_strings`), сериализация |
@@ -370,6 +375,37 @@ node_view err = node_view_error(node_error::not_found);
 | `node_error::readonly` | Попытка записи в readonly-пространство (`/$metrics`) |
 | `node_error::ref_cycle` | Обнаружен цикл или превышена глубина при разыменовании `$ref` |
 | `node_error::parse_error` | Ошибка парсинга JSON |
+
+#### Сообщения об ошибках (Фаза 12)
+
+Функция `node_error_message()` и метод `node_view::error_message()` возвращают человекочитаемое описание ошибки:
+
+```cpp
+// Получить сообщение для кода ошибки
+const char* msg = node_error_message(node_error::not_found);
+// msg == "node not found"
+
+// Получить сообщение через node_view
+node_view v = db.get("/nonexistent");
+if (v.is_error()) {
+    std::cerr << "Ошибка: " << v.error_message() << "\n";
+    // Вывод: "Ошибка: node not found"
+}
+
+// Для обычных и null node_view — "no error"
+node_view ok{};
+// ok.error_message() == "no error"
+```
+
+| Код ошибки | Сообщение |
+|------------|-----------|
+| `node_error::none` | `"no error"` |
+| `node_error::not_found` | `"node not found"` |
+| `node_error::wrong_type` | `"wrong node type for navigation"` |
+| `node_error::index_out_of_range` | `"array index out of range"` |
+| `node_error::readonly` | `"cannot modify read-only path"` |
+| `node_error::ref_cycle` | `"cyclic $ref detected or max depth exceeded"` |
+| `node_error::parse_error` | `"JSON parse error"` |
 
 ---
 
