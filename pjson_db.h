@@ -119,11 +119,11 @@ class pjson_db
     /// Получить узел по пути path (абсолютный путь вида /a/b/0/c).
     /// По умолчанию разыменовывает $ref-узлы автоматически.
     /// Зарезервированные пространства: /$metrics — метрики (только чтение).
-    /// Возвращает node_view(0) при ошибке.
+    /// При ошибке возвращает node_view_error(node_error::...) с типизированным кодом (Фаза 11).
     node_view get( const char* path, bool deref_refs = true ) const
     {
         if ( path == nullptr )
-            return node_view{};
+            return node_view_error( node_error::not_found );
 
         // Проверяем зарезервированное пространство /$metrics
         if ( _is_metrics_path( path ) )
@@ -131,7 +131,7 @@ class pjson_db
 
         node_id cur = _find_root();
         if ( cur == 0 )
-            return node_view{};
+            return node_view_error( node_error::not_found );
 
         const char* p = path;
         // Пропускаем ведущий слэш.
@@ -160,7 +160,7 @@ class pjson_db
                 {
                     node_view resolved = cur_v.deref( true, 32 );
                     if ( !resolved.valid() )
-                        return node_view{};
+                        return node_view_error( node_error::ref_cycle );
                     cur = resolved.id;
                 }
             }
@@ -171,7 +171,7 @@ class pjson_db
             {
                 node_view child = cur_v.at( seg.c_str() );
                 if ( !child.valid() )
-                    return node_view{};
+                    return node_view_error( node_error::not_found );
                 cur = child.id;
             }
             else if ( cur_v.is_array() )
@@ -180,22 +180,27 @@ class pjson_db
                 char*     end_ptr = nullptr;
                 uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );
                 if ( end_ptr == seg.c_str() || *end_ptr != '\0' )
-                    return node_view{};
+                    return node_view_error( node_error::wrong_type );
                 node_view elem = cur_v.at( idx );
                 if ( !elem.valid() )
-                    return node_view{};
+                    return node_view_error( node_error::index_out_of_range );
                 cur = elem.id;
             }
             else
             {
-                return node_view{};
+                return node_view_error( node_error::wrong_type );
             }
         }
 
         node_view result{ cur };
         // Разыменовываем итоговый узел, если он ref.
         if ( deref_refs && result.is_ref() )
-            return result.deref( true, 32 );
+        {
+            node_view derefed = result.deref( true, 32 );
+            if ( !derefed.valid() )
+                return node_view_error( node_error::ref_cycle );
+            return derefed;
+        }
         return result;
     }
 
