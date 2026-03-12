@@ -955,10 +955,12 @@ PMM не имеет встроенной карты имён (`name_map`). Не�
 
 ### Задача 14.0. Подготовка: подключение PMM
 
-- [ ] Скопировать `single_include/pmm/pmm.h` (или пресет `pmm_single_threaded_heap.h`) в проект.
-- [ ] Добавить в `CMakeLists.txt` путь к заголовку PMM.
-- [ ] Убедиться, что проект компилируется с PMM (без использования — только `#include`).
-- [ ] Определить тип менеджера: `using PamManager = pmm::presets::SingleThreadedHeap;`
+- [x] Скопировать `single_include/pmm/pmm.h` (или пресет `pmm_single_threaded_heap.h`) в проект.
+- [x] Добавить в `CMakeLists.txt` путь к заголовку PMM.
+- [x] Убедиться, что проект компилируется с PMM (без использования — только `#include`).
+- [x] Определить тип менеджера: `using PamManager = pmm::PersistMemoryManager<pmm::CacheManagerConfig>;`
+
+**Примечание:** PMM требует C++20. Проект обновлён с C++17 до C++20. Тип `CacheManagerConfig` соответствует однопоточному сценарию (NoLock, HeapStorage, 16B гранула, рост 25%). Добавлены базовые тесты интеграции PMM в `tests/test_pmm_basic.cpp`.
 
 ---
 
