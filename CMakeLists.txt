@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(BinDiffSynchronizer LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+# C++20 требуется для PMM (PersistMemoryManager) — Фаза 14
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -11,6 +12,7 @@ target_include_directories(bindiff INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}/utils
+    ${CMAKE_CURRENT_SOURCE_DIR}/deps/pmm
 )
 
 # Compiler warnings

@@ -955,18 +955,20 @@ PMM не имеет встроенной карты имён (`name_map`). Не�
 
 ### Задача 14.0. Подготовка: подключение PMM
 
-- [ ] Скопировать `single_include/pmm/pmm.h` (или пресет `pmm_single_threaded_heap.h`) в проект.
-- [ ] Добавить в `CMakeLists.txt` путь к заголовку PMM.
-- [ ] Убедиться, что проект компилируется с PMM (без использования — только `#include`).
-- [ ] Определить тип менеджера: `using PamManager = pmm::presets::SingleThreadedHeap;`
+- [x] Скопировать `single_include/pmm/pmm.h` (или пресет `pmm_single_threaded_heap.h`) в проект.
+- [x] Добавить в `CMakeLists.txt` путь к заголовку PMM.
+- [x] Убедиться, что проект компилируется с PMM (без использования — только `#include`).
+- [x] Определить тип менеджера: `using PamManager = pmm::PersistMemoryManager<pmm::CacheManagerConfig>;`
+
+**Примечание:** PMM требует C++20. Проект обновлён с C++17 до C++20. Тип `CacheManagerConfig` соответствует однопоточному сценарию (NoLock, HeapStorage, 16B гранула, рост 25%). Добавлены базовые тесты интеграции PMM в `tests/test_pmm_basic.cpp`.
 
 ---
 
-### Задача 14.1. Адаптер `pptr<T>` ↔ `uintptr_t` (слой совместимости)
+### Задача 14.1. Адаптер `pptr<T>` ↔ `uintptr_t` (слой совместимости) ✅ ВЫПОЛНЕНО
 
 **Цель:** Обеспечить плавный переход, временно поддерживая оба стиля указателей.
 
-- [ ] Создать файл `pam_adapter.h` с маппингом:
+- [x] Создать файл `pam_adapter.h` с маппингом:
   ```cpp
   // Преобразование pptr → uintptr_t (для совместимости с node_id)
   template <typename T>
@@ -976,10 +978,10 @@ PMM не имеет встроенной карты имён (`name_map`). Не�
   template <typename T>
   PamManager::pptr<T> offset_to_pptr(uintptr_t off);
   ```
-- [ ] Определить `node_id` через `pptr<node>` или оставить `uintptr_t` с конверсиями.
-- [ ] Написать тесты конверсии `pptr ↔ uintptr_t`.
+- [x] Определить `node_id` через `pptr<node>` или оставить `uintptr_t` с конверсиями.
+- [x] Написать тесты конверсии `pptr ↔ uintptr_t`.
 
-**Рекомендация:** На этапе миграции сохранить `node_id = uintptr_t` для минимизации изменений в `pjson_node.h`, `pjson_db.h`, `pjson_codec.h`. В будущем (фаза 15+) перейти на `node_id = pptr<node>`.
+**Примечание:** Создан файл `pam_adapter.h` с функциями конверсии. Формула: `byte_offset = granule_index * granule_size` (16 байт для CacheManagerConfig). На этапе миграции `node_id` сохранён как `uintptr_t` для минимизации изменений. Добавлены вспомогательные функции: `is_aligned_offset()`, `align_offset_up()`, `get_granule_size()`. Определены типы `pmm_index_type`, `node_pptr`, `char_pptr`, `byte_pptr`. Добавлено 10 тестов в `tests/test_pmm_basic.cpp` (тег `[task14.1][adapter]`). Все 539 тестов проходят.
 
 ---
 

@@ -20,7 +20,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | Характеристика | Описание |
 |---|---|
 | **Header-only** | Вся реализация — только `.h` файлы, без `.cpp` |
-| **C++17** | Без внешних зависимостей |
+| **C++20** | Требует C++20 (для PMM); без внешних зависимостей |
 | **Персистность** | Данные в ПАП переживают перезапуск без явной сериализации |
 | **Два типа строк** | readonly (`pstringview`): ключи объектов, пути `$ref`, интернированы, сравнение O(1); readwrite (`pstring`): строковые значения JSON, изменяемые на лету |
 | **Нет SSO** | Ни `pstringview`, ни `pstring` не используют SSO — все строки хранятся в ПАП (необходимо для сквозного поиска) |
@@ -34,6 +34,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Коды ошибок** | `node_error` enum + `is_error()` / `error()` в `node_view`; `get()` возвращает типизированные ошибки (`not_found`, `wrong_type`, `index_out_of_range`, `ref_cycle`) вместо `node_view(0)` (Фаза 11) |
 | **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок (Фаза 12) |
 | **Глубокое копирование** | `node_clone()` + `pjson_db::clone()` — создание полных копий поддеревьев JSON в ПАП (Фаза 13) |
+| **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) для будущей миграции (Фаза 14, в процессе) |
 
 ---
 
@@ -105,6 +106,10 @@ C++17 header-only библиотека для работы с JSON в перси
 ├─────────────────────────────────────────────┤
 │   Слой A: pam_core + pam                    │
 │   (ПАП: аллокатор, слоты, realloc)         │
+├─────────────────────────────────────────────┤
+│   Слой A': PMM (Фаза 14, в процессе) 🚧     │
+│   PersistMemoryManager: новый бэкенд ПАП    │
+│   pam_pmm_config.h: конфигурация PamManager │
 └─────────────────────────────────────────────┘
 ```
 
@@ -114,6 +119,9 @@ C++17 header-only библиотека для работы с JSON в перси
 |------|------|----------|
 | `pam_core.h` | A | Ядро ПАМ: аллокатор, слоты, карта имён, realloc; внутренние массивы через pam_array_hdr (≡ pmem_array_hdr) |
 | `pam.h` | A | Фасад: включает pvector, pmap, pstring |
+| `pam_pmm_config.h` | A' | Конфигурация менеджера PMM: определяет `PamManager` для будущей миграции (Фаза 14) |
+| `pam_adapter.h` | A' | Адаптер pptr<T> ↔ uintptr_t: слой совместимости для плавного перехода на PMM (Задача 14.1) |
+| `deps/pmm/pmm.h` | A' | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14) |
 | `persist.h` | A | Базовые типы: fptr<T>, persist<T>, AddressManager |
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
 | `pvector.h` | B | Персистный динамический массив (тонкая обёртка над pmem_array_hdr) |
