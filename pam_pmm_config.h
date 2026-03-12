@@ -13,7 +13,8 @@
 
 #include "pmm.h"
 
-namespace pjson {
+namespace pjson
+{
 
 /**
  * @brief Рекомендуемый тип менеджера ПАП для pjson_db.
