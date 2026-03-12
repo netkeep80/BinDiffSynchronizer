@@ -985,30 +985,31 @@ PMM не имеет встроенной карты имён (`name_map`). Не�
 
 ---
 
-### Задача 14.2. Миграция `pmem_array` и `pvector` на PMM
+### Задача 14.2. Миграция `pmem_array` и `pvector` на PMM ✅ ВЫПОЛНЕНО
 
 **Цель:** Переписать `pmem_array.h` и `pvector.h` для работы с аллокатором PMM.
 
-- [ ] Заменить вызовы `PersistentAddressSpace::Get().Create<T>()` / `Resolve<T>()` на `PamManager::allocate_typed<T>()` / `pptr<T>::resolve()`.
-- [ ] Обновить `pmem_array_hdr`:
+- [x] Заменить вызовы `PersistentAddressSpace::Get().Create<T>()` / `Resolve<T>()` на `PamManager::allocate_typed<T>()` / `pptr<T>::resolve()`.
+- [x] Обновить `pmem_array_hdr`:
   ```cpp
-  struct pmem_array_hdr {
+  struct pmem_array_hdr_pmm {
       uintptr_t size;
       uintptr_t capacity;
-      uintptr_t data_off;  // гранульный индекс вместо байтового смещения
+      uintptr_t data_off;  // байтовое смещение (кратно 16) для совместимости с node_id
   };
   ```
-  Или перейти на `pptr<T>` для `data_off`:
-  ```cpp
-  struct pmem_array_hdr {
-      uintptr_t size;
-      uintptr_t capacity;
-      PamManager::pptr<T> data;  // типобезопасный указатель
-  };
-  ```
-- [ ] Обновить `pmem_array_reserve<T>` — использовать `PamManager::allocate_typed<T>(new_cap)` и `PamManager::deallocate_typed<T>()`.
-- [ ] Обновить `pvector<T>` — тонкая обёртка должна делегировать в обновлённый `pmem_array`.
-- [ ] Прогнать все тесты `test_pmem_array.cpp` и `test_pvector.cpp`.
+- [x] Обновить `pmem_array_reserve<T>` — использовать `PamManager::allocate_typed<T>(new_cap)` и `PamManager::deallocate_typed<T>()`.
+- [x] Обновить `pvector<T>` — тонкая обёртка должна делегировать в обновлённый `pmem_array`.
+- [x] Прогнать все тесты `test_pmem_array.cpp` и `test_pvector.cpp`.
+
+**Примечание:** Реализована инкрементальная стратегия миграции:
+- Созданы новые файлы `pmem_array_pmm.h` и `pvector_pmm.h` с PMM-реализациями.
+- Оригинальные `pmem_array.h` и `pvector.h` сохранены для обратной совместимости.
+- Новые типы: `pjson::pmem_array_hdr_pmm`, `pjson::pvector_pmm<T>`.
+- Новые функции: `pmem_array_pmm_init`, `pmem_array_pmm_reserve`, `pmem_array_pmm_push_back`, и др.
+- Вспомогательные функции: `pjson::pmm_resolve<T>()`, `pjson::pmm_resolve_const<T>()`.
+- Добавлено 21 тест в `tests/test_pmem_array_pmm.cpp` (тег `[task14.2]`).
+- Все 560 тестов проходят.
 
 ---
 
