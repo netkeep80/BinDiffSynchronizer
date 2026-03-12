@@ -32,6 +32,7 @@ set(TEST_SOURCES
     test_pjson_db_errors.cpp
     test_pjson_clone.cpp
     test_pmm_basic.cpp
+    test_pmem_array_pmm.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
