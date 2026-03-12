@@ -44,7 +44,7 @@ namespace pjson
  */
 struct pstring_pmm
 {
-    uintptr_t length;    ///< Число символов (без учёта нулевого терминатора)
+    uintptr_t length; ///< Число символов (без учёта нулевого терминатора)
     uintptr_t chars_off; ///< Байтовое смещение массива char в ПАП; 0 = пустая строка
 
     /**
@@ -186,10 +186,8 @@ struct pstring_pmm
     bool operator<( const pstring_pmm& other ) const { return std::strcmp( c_str(), other.c_str() ) < 0; }
 };
 
-static_assert( sizeof( pstring_pmm ) == 2 * sizeof( void* ),
-               "pstring_pmm должна занимать 2 * sizeof(void*) байт" );
-static_assert( std::is_trivially_copyable<pstring_pmm>::value,
-               "pstring_pmm должен быть тривиально копируемым" );
+static_assert( sizeof( pstring_pmm ) == 2 * sizeof( void* ), "pstring_pmm должна занимать 2 * sizeof(void*) байт" );
+static_assert( std::is_trivially_copyable<pstring_pmm>::value, "pstring_pmm должен быть тривиально копируемым" );
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Вспомогательные функции для работы с pstring_pmm

@@ -202,8 +202,7 @@ TEST_CASE( "pstringview_pmm: chars_offset is non-zero after intern non-empty str
 // ТЕСТЫ МНОЖЕСТВЕННЫХ СТРОК
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstringview_pmm: many distinct strings are all interned correctly",
-           "[pstringview_pmm][intern][task14.4]" )
+TEST_CASE( "pstringview_pmm: many distinct strings are all interned correctly", "[pstringview_pmm][intern][task14.4]" )
 {
     pjson::PamManager::create( 64 * 1024 );
     pjson::pstringview_pmm_reset();
@@ -234,8 +233,7 @@ TEST_CASE( "pstringview_pmm: many distinct strings are all interned correctly",
 // ТЕСТЫ ХЕЛПЕР-ФУНКЦИЙ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstringview_pmm_intern: returns InternResult with correct values",
-           "[pstringview_pmm][helper][task14.4]" )
+TEST_CASE( "pstringview_pmm_intern: returns InternResult with correct values", "[pstringview_pmm][helper][task14.4]" )
 {
     pjson::PamManager::create( 64 * 1024 );
     pjson::pstringview_pmm_reset();
@@ -245,7 +243,7 @@ TEST_CASE( "pstringview_pmm_intern: returns InternResult with correct values",
     REQUIRE( r1.chars_offset != 0u );
 
     // Проверяем, что можно получить строку по смещению
-    auto p   = pjson::offset_to_pptr<pjson::pmm_pstringview>( r1.chars_offset );
+    auto  p  = pjson::offset_to_pptr<pjson::pmm_pstringview>( r1.chars_offset );
     auto* sv = p.resolve();
     REQUIRE( sv != nullptr );
     REQUIRE( std::strcmp( sv->c_str(), "world" ) == 0 );
@@ -348,8 +346,8 @@ TEST_CASE( "pstringview_pmm: can be used as map keys (comparison)", "[pstringvie
     key3.intern( "name" ); // Дубликат key1
 
     // Проверяем уникальность и сравнение
-    REQUIRE( key1 == key3 );                 // Одинаковые строки
-    REQUIRE( key1 != key2 );                 // Разные строки
+    REQUIRE( key1 == key3 );                       // Одинаковые строки
+    REQUIRE( key1 != key2 );                       // Разные строки
     REQUIRE( ( key1 < key2 ) != ( key2 < key1 ) ); // Строгий порядок
 
     pjson::PamManager::destroy();

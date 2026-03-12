@@ -61,7 +61,7 @@ using pmm_pstringview_pptr = typename PamManager::template pptr<pmm_pstringview>
  */
 struct pstringview_pmm
 {
-    uintptr_t length;       ///< Длина строки (без нулевого терминатора)
+    uintptr_t length; ///< Длина строки (без нулевого терминатора)
     uintptr_t chars_offset; ///< Байтовое смещение pstringview в ПАП (не символов, а блока!)
 
     /**
@@ -104,7 +104,7 @@ struct pstringview_pmm
     {
         if ( chars_offset == 0 )
             return "";
-        auto                     p  = offset_to_pptr<pmm_pstringview>( chars_offset );
+        auto                   p  = offset_to_pptr<pmm_pstringview>( chars_offset );
         const pmm_pstringview* sv = p.resolve();
         return ( sv != nullptr ) ? sv->c_str() : "";
     }
@@ -181,9 +181,9 @@ inline pstringview_pmm_intern_result pstringview_pmm_intern( const char* s )
     if ( p.is_null() )
         return result;
 
-    result.chars_offset      = pptr_to_offset( p );
+    result.chars_offset = pptr_to_offset( p );
     pmm_pstringview* sv = p.resolve();
-    result.length            = ( sv != nullptr ) ? static_cast<uintptr_t>( sv->size() ) : 0;
+    result.length       = ( sv != nullptr ) ? static_cast<uintptr_t>( sv->size() ) : 0;
 
     return result;
 }
