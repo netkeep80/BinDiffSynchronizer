@@ -126,6 +126,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pam_adapter.h` | A' | Адаптер pptr<T> ↔ uintptr_t: слой совместимости для плавного перехода на PMM (Задача 14.1); `pptr_to_offset()`, `offset_to_pptr()`, `pmm_resolve<T>()` |
 | `pmem_array_pmm.h` | A' | PMM-реализация персистного массива (Задача 14.2): `pmem_array_hdr_pmm`, шаблонные функции `pmem_array_pmm_*` |
 | `pvector_pmm.h` | A' | PMM-реализация динамического массива (Задача 14.2): `pvector_pmm<T>`, совместим по API с `pvector<T>` |
+| `pmap_pmm.h` | A' | PMM-реализация персистной карты (Задача 14.3): `pmap_pmm<K,V>` — sorted array, совместим по API с `pmap<K,V>` |
 | `deps/pmm/pmm.h` | A' | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14) |
 | `persist.h` | A | Базовые типы: fptr<T>, persist<T>, AddressManager |
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
