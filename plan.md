@@ -895,7 +895,342 @@ node_id clone( node_id src_id );
                     Фаза 12 (сообщения об ошибках) ✅
                           ↓
                     Фаза 13 (глубокое копирование) ✅
+                          ↓
+                    Фаза 14 (переход на PersistMemoryManager)
 ```
 
 Фазы 1 и 3 можно выполнять параллельно (нет зависимостей между pmem_array и node model).
 Фазы 7 и 8 можно выполнять параллельно (оба зависят от Фазы 6).
+
+---
+
+## Фаза 14. Переход на новый менеджер ПАП (`PersistMemoryManager`)
+
+**Цель:** Заменить текущий встроенный менеджер ПАП (`pam_core.h` / `persist.h` / `pam.h`) на внешнюю библиотеку [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) (далее — PMM). PMM предоставляет типобезопасные персистные указатели (`pptr<T>`), AVL-деревья свободных блоков, настраиваемые адресные пространства и готовые персистные структуры данных (`pmap`, `pstringview`).
+
+### Предпосылки перехода
+
+| Аспект | Текущий ПАМ (`pam_core.h`) | PMM (`PersistMemoryManager`) |
+|--------|---------------------------|------------------------------|
+| **Модель указателей** | Сырые `uintptr_t` смещения | Типобезопасные `pptr<T, Manager>` |
+| **Аллокатор** | Bump-аллокатор + линейный free-list | AVL-дерево свободных блоков (best-fit) |
+| **Многопоточность** | Не поддерживается | Настраиваемая политика блокировок (`NoLock` / `SharedMutexLock`) |
+| **Адресные пространства** | Только 64-bit | 16-bit / 32-bit / 64-bit через `AddressTraits` |
+| **Бэкенды хранения** | `fread`/`fwrite` в `malloc`-буфер | `HeapStorage` / `StaticStorage` / `MMapStorage` |
+| **Метаданные объектов** | `type_vec` + `slot_map` + `name_map` внутри ПАП | Заголовок блока (32 байта) + приложение управляет реестрами |
+| **Гранулярность** | Побайтовые смещения | 16/64-байтовые гранулы |
+| **API-модель** | Синглтон `PersistentAddressSpace::Get()` | Статические методы `Mgr::allocate_typed<T>()` |
+| **Персистные контейнеры** | `pvector<T>`, `pmap<K,V>` (sorted array) | `pmap<K,V>` (AVL-дерево), `pstringview` (оптимизированная) |
+| **Расширение памяти** | Удвоение буфера | Политика роста (25% / 50% / 100%) |
+
+### Ключевые архитектурные решения
+
+**Р14.1. Выбор конфигурации PMM.**
+Для pjson_db рекомендуется пресет `SingleThreadedHeap` (32-bit `DefaultAddressTraits`, `HeapStorage`, `NoLock`, 25% рост) — соответствует текущему однопоточному сценарию использования. При необходимости многопоточности — `MultiThreadedHeap`.
+
+```cpp
+// Рекомендуемый тип менеджера:
+using PamManager = pmm::presets::SingleThreadedHeap;
+// Альтернатива для многопоточности:
+// using PamManager = pmm::presets::MultiThreadedHeap;
+```
+
+**Р14.2. Подключение PMM как зависимости.**
+PMM предоставляет single-header вариант (`single_include/pmm/pmm.h`). Варианты подключения:
+- **(a) Vendoring**: скопировать `single_include/pmm/pmm.h` в проект (самый простой вариант, сохраняет header-only принцип).
+- **(b) git submodule**: `git submodule add https://github.com/netkeep80/PersistMemoryManager deps/pmm` и добавить `deps/pmm/include` в `include_directories()`.
+- **(c) CMake FetchContent**: автоматическое скачивание при сборке.
+
+Рекомендация: вариант (a) для минимального изменения инфраструктуры сборки.
+
+**Р14.3. Реестр именованных объектов.**
+PMM не имеет встроенной карты имён (`name_map`). Необходимо реализовать реестр поверх `pmm::pmap<pptr<pstringview>, pptr<void>>` на уровне приложения. Это заменит текущие `PersistentAddressSpace::Find()` / `Create<T>(name)`.
+
+**Р14.4. Формат файла — несовместимость.**
+Формат файла `.pam` полностью несовместим между текущим ПАМ и PMM (разные заголовки, разная гранулярность, разные метаданные блоков). Потребуется:
+- Утилита миграции: загрузка старого `.pam` → экспорт JSON → создание нового `.pam` через PMM → импорт JSON.
+- Либо пересоздание БД из JSON-дампа.
+
+---
+
+### Задача 14.0. Подготовка: подключение PMM
+
+- [ ] Скопировать `single_include/pmm/pmm.h` (или пресет `pmm_single_threaded_heap.h`) в проект.
+- [ ] Добавить в `CMakeLists.txt` путь к заголовку PMM.
+- [ ] Убедиться, что проект компилируется с PMM (без использования — только `#include`).
+- [ ] Определить тип менеджера: `using PamManager = pmm::presets::SingleThreadedHeap;`
+
+---
+
+### Задача 14.1. Адаптер `pptr<T>` ↔ `uintptr_t` (слой совместимости)
+
+**Цель:** Обеспечить плавный переход, временно поддерживая оба стиля указателей.
+
+- [ ] Создать файл `pam_adapter.h` с маппингом:
+  ```cpp
+  // Преобразование pptr → uintptr_t (для совместимости с node_id)
+  template <typename T>
+  uintptr_t pptr_to_offset(PamManager::pptr<T> p);
+
+  // Преобразование uintptr_t → pptr (для новых вызовов)
+  template <typename T>
+  PamManager::pptr<T> offset_to_pptr(uintptr_t off);
+  ```
+- [ ] Определить `node_id` через `pptr<node>` или оставить `uintptr_t` с конверсиями.
+- [ ] Написать тесты конверсии `pptr ↔ uintptr_t`.
+
+**Рекомендация:** На этапе миграции сохранить `node_id = uintptr_t` для минимизации изменений в `pjson_node.h`, `pjson_db.h`, `pjson_codec.h`. В будущем (фаза 15+) перейти на `node_id = pptr<node>`.
+
+---
+
+### Задача 14.2. Миграция `pmem_array` и `pvector` на PMM
+
+**Цель:** Переписать `pmem_array.h` и `pvector.h` для работы с аллокатором PMM.
+
+- [ ] Заменить вызовы `PersistentAddressSpace::Get().Create<T>()` / `Resolve<T>()` на `PamManager::allocate_typed<T>()` / `pptr<T>::resolve()`.
+- [ ] Обновить `pmem_array_hdr`:
+  ```cpp
+  struct pmem_array_hdr {
+      uintptr_t size;
+      uintptr_t capacity;
+      uintptr_t data_off;  // гранульный индекс вместо байтового смещения
+  };
+  ```
+  Или перейти на `pptr<T>` для `data_off`:
+  ```cpp
+  struct pmem_array_hdr {
+      uintptr_t size;
+      uintptr_t capacity;
+      PamManager::pptr<T> data;  // типобезопасный указатель
+  };
+  ```
+- [ ] Обновить `pmem_array_reserve<T>` — использовать `PamManager::allocate_typed<T>(new_cap)` и `PamManager::deallocate_typed<T>()`.
+- [ ] Обновить `pvector<T>` — тонкая обёртка должна делегировать в обновлённый `pmem_array`.
+- [ ] Прогнать все тесты `test_pmem_array.cpp` и `test_pvector.cpp`.
+
+---
+
+### Задача 14.3. Миграция `pmap` на PMM
+
+**Цель:** Решить, использовать ли собственный sorted-array `pmap` или AVL-дерево `pmm::pmap`.
+
+**Вариант A (рекомендуемый на первом этапе):** Оставить sorted-array `pmap`, но переключить аллокатор на PMM.
+- [ ] Заменить вызовы аллокатора в `pmem_array_*` функциях (которые использует `pmap`).
+- [ ] Тесты `test_pmap.cpp` должны пройти без изменений.
+
+**Вариант B (в будущем):** Перейти на `pmm::pmap` (AVL-дерево).
+- [ ] Обеспечить совместимость API: `insert()`, `find()`, `contains()`, итерация.
+- [ ] Обновить `pjson_node.h` — `object_val` должен использовать новый `pmap`.
+- [ ] Обновить итераторы объектов (`object_iterator` из фазы 10).
+- [ ] Прогнать все тесты `test_pmap.cpp` и `test_pjson_db.cpp`.
+
+---
+
+### Задача 14.4. Миграция `pstring` и `pstringview` на PMM
+
+**Цель:** Адаптировать строковые типы для работы с аллокатором PMM.
+
+**14.4.1. `pstringview` (readonly, интернированные).**
+
+PMM v0.21.0 уже содержит оптимизированный `pmm::pstringview` (single-block, с `pptr<pstringview>` как ключ `pmap`). Варианты:
+
+- **Вариант A (рекомендуемый):** Использовать `pmm::pstringview` напрямую.
+  - [ ] Заменить текущий `pstringview` (offset + length) на `PamManager::pstringview`.
+  - [ ] Заменить `pstringview_table` (hash-таблица) на `PamManager::pstringview::intern()`.
+  - [ ] Обновить `pam_intern_string()` → делегировать в `PamManager::pstringview::intern()`.
+  - [ ] Обновить `pjson_node.h` — ключи объектов используют `pptr<pstringview>`.
+  - [ ] Обновить `pjson_codec.h` — парсер интернирует ключи через PMM.
+  - [ ] Тесты `test_pstringview.cpp`.
+
+- **Вариант B:** Оставить собственный `pstringview` с переключением аллокатора.
+
+**14.4.2. `pstring` (readwrite, изменяемые строки JSON).**
+
+PMM не имеет аналога `pstring`. Необходимо сохранить текущую реализацию, переключив аллокатор:
+
+- [ ] В `pstring`: заменить `PersistentAddressSpace::Get().Create<char>()` на `PamManager::allocate_typed<char>(len)`.
+- [ ] В `node_set_string()`: аналогично.
+- [ ] Тесты `test_pstring.cpp`.
+
+---
+
+### Задача 14.5. Миграция `pjson_pool` на PMM
+
+**Цель:** Пул узлов (`pjson_pool`) должен аллоцировать массив `node` через PMM.
+
+- [ ] В `pjson_pool`: заменить рост массива узлов на `PamManager::allocate_typed<node>(new_cap)`.
+- [ ] Free-list внутри пула не меняется (внутренняя логика на основе `node_tag::_free`).
+- [ ] Тесты `test_pjson_pool.cpp`.
+
+---
+
+### Задача 14.6. Миграция `PersistentAddressSpace` → PMM API
+
+**Цель:** Заменить синглтон `PersistentAddressSpace` на статический API PMM.
+
+Таблица соответствия методов:
+
+| Текущий API (`PersistentAddressSpace`) | Новый API (`PamManager`) |
+|----------------------------------------|--------------------------|
+| `Init(filename)` | `PamManager::create(initial_size)` + `pmm::load_manager_from_file()` |
+| `Get()` | Не нужен (статические методы) |
+| `Create<T>(name)` | `PamManager::allocate_typed<T>()` + реестр имён |
+| `CreateArray<T>(count, name)` | `PamManager::allocate_typed<T>(count)` + реестр имён |
+| `Resolve<T>(offset)` | `pptr<T>::resolve()` |
+| `Delete(offset)` | `PamManager::deallocate_typed<T>(pptr)` |
+| `Find(name)` | Поиск в пользовательском реестре имён (`pmap`) |
+| `FindTyped<T>(name)` | Поиск в реестре имён + приведение типа |
+| `Realloc(off, old, new, size)` | Аллокация нового блока + копирование + деаллокация старого |
+| `Save()` | `pmm::save_manager<PamManager>(filename)` |
+| `Load()` | `pmm::load_manager_from_file<PamManager>(filename)` |
+| `GetBump()` | `PamManager::used_size()` |
+| `GetDataSize()` | `PamManager::total_size()` |
+| `GetFreeListSize()` | `PamManager::free_size()` / `PamManager::get_stats()` |
+| `GetSlotCount()` | Подсчёт записей в пользовательском реестре |
+| `GetNamedCount()` | Подсчёт записей в пользовательском реестре имён |
+| `GetStringTableOffset()` | Не нужен (PMM хранит `pstringview` автоматически) |
+
+- [ ] Создать фасад `pam_pmm.h`, реализующий совместимый API поверх PMM.
+- [ ] Реализовать реестр именованных объектов через `pmm::pmap<pptr<pstringview>, uintptr_t>`.
+- [ ] Реализовать сохранение/загрузку через `pmm::save_manager()` / `pmm::load_manager_from_file()`.
+- [ ] Обновить `pjson_db::open()` — использовать новый фасад.
+- [ ] Обновить `pjson_db::save()`.
+- [ ] Тесты `test_pam.cpp`, `test_pam_dynamic.cpp`, `test_pam_metrics.cpp`.
+
+---
+
+### Задача 14.7. Миграция `persist<T>` и `fptr<T>`
+
+**Цель:** Определить судьбу `persist<T>` и `fptr<T>` в новой архитектуре.
+
+- `persist<T>` — обёртка для POD-типов в ПАП. В PMM не нужна: PMM сам гарантирует работу с тривиально копируемыми типами.
+- `fptr<T>` — персистный указатель (offset-based). Заменяется на `pptr<T, PamManager>`.
+
+- [ ] Определить `fptr<T>` как алиас или тонкую обёртку над `pptr<T>`:
+  ```cpp
+  template <typename T>
+  using fptr = PamManager::pptr<T>;
+  ```
+- [ ] Удалить `persist<T>` (или оставить как deprecated alias).
+- [ ] Обновить `pallocator.h` — STL-совместимый аллокатор через PMM.
+- [ ] Тесты `test_persist.cpp`, `test_pallocator.cpp`.
+
+---
+
+### Задача 14.8. Миграция `pjson_db` (высокоуровневый API)
+
+**Цель:** Обновить `pjson_db.h` для работы с новым бэкендом.
+
+- [ ] `pjson_db::open()` — инициализация PMM вместо `PersistentAddressSpace::Init()`.
+- [ ] `pjson_db::save()` — сохранение через `pmm::save_manager()`.
+- [ ] Обновить метрики (`db_metrics`) — маппинг полей ПАМ на PMM stats:
+  ```
+  pam_bump_offset    → PamManager::used_size()
+  pam_free_list_size → PamManager::get_stats().free_count
+  pam_total_size     → PamManager::total_size()
+  pam_slot_count     → PamManager::get_stats().alloc_count
+  pam_named_count    → name_registry.size()
+  ```
+- [ ] Все тесты `test_pjson_db.cpp`, `test_pjson_db_errors.cpp`, `test_pjson_db_perf.cpp`, `test_pjson_clone.cpp`.
+
+---
+
+### Задача 14.9. Утилита миграции старых `.pam` файлов
+
+**Цель:** Обеспечить переход для существующих баз данных.
+
+- [ ] Создать утилиту `pam_migrate.cpp`:
+  1. Загрузить старый `.pam` файл через текущий `PersistentAddressSpace`.
+  2. Экспортировать всё дерево JSON в строку: `node_to_string(root_id)`.
+  3. Создать новый `.pam` файл через PMM: `PamManager::create(size)`.
+  4. Импортировать JSON в новую БД: `pjson_db::parse_into(root, json_str)`.
+  5. Сохранить: `pmm::save_manager<PamManager>(new_filename)`.
+- [ ] Написать тест миграции: создать БД в старом формате → мигрировать → проверить данные.
+
+---
+
+### Задача 14.10. Удаление устаревшего кода
+
+**Цель:** После успешной миграции всех тестов — удалить старый ПАМ.
+
+- [ ] Удалить `pam_core.h` (1500 строк).
+- [ ] Удалить `persist.h` (374 строки) — или оставить только алиасы `fptr<T>` → `pptr<T>`.
+- [ ] Удалить `pam.h` (88 строк) — заменить на новый фасад.
+- [ ] Обновить `CMakeLists.txt` — убрать устаревшие зависимости.
+- [ ] Обновить `readme.md` — документация нового ПАМ.
+- [ ] Финальный прогон всех тестов.
+
+---
+
+### Задача 14.11. Обновить тесты и демонстрации
+
+- [ ] `test_pam.cpp` — адаптировать под новый API.
+- [ ] `test_persist.cpp` — обновить или удалить (если `persist<T>` удалён).
+- [ ] `test_pallocator.cpp` — обновить под PMM-аллокатор.
+- [ ] `test_pam_dynamic.cpp`, `test_pam_metrics.cpp`, `test_pam_perf.cpp` — адаптировать.
+- [ ] `main.cpp` — обновить демонстрацию на новый бэкенд.
+- [ ] Все 521+ тестов проекта должны пройти.
+
+---
+
+### Порядок выполнения задач Фазы 14
+
+```
+Задача 14.0 (подключение PMM)
+        ↓
+Задача 14.1 (адаптер pptr ↔ uintptr_t)
+        ↓
+  ┌─────┼─────────┐
+  ↓     ↓         ↓
+14.2  14.4.2    14.7
+(array, (pstring) (fptr)
+vector)
+  ↓     ↓
+14.3  14.4.1
+(pmap) (pstringview)
+  └─────┼─────────┘
+        ↓
+Задача 14.5 (pjson_pool)
+        ↓
+Задача 14.6 (PersistentAddressSpace → PMM)
+        ↓
+Задача 14.8 (pjson_db)
+        ↓
+  ┌─────┴─────┐
+  ↓           ↓
+14.9        14.11
+(миграция)  (тесты)
+  └─────┬─────┘
+        ↓
+Задача 14.10 (удаление устаревшего кода)
+```
+
+Задачи 14.2, 14.4.2 и 14.7 можно выполнять параллельно (независимые модули с общей зависимостью от 14.1).
+Задачи 14.9 и 14.11 можно выполнять параллельно (одна создаёт утилиту, другая обновляет тесты).
+
+---
+
+### Критерии приёмки Фазы 14
+
+- [ ] PMM подключён как зависимость (single-header или submodule).
+- [ ] Все персистные типы (`pvector`, `pmap`, `pstring`, `pstringview`) работают через аллокатор PMM.
+- [ ] `pjson_db::open()` / `save()` используют PMM для управления ПАП.
+- [ ] Реестр именованных объектов реализован поверх `pmm::pmap`.
+- [ ] `fptr<T>` = `pptr<T>` (алиас или обёртка).
+- [ ] Утилита миграции `.pam` → новый формат работает.
+- [ ] Все 521+ тестов проходят.
+- [ ] Старый `pam_core.h` / `persist.h` удалены или содержат только совместимые алиасы.
+- [ ] `readme.md` обновлён.
+- [ ] CI проходит.
+
+---
+
+### Риски и смягчение
+
+| Риск | Вероятность | Влияние | Смягчение |
+|------|-------------|---------|-----------|
+| Несовместимость формата файла | Высокая | Среднее | Утилита миграции (задача 14.9) |
+| Различие в семантике `Realloc` | Средняя | Высокое | PMM не имеет `Realloc` — нужно alloc+copy+dealloc; проверить производительность `pvector::push_back` |
+| Overhead гранульного выравнивания | Низкая | Низкое | 16-байтовые гранулы дают ≤15 байт overhead на аллокацию; для мелких объектов пул сглаживает |
+| Потеря `type_vec` (runtime type info) | Средняя | Низкое | В pjson_db type info хранится в `node_tag`; `type_vec` нужен только для legacy API |
+| Регрессия производительности | Средняя | Среднее | AVL-аллокатор O(log n) vs bump O(1); компенсируется лучшей утилизацией памяти; бенчмарки из фазы 9 |
