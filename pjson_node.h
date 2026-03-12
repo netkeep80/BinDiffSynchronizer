@@ -1055,6 +1055,211 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
 }
 
 // ---------------------------------------------------------------------------
+// Фаза 13: Глубокое копирование узлов (node_clone)
+// ---------------------------------------------------------------------------
+//
+// Функция node_clone создаёт глубокую копию поддерева JSON в ПАП.
+// Копируются все вложенные узлы, строки, массивы и объекты.
+// ref-узлы копируются как ref (путь интернируется, target не разрешается).
+//
+// Все комментарии — на русском языке (Тр.6).
+
+/// Глубоко скопировать узел (Задача 13.1).
+/// Создаёт полную копию поддерева, включая все вложенные структуры.
+/// ref-узлы копируются как ref (путь копируется, target = 0, не разрешается автоматически).
+/// Возвращает node_id нового узла (копии); 0 при ошибке.
+inline node_id node_clone( node_id src_id )
+{
+    if ( src_id == 0 )
+        return 0;
+
+    auto& pam = PersistentAddressSpace::Get();
+
+    // Разрешаем исходный узел.
+    const node* src = pam.Resolve<node>( src_id );
+    if ( src == nullptr )
+        return 0;
+
+    // Аллоцируем новый узел.
+    fptr<node> dst_fptr;
+    dst_fptr.New(); // Может вызвать realloc!
+    node_id dst_id = dst_fptr.addr();
+
+    // Переразрешаем src после возможного realloc.
+    src = pam.Resolve<node>( src_id );
+    if ( src == nullptr )
+        return dst_id;
+
+    switch ( src->tag )
+    {
+    case node_tag::null:
+        node_init_null( dst_id );
+        break;
+
+    case node_tag::boolean:
+        node_set_bool( dst_id, src->boolean_val != 0 );
+        break;
+
+    case node_tag::integer:
+        node_set_int( dst_id, src->int_val );
+        break;
+
+    case node_tag::uinteger:
+        node_set_uint( dst_id, src->uint_val );
+        break;
+
+    case node_tag::real:
+        node_set_real( dst_id, src->real_val );
+        break;
+
+    case node_tag::string:
+    {
+        // Копируем pstring (readwrite): читаем символы из исходного узла.
+        std::string_view sv = node_view{ src_id }.as_string();
+        std::string      s( sv );
+        node_set_string( dst_id, s.c_str() );
+        break;
+    }
+
+    case node_tag::binary:
+    {
+        // Инициализируем binary-узел и копируем данные побайтно.
+        node_set_binary( dst_id );
+        // Переразрешаем src после set_binary (может вызвать realloc).
+        src = pam.Resolve<node>( src_id );
+        if ( src == nullptr )
+            break;
+        uintptr_t bin_size = src->binary_val.size;
+        if ( bin_size > 0 && src->binary_val.data_off != 0 )
+        {
+            const uint8_t* bin_data = pam.Resolve<uint8_t>( src->binary_val.data_off );
+            if ( bin_data != nullptr )
+            {
+                for ( uintptr_t i = 0; i < bin_size; ++i )
+                {
+                    uint8_t byte = bin_data[i];
+                    node_binary_push_back( dst_id, byte );
+                    // Переразрешаем bin_data после push_back (может вызвать realloc).
+                    src = pam.Resolve<node>( src_id );
+                    if ( src == nullptr || src->binary_val.data_off == 0 )
+                        break;
+                    bin_data = pam.Resolve<uint8_t>( src->binary_val.data_off );
+                    if ( bin_data == nullptr )
+                        break;
+                }
+            }
+        }
+        break;
+    }
+
+    case node_tag::array:
+    {
+        // Инициализируем array-узел и рекурсивно копируем элементы.
+        node_set_array( dst_id );
+        // Переразрешаем src после set_array.
+        src = pam.Resolve<node>( src_id );
+        if ( src == nullptr )
+            break;
+        uintptr_t arr_size = src->array_val.size;
+        for ( uintptr_t i = 0; i < arr_size; ++i )
+        {
+            // Получаем node_id i-го элемента исходного массива.
+            node_view src_elem = node_view{ src_id }.at( i );
+            if ( !src_elem.valid() )
+                continue;
+            // Рекурсивно клонируем элемент.
+            node_id elem_clone = node_clone( src_elem.id );
+            // Добавляем слот в целевой массив.
+            node_id slot_id = node_array_push_back( dst_id );
+            // Копируем содержимое склонированного элемента в слот.
+            // Так как push_back создаёт null-узел, а clone создаёт полную копию,
+            // нужно переместить данные. Проще: записываем node_id прямо в массив.
+            node* dst_node = pam.Resolve<node>( dst_id );
+            if ( dst_node != nullptr && dst_node->tag == node_tag::array && dst_node->array_val.data_off != 0 )
+            {
+                node_id* arr = pam.Resolve<node_id>( dst_node->array_val.data_off );
+                if ( arr != nullptr && dst_node->array_val.size > 0 )
+                {
+                    arr[dst_node->array_val.size - 1] = elem_clone;
+                }
+            }
+            // Удаляем временный null-слот.
+            if ( slot_id != 0 && slot_id != elem_clone )
+            {
+                fptr<node> tmp;
+                tmp.set_addr( slot_id );
+                tmp.Delete();
+            }
+        }
+        break;
+    }
+
+    case node_tag::object:
+    {
+        // Инициализируем object-узел и рекурсивно копируем пары ключ-значение.
+        node_set_object( dst_id );
+        node_view src_view{ src_id };
+        uintptr_t obj_size = src_view.size();
+        for ( uintptr_t i = 0; i < obj_size; ++i )
+        {
+            std::string_view key_sv = src_view.key_at( i );
+            node_view        val_v  = src_view.value_at( i );
+            if ( key_sv.empty() && !val_v.valid() )
+                continue;
+            std::string key_s( key_sv );
+            // Рекурсивно клонируем значение.
+            node_id val_clone = node_clone( val_v.id );
+            // Вставляем ключ в целевой объект.
+            node_id slot_id = node_object_insert( dst_id, key_s.c_str() );
+            // Записываем склонированное значение в слот.
+            node* dst_node = pam.Resolve<node>( dst_id );
+            if ( dst_node != nullptr && dst_node->tag == node_tag::object && dst_node->object_val.data_off != 0 )
+            {
+                object_entry* entries = pam.Resolve<object_entry>( dst_node->object_val.data_off );
+                if ( entries != nullptr )
+                {
+                    // Ищем запись по slot_id (value) и заменяем.
+                    for ( uintptr_t j = 0; j < dst_node->object_val.size; ++j )
+                    {
+                        if ( entries[j].value == slot_id )
+                        {
+                            entries[j].value = val_clone;
+                            break;
+                        }
+                    }
+                }
+            }
+            // Удаляем временный null-слот, если он не был использован.
+            if ( slot_id != 0 && slot_id != val_clone )
+            {
+                fptr<node> tmp;
+                tmp.set_addr( slot_id );
+                tmp.Delete();
+            }
+        }
+        break;
+    }
+
+    case node_tag::ref:
+    {
+        // Копируем ref-узел: копируем путь, target = 0 (не разрешён).
+        std::string_view path_sv = node_view{ src_id }.ref_path();
+        std::string      path_s( path_sv );
+        node_set_ref( dst_id, path_s.c_str() );
+        // target не копируем (остаётся 0) — ссылка не разрешена в копии.
+        break;
+    }
+
+    case node_tag::_free:
+        // Служебный тег — не копируем.
+        node_init_null( dst_id );
+        break;
+    }
+
+    return dst_id;
+}
+
+// ---------------------------------------------------------------------------
 // Фаза 10: Итераторы для обхода дерева JSON
 // ---------------------------------------------------------------------------
 //

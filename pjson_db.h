@@ -12,6 +12,7 @@
 // Все комментарии — на русском языке (Тр.6).
 
 #include "pjson_codec.h"
+#include "pjson_db_helpers.h"
 #include <string>
 #include <string_view>
 #include <vector>
@@ -564,6 +565,118 @@ class pjson_db
     }
 
     // -----------------------------------------------------------------------
+    // Фаза 13: Глубокое копирование узлов (clone)
+    // -----------------------------------------------------------------------
+
+    /// Глубоко скопировать узел по пути src_path в dest_path (Задача 13.2).
+    /// Создаёт полную копию поддерева, включая все вложенные структуры.
+    /// ref-узлы копируются как ref (путь копируется, target = 0, не разрешается автоматически).
+    /// Возвращает true при успехе, false при ошибке.
+    bool clone( const char* src_path, const char* dest_path )
+    {
+        if ( src_path == nullptr || dest_path == nullptr )
+            return false;
+        if ( _is_metrics_path( src_path ) || _is_metrics_path( dest_path ) )
+            return false;
+
+        // Получаем исходный узел.
+        node_view src_view = get( src_path, /*deref_refs=*/false );
+        if ( !src_view.valid() )
+            return false;
+
+        // Клонируем узел.
+        node_id cloned_id = node_clone( src_view.id );
+        if ( cloned_id == 0 )
+            return false;
+
+        // Разбираем путь назначения на родительский путь и последний сегмент.
+        std::string parent_path;
+        std::string last_seg;
+        _split_path( dest_path, parent_path, last_seg );
+
+        // Получаем или создаём родительский узел.
+        node_id parent_id = 0;
+        if ( parent_path.empty() || parent_path == "/" )
+        {
+            parent_id = _find_root();
+        }
+        else
+        {
+            parent_id = _ensure_path( parent_path.c_str() );
+            if ( parent_id != 0 )
+            {
+                // Убедимся, что родитель — объект.
+                node_view pv{ parent_id };
+                if ( pv.is_null() )
+                    node_set_object( parent_id );
+            }
+        }
+
+        if ( parent_id == 0 )
+        {
+            _free_node_tree( cloned_id );
+            return false;
+        }
+
+        auto& pam         = PersistentAddressSpace::Get();
+        node* parent_node = pam.Resolve<node>( parent_id );
+        if ( parent_node == nullptr )
+        {
+            _free_node_tree( cloned_id );
+            return false;
+        }
+
+        // Вставляем клонированный узел в родителя.
+        if ( parent_node->tag == node_tag::object )
+        {
+            // Удаляем старое значение по ключу, если есть.
+            node_view existing = node_view{ parent_id }.at( last_seg.c_str() );
+            if ( existing.valid() )
+            {
+                _free_node_tree( existing.id );
+                _object_erase( parent_id, last_seg.c_str() );
+            }
+
+            // Вставляем клон.
+            _object_insert_direct( parent_id, last_seg.c_str(), cloned_id );
+        }
+        else if ( parent_node->tag == node_tag::array )
+        {
+            // Интерпретируем last_seg как индекс.
+            char*     end_ptr = nullptr;
+            uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( last_seg.c_str(), &end_ptr, 10 ) );
+            if ( end_ptr == last_seg.c_str() || *end_ptr != '\0' )
+            {
+                _free_node_tree( cloned_id );
+                return false;
+            }
+
+            // Удаляем старый элемент по индексу, если есть.
+            node_view existing = node_view{ parent_id }.at( idx );
+            if ( existing.valid() )
+            {
+                _free_node_tree( existing.id );
+            }
+
+            // Вставляем клон в массив.
+            _array_set_direct( parent_id, idx, cloned_id );
+        }
+        else
+        {
+            // Родитель не объект и не массив — не можем вставить.
+            _free_node_tree( cloned_id );
+            return false;
+        }
+
+        _update_metrics_after_mutation();
+        return true;
+    }
+
+    /// Глубоко скопировать узел по node_id (Задача 13.1).
+    /// Возвращает node_id нового узла (копии); 0 при ошибке.
+    node_id clone( node_id src_id ) { return node_clone( src_id ); }
+
+    // -----------------------------------------------------------------------
     // Доступ к ПАП напрямую
     // -----------------------------------------------------------------------
 
@@ -758,34 +871,7 @@ class pjson_db
     /// Разбить путь на родительский путь и последний сегмент.
     static void _split_path( const char* path, std::string& parent, std::string& last )
     {
-        if ( path == nullptr || path[0] == '\0' )
-        {
-            parent = "";
-            last   = "";
-            return;
-        }
-
-        std::string full( path );
-        // Убираем trailing slash.
-        while ( full.size() > 1 && full.back() == '/' )
-            full.pop_back();
-
-        auto pos = full.rfind( '/' );
-        if ( pos == std::string::npos )
-        {
-            parent = "";
-            last   = full;
-        }
-        else if ( pos == 0 )
-        {
-            parent = "/";
-            last   = full.substr( 1 );
-        }
-        else
-        {
-            parent = full.substr( 0, pos );
-            last   = full.substr( pos + 1 );
-        }
+        pjson_split_path( path, parent, last );
     }
 
     /// Обеспечить существование узла по пути, создавая промежуточные объекты.
@@ -904,13 +990,7 @@ class pjson_db
     }
 
     /// Проверить, является ли следующий сегмент пути числовым индексом.
-    static bool _next_seg_is_numeric( const char* p )
-    {
-        if ( p == nullptr || *p == '\0' )
-            return false;
-        char c = *p;
-        return ( c >= '0' && c <= '9' );
-    }
+    static bool _next_seg_is_numeric( const char* p ) { return pjson_next_seg_is_numeric( p ); }
 
     // -----------------------------------------------------------------------
     // Вспомогательные методы: удаление узлов
@@ -1095,6 +1175,123 @@ class pjson_db
         return true;
     }
 
+    /// Вставить node_id напрямую в объект под ключом key (Фаза 13).
+    /// Ключ интернируется через pstringview. Узел value_id уже должен быть создан.
+    bool _object_insert_direct( node_id obj_id, const char* key, node_id value_id )
+    {
+        if ( obj_id == 0 || key == nullptr || value_id == 0 )
+            return false;
+
+        auto& pam = PersistentAddressSpace::Get();
+
+        // Интернируем ключ.
+        auto key_result = pam_intern_string( key );
+
+        // Переразрешаем узел после intern (может вызвать realloc).
+        node* n = pam.Resolve<node>( obj_id );
+        if ( n == nullptr || n->tag != node_tag::object )
+            return false;
+
+        // Создаём новую запись.
+        object_entry new_entry;
+        new_entry.key_length       = key_result.length;
+        new_entry.key_chars_offset = key_result.chars_offset;
+        new_entry.value            = value_id;
+
+        // Используем pmem_array_insert_sorted для вставки.
+        struct ObjKeyOf
+        {
+            uintptr_t operator()( const object_entry& e ) const { return e.key_chars_offset; }
+        };
+        struct ObjLess
+        {
+            bool operator()( uintptr_t a_offset, uintptr_t b_offset ) const
+            {
+                auto& pam = PersistentAddressSpace::Get();
+                if ( a_offset == 0 && b_offset == 0 )
+                    return false;
+                if ( a_offset == 0 )
+                    return true;
+                if ( b_offset == 0 )
+                    return false;
+                const char* a = pam.Resolve<char>( a_offset );
+                const char* b = pam.Resolve<char>( b_offset );
+                if ( a == nullptr || b == nullptr )
+                    return false;
+                return std::strcmp( a, b ) < 0;
+            }
+        };
+
+        // Получаем смещение заголовка pmem_array_hdr внутри object_val.
+        n = pam.Resolve<node>( obj_id );
+        if ( n == nullptr )
+            return false;
+        uintptr_t hdr_off = pam.PtrToOffset( reinterpret_cast<pmem_array_hdr*>( &( n->object_val.size ) ) );
+
+        pmem_array_insert_sorted<object_entry, ObjKeyOf, ObjLess>( hdr_off, new_entry, ObjKeyOf{}, ObjLess{} );
+
+        return true;
+    }
+
+    /// Установить node_id напрямую в массив по индексу idx (Фаза 13).
+    /// Если idx >= size, расширяем массив до idx+1.
+    bool _array_set_direct( node_id arr_id, uintptr_t idx, node_id value_id )
+    {
+        if ( arr_id == 0 || value_id == 0 )
+            return false;
+
+        auto& pam = PersistentAddressSpace::Get();
+        node* n   = pam.Resolve<node>( arr_id );
+        if ( n == nullptr || n->tag != node_tag::array )
+            return false;
+
+        uintptr_t current_size = n->array_val.size;
+
+        // Если индекс в пределах текущего размера — просто заменяем.
+        if ( idx < current_size )
+        {
+            node_id* arr = pam.Resolve<node_id>( n->array_val.data_off );
+            if ( arr != nullptr )
+            {
+                arr[idx] = value_id;
+                return true;
+            }
+            return false;
+        }
+
+        // Иначе расширяем массив до idx+1.
+        // Добавляем null-узлы для промежуточных индексов.
+        while ( current_size < idx )
+        {
+            node_array_push_back( arr_id );
+            n = pam.Resolve<node>( arr_id );
+            if ( n == nullptr )
+                return false;
+            current_size = n->array_val.size;
+        }
+
+        // Теперь добавляем элемент на позицию idx.
+        node_array_push_back( arr_id );
+        n = pam.Resolve<node>( arr_id );
+        if ( n == nullptr || n->array_val.data_off == 0 )
+            return false;
+
+        node_id* arr = pam.Resolve<node_id>( n->array_val.data_off );
+        if ( arr == nullptr )
+            return false;
+
+        // Удаляем автоматически созданный null-узел и заменяем на value_id.
+        if ( arr[idx] != 0 )
+        {
+            fptr<node> tmp;
+            tmp.set_addr( arr[idx] );
+            tmp.Delete();
+        }
+        arr[idx] = value_id;
+
+        return true;
+    }
+
     // -----------------------------------------------------------------------
     // Вспомогательные методы: метрики (Фаза 7)
     // -----------------------------------------------------------------------
@@ -1183,56 +1380,7 @@ class pjson_db
     void _count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64_t& ref_cnt, uint64_t& array_cnt,
                                   uint64_t& object_cnt, uint64_t& binary_bytes ) const
     {
-        if ( id == 0 )
-            return;
-        const node_view v{ id };
-        if ( !v.valid() )
-            return;
-
-        ++node_cnt;
-
-        switch ( v.tag() )
-        {
-        case node_tag::array:
-            ++array_cnt;
-            {
-                uintptr_t sz = v.size();
-                for ( uintptr_t i = 0; i < sz; ++i )
-                {
-                    node_view elem = v.at( i );
-                    if ( elem.valid() )
-                        _count_nodes_in_subtree( elem.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-                }
-            }
-            break;
-        case node_tag::object:
-            ++object_cnt;
-            {
-                uintptr_t sz = v.size();
-                for ( uintptr_t i = 0; i < sz; ++i )
-                {
-                    node_view val = v.value_at( i );
-                    if ( val.valid() )
-                        _count_nodes_in_subtree( val.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-                }
-            }
-            break;
-        case node_tag::ref:
-            ++ref_cnt;
-            // Не обходим цель ref (избегаем дублирования счёта).
-            break;
-        case node_tag::binary:
-            // Считаем байты из binary_val.size.
-            {
-                const auto& pam = PersistentAddressSpace::Get();
-                const node* n   = pam.Resolve<node>( id );
-                if ( n != nullptr )
-                    binary_bytes += static_cast<uint64_t>( n->binary_val.size );
-            }
-            break;
-        default:
-            break;
-        }
+        pjson_count_nodes_in_subtree( id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
     }
 
     /// Быстрое обновление метрик после мутации (Задача 7.2).
@@ -1255,64 +1403,9 @@ class pjson_db
 
     /// Рекурсивный обход поддерева для поиска string-узлов (pstring, readwrite)
     /// чьё значение содержит подстроку pattern.
-    ///
-    /// Заполняет results списком node_id найденных string-узлов.
     void _search_node_strings_in_subtree( node_id id, const char* pattern, std::vector<node_id>& results ) const
     {
-        if ( id == 0 )
-            return;
-        const node_view v{ id };
-        if ( !v.valid() )
-            return;
-
-        switch ( v.tag() )
-        {
-        case node_tag::string:
-        {
-            // Проверяем, содержит ли pstring-значение подстроку pattern.
-            std::string_view sv = v.as_string();
-            if ( pattern[0] == '\0' )
-            {
-                // Пустой pattern — возвращаем все string-узлы.
-                results.push_back( id );
-            }
-            else if ( !sv.empty() )
-            {
-                // Поиск подстроки через std::strstr (безопасно: sv нуль-терминирована pstring).
-                const char* s = sv.data();
-                if ( s != nullptr && std::strstr( s, pattern ) != nullptr )
-                    results.push_back( id );
-            }
-            break;
-        }
-        case node_tag::array:
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view elem = v.at( i );
-                if ( elem.valid() )
-                    _search_node_strings_in_subtree( elem.id, pattern, results );
-            }
-            break;
-        }
-        case node_tag::object:
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view val = v.value_at( i );
-                if ( val.valid() )
-                    _search_node_strings_in_subtree( val.id, pattern, results );
-            }
-            break;
-        }
-        case node_tag::ref:
-            // Не обходим цель ref (избегаем дублирования).
-            break;
-        default:
-            break;
-        }
+        pjson_search_node_strings_in_subtree( id, pattern, results );
     }
 
     // -----------------------------------------------------------------------
