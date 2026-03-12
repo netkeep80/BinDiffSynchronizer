@@ -127,6 +127,8 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pmem_array_pmm.h` | A' | PMM-реализация персистного массива (Задача 14.2): `pmem_array_hdr_pmm`, шаблонные функции `pmem_array_pmm_*` |
 | `pvector_pmm.h` | A' | PMM-реализация динамического массива (Задача 14.2): `pvector_pmm<T>`, совместим по API с `pvector<T>` |
 | `pmap_pmm.h` | A' | PMM-реализация персистной карты (Задача 14.3): `pmap_pmm<K,V>` — sorted array, совместим по API с `pmap<K,V>` |
+| `pstring_pmm.h` | A' | PMM-реализация персистной изменяемой строки (Задача 14.4.2): `pstring_pmm` — readwrite строка с `assign()`, `clear()` |
+| `pstringview_pmm.h` | A' | PMM-реализация интернированной строки (Задача 14.4.1): `pstringview_pmm` — адаптер для `pmm::pstringview`, O(1) сравнение |
 | `deps/pmm/pmm.h` | A' | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14) |
 | `persist.h` | A | Базовые типы: fptr<T>, persist<T>, AddressManager |
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |

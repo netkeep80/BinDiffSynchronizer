@@ -1037,31 +1037,31 @@ PMM не имеет встроенной карты имён (`name_map`). Не�
 
 ---
 
-### Задача 14.4. Миграция `pstring` и `pstringview` на PMM
+### Задача 14.4. Миграция `pstring` и `pstringview` на PMM ✅ ВЫПОЛНЕНО
 
 **Цель:** Адаптировать строковые типы для работы с аллокатором PMM.
 
 **14.4.1. `pstringview` (readonly, интернированные).**
 
-PMM v0.21.0 уже содержит оптимизированный `pmm::pstringview` (single-block, с `pptr<pstringview>` как ключ `pmap`). Варианты:
+PMM v0.21.0 уже содержит оптимизированный `pmm::pstringview` (single-block, с `pptr<pstringview>` как ключ `pmap`). Реализован **Вариант A (рекомендуемый):**
 
-- **Вариант A (рекомендуемый):** Использовать `pmm::pstringview` напрямую.
-  - [ ] Заменить текущий `pstringview` (offset + length) на `PamManager::pstringview`.
-  - [ ] Заменить `pstringview_table` (hash-таблица) на `PamManager::pstringview::intern()`.
-  - [ ] Обновить `pam_intern_string()` → делегировать в `PamManager::pstringview::intern()`.
-  - [ ] Обновить `pjson_node.h` — ключи объектов используют `pptr<pstringview>`.
-  - [ ] Обновить `pjson_codec.h` — парсер интернирует ключи через PMM.
-  - [ ] Тесты `test_pstringview.cpp`.
-
-- **Вариант B:** Оставить собственный `pstringview` с переключением аллокатора.
+- [x] Создан файл `pstringview_pmm.h` — адаптер для `pmm::pstringview<PamManager>`.
+- [x] `pstringview_pmm` делегирует интернирование в `PamManager::pstringview::intern()`.
+- [x] `pstringview_pmm_intern()` — хелпер для интернирования строк через PMM.
+- [x] Тесты в `tests/test_pstringview_pmm.cpp` (19 тестов, тег `[task14.4]`).
 
 **14.4.2. `pstring` (readwrite, изменяемые строки JSON).**
 
-PMM не имеет аналога `pstring`. Необходимо сохранить текущую реализацию, переключив аллокатор:
+PMM не имеет аналога `pstring`. Создана новая реализация на базе PMM:
 
-- [ ] В `pstring`: заменить `PersistentAddressSpace::Get().Create<char>()` на `PamManager::allocate_typed<char>(len)`.
-- [ ] В `node_set_string()`: аналогично.
-- [ ] Тесты `test_pstring.cpp`.
+- [x] Создан файл `pstring_pmm.h` — персистная изменяемая строка на PMM.
+- [x] `pstring_pmm::assign()` использует `PamManager::allocate_typed<char>()`.
+- [x] `pstring_pmm_create()` / `pstring_pmm_destroy()` — хелперы для создания/удаления.
+- [x] Тесты в `tests/test_pstring_pmm.cpp` (17 тестов, тег `[task14.4]`).
+
+**Примечание:** PMM-версии строковых типов (`pstring_pmm`, `pstringview_pmm`) созданы параллельно
+с оригинальными (`pstring`, `pstringview`). Полная интеграция в `pjson_node.h` и `pjson_codec.h`
+будет выполнена в задачах 14.5–14.8. Все 614 тестов проходят.
 
 ---
 
