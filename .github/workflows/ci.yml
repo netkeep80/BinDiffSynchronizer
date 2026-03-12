@@ -50,6 +50,7 @@ jobs:
             --suppress=unmatchedSuppression \
             --suppress=throwInNoexceptFunction \
             --suppress=uninitMemberVarPrivate \
+            --suppress='*:deps/*' \
             -I . -I utils -I deps/pmm \
             $(find . -name '*.cpp' ! -path './third_party/*' ! -path './deps/*')
 
