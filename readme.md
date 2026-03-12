@@ -120,6 +120,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pam_core.h` | A | Ядро ПАМ: аллокатор, слоты, карта имён, realloc; внутренние массивы через pam_array_hdr (≡ pmem_array_hdr) |
 | `pam.h` | A | Фасад: включает pvector, pmap, pstring |
 | `pam_pmm_config.h` | A' | Конфигурация менеджера PMM: определяет `PamManager` для будущей миграции (Фаза 14) |
+| `pam_adapter.h` | A' | Адаптер pptr<T> ↔ uintptr_t: слой совместимости для плавного перехода на PMM (Задача 14.1) |
 | `deps/pmm/pmm.h` | A' | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14) |
 | `persist.h` | A | Базовые типы: fptr<T>, persist<T>, AddressManager |
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
