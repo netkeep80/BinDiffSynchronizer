@@ -59,8 +59,7 @@ TEST_CASE( "pmem_array_pmm_init: initialises header to zeroes", "[pmem_array_pmm
 // ТЕСТЫ pmem_array_pmm_push_back / pmem_array_pmm_at
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_push_back: appends elements and increases size",
-           "[pmem_array_pmm][push_back][task14.2]" )
+TEST_CASE( "pmem_array_pmm_push_back: appends elements and increases size", "[pmem_array_pmm][push_back][task14.2]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -89,8 +88,7 @@ TEST_CASE( "pmem_array_pmm_push_back: appends elements and increases size",
 // ТЕСТЫ pmem_array_pmm_reserve
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_reserve: capacity grows to accommodate elements",
-           "[pmem_array_pmm][reserve][task14.2]" )
+TEST_CASE( "pmem_array_pmm_reserve: capacity grows to accommodate elements", "[pmem_array_pmm][reserve][task14.2]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -210,8 +208,7 @@ TEST_CASE( "pmem_array_pmm_erase_at: removes element and shifts left", "[pmem_ar
 // ТЕСТЫ pmem_array_pmm_insert_sorted / pmem_array_pmm_find_sorted
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_insert_sorted: maintains sorted order",
-           "[pmem_array_pmm][sorted][task14.2]" )
+TEST_CASE( "pmem_array_pmm_insert_sorted: maintains sorted order", "[pmem_array_pmm][sorted][task14.2]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -271,8 +268,7 @@ TEST_CASE( "pmem_array_pmm_find_sorted: finds existing elements", "[pmem_array_p
 // ТЕСТЫ pmem_array_pmm_free / pmem_array_pmm_clear
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_free: deallocates buffer and resets header",
-           "[pmem_array_pmm][free][task14.2]" )
+TEST_CASE( "pmem_array_pmm_free: deallocates buffer and resets header", "[pmem_array_pmm][free][task14.2]" )
 {
     PamManager::create( 64 * 1024 );
 

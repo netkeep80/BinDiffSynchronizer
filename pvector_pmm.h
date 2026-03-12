@@ -36,8 +36,7 @@ namespace pjson
  */
 template <typename T> class pvector_pmm
 {
-    static_assert( std::is_trivially_copyable<T>::value,
-                   "pvector_pmm<T> требует, чтобы T был тривиально копируемым" );
+    static_assert( std::is_trivially_copyable<T>::value, "pvector_pmm<T> требует, чтобы T был тривиально копируемым" );
 
     // Единственное поле — заголовок pmem_array_hdr_pmm (3 * sizeof(uintptr_t)).
     pmem_array_hdr_pmm hdr_; ///< Заголовок персистного массива
@@ -143,8 +142,8 @@ template <typename T> class pvector_pmm
         }
 
         // Добавляем элемент
-        T* raw             = pmm_resolve<T>( hdr_.data_off );
-        raw[hdr_.size]     = val;
+        T* raw         = pmm_resolve<T>( hdr_.data_off );
+        raw[hdr_.size] = val;
         hdr_.size++;
     }
 

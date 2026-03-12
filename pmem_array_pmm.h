@@ -391,10 +391,7 @@ inline T* pmem_array_pmm_find_sorted( uintptr_t hdr_off, const KeyType& key, Key
  * @brief Бинарный поиск (const версия).
  */
 template <typename T, typename KeyType, typename KeyOf, typename Less>
-inline const T* pmem_array_pmm_find_sorted_const( uintptr_t       hdr_off,
-                                                  const KeyType&  key,
-                                                  KeyOf           key_of,
-                                                  Less            less )
+inline const T* pmem_array_pmm_find_sorted_const( uintptr_t hdr_off, const KeyType& key, KeyOf key_of, Less less )
 {
     if ( hdr_off == 0 )
         return nullptr;
