@@ -12,6 +12,7 @@
 // Все комментарии — на русском языке (Тр.6).
 
 #include "pjson_codec.h"
+#include "pjson_db_helpers.h"
 #include <string>
 #include <string_view>
 #include <vector>
@@ -870,34 +871,7 @@ class pjson_db
     /// Разбить путь на родительский путь и последний сегмент.
     static void _split_path( const char* path, std::string& parent, std::string& last )
     {
-        if ( path == nullptr || path[0] == '\0' )
-        {
-            parent = "";
-            last   = "";
-            return;
-        }
-
-        std::string full( path );
-        // Убираем trailing slash.
-        while ( full.size() > 1 && full.back() == '/' )
-            full.pop_back();
-
-        auto pos = full.rfind( '/' );
-        if ( pos == std::string::npos )
-        {
-            parent = "";
-            last   = full;
-        }
-        else if ( pos == 0 )
-        {
-            parent = "/";
-            last   = full.substr( 1 );
-        }
-        else
-        {
-            parent = full.substr( 0, pos );
-            last   = full.substr( pos + 1 );
-        }
+        pjson_split_path( path, parent, last );
     }
 
     /// Обеспечить существование узла по пути, создавая промежуточные объекты.
@@ -1016,13 +990,7 @@ class pjson_db
     }
 
     /// Проверить, является ли следующий сегмент пути числовым индексом.
-    static bool _next_seg_is_numeric( const char* p )
-    {
-        if ( p == nullptr || *p == '\0' )
-            return false;
-        char c = *p;
-        return ( c >= '0' && c <= '9' );
-    }
+    static bool _next_seg_is_numeric( const char* p ) { return pjson_next_seg_is_numeric( p ); }
 
     // -----------------------------------------------------------------------
     // Вспомогательные методы: удаление узлов
@@ -1412,56 +1380,7 @@ class pjson_db
     void _count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64_t& ref_cnt, uint64_t& array_cnt,
                                   uint64_t& object_cnt, uint64_t& binary_bytes ) const
     {
-        if ( id == 0 )
-            return;
-        const node_view v{ id };
-        if ( !v.valid() )
-            return;
-
-        ++node_cnt;
-
-        switch ( v.tag() )
-        {
-        case node_tag::array:
-            ++array_cnt;
-            {
-                uintptr_t sz = v.size();
-                for ( uintptr_t i = 0; i < sz; ++i )
-                {
-                    node_view elem = v.at( i );
-                    if ( elem.valid() )
-                        _count_nodes_in_subtree( elem.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-                }
-            }
-            break;
-        case node_tag::object:
-            ++object_cnt;
-            {
-                uintptr_t sz = v.size();
-                for ( uintptr_t i = 0; i < sz; ++i )
-                {
-                    node_view val = v.value_at( i );
-                    if ( val.valid() )
-                        _count_nodes_in_subtree( val.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-                }
-            }
-            break;
-        case node_tag::ref:
-            ++ref_cnt;
-            // Не обходим цель ref (избегаем дублирования счёта).
-            break;
-        case node_tag::binary:
-            // Считаем байты из binary_val.size.
-            {
-                const auto& pam = PersistentAddressSpace::Get();
-                const node* n   = pam.Resolve<node>( id );
-                if ( n != nullptr )
-                    binary_bytes += static_cast<uint64_t>( n->binary_val.size );
-            }
-            break;
-        default:
-            break;
-        }
+        pjson_count_nodes_in_subtree( id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
     }
 
     /// Быстрое обновление метрик после мутации (Задача 7.2).
@@ -1484,64 +1403,9 @@ class pjson_db
 
     /// Рекурсивный обход поддерева для поиска string-узлов (pstring, readwrite)
     /// чьё значение содержит подстроку pattern.
-    ///
-    /// Заполняет results списком node_id найденных string-узлов.
     void _search_node_strings_in_subtree( node_id id, const char* pattern, std::vector<node_id>& results ) const
     {
-        if ( id == 0 )
-            return;
-        const node_view v{ id };
-        if ( !v.valid() )
-            return;
-
-        switch ( v.tag() )
-        {
-        case node_tag::string:
-        {
-            // Проверяем, содержит ли pstring-значение подстроку pattern.
-            std::string_view sv = v.as_string();
-            if ( pattern[0] == '\0' )
-            {
-                // Пустой pattern — возвращаем все string-узлы.
-                results.push_back( id );
-            }
-            else if ( !sv.empty() )
-            {
-                // Поиск подстроки через std::strstr (безопасно: sv нуль-терминирована pstring).
-                const char* s = sv.data();
-                if ( s != nullptr && std::strstr( s, pattern ) != nullptr )
-                    results.push_back( id );
-            }
-            break;
-        }
-        case node_tag::array:
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view elem = v.at( i );
-                if ( elem.valid() )
-                    _search_node_strings_in_subtree( elem.id, pattern, results );
-            }
-            break;
-        }
-        case node_tag::object:
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view val = v.value_at( i );
-                if ( val.valid() )
-                    _search_node_strings_in_subtree( val.id, pattern, results );
-            }
-            break;
-        }
-        case node_tag::ref:
-            // Не обходим цель ref (избегаем дублирования).
-            break;
-        default:
-            break;
-        }
+        pjson_search_node_strings_in_subtree( id, pattern, results );
     }
 
     // -----------------------------------------------------------------------
