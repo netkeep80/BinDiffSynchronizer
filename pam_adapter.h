@@ -160,12 +160,9 @@ inline constexpr std::size_t get_granule_size() noexcept
 // ТИПЫ УКАЗАТЕЛЕЙ ДЛЯ ОСНОВНЫХ СТРУКТУР
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Forward declarations (определены в соответствующих заголовках)
-struct node;
-
-/// pptr<node> — персистный указатель на узел JSON.
-/// Используется внутри адаптера для работы с пулом узлов.
-using node_pptr = typename PamManager::template pptr<node>;
+// Примечание: node определён в pjson_node.h в глобальном пространстве имён (::node).
+// Тип node_pptr не определяется здесь, чтобы избежать конфликтов с forward declaration.
+// При необходимости используйте PamManager::pptr<::node> в месте использования.
 
 /// pptr<char> — персистный указатель на символы строки.
 /// Используется для pstring и pstringview.

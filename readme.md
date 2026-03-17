@@ -113,6 +113,7 @@ C++17 header-only библиотека для работы с JSON в перси
 │   pam_adapter.h: pptr<T> ↔ uintptr_t        │
 │   pmem_array_pmm.h: массивы на PMM ✅       │
 │   pvector_pmm.h: вектор на PMM ✅           │
+│   pjson_pool_pmm.h: пул узлов на PMM ✅     │
 └─────────────────────────────────────────────┘
 ```
 
@@ -129,6 +130,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pmap_pmm.h` | A' | PMM-реализация персистной карты (Задача 14.3): `pmap_pmm<K,V>` — sorted array, совместим по API с `pmap<K,V>` |
 | `pstring_pmm.h` | A' | PMM-реализация персистной изменяемой строки (Задача 14.4.2): `pstring_pmm` — readwrite строка с `assign()`, `clear()` |
 | `pstringview_pmm.h` | A' | PMM-реализация интернированной строки (Задача 14.4.1): `pstringview_pmm` — адаптер для `pmm::pstringview`, O(1) сравнение |
+| `pjson_pool_pmm.h` | A' | PMM-реализация пула узлов (Задача 14.5): `pjson_pool_pmm` — быстрая аллокация O(1) через PMM + free-list |
 | `deps/pmm/pmm.h` | A' | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14) |
 | `persist.h` | A | Базовые типы: fptr<T>, persist<T>, AddressManager |
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
