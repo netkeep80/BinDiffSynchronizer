@@ -1114,21 +1114,28 @@ PMM не имеет аналога `pstring`. Создана новая реал
 
 ---
 
-### Задача 14.7. Миграция `persist<T>` и `fptr<T>`
+### Задача 14.7. Миграция `persist<T>` и `fptr<T>` ✅ ВЫПОЛНЕНО
 
 **Цель:** Определить судьбу `persist<T>` и `fptr<T>` в новой архитектуре.
 
 - `persist<T>` — обёртка для POD-типов в ПАП. В PMM не нужна: PMM сам гарантирует работу с тривиально копируемыми типами.
 - `fptr<T>` — персистный указатель (offset-based). Заменяется на `pptr<T, PamManager>`.
 
-- [ ] Определить `fptr<T>` как алиас или тонкую обёртку над `pptr<T>`:
-  ```cpp
-  template <typename T>
-  using fptr = PamManager::pptr<T>;
-  ```
-- [ ] Удалить `persist<T>` (или оставить как deprecated alias).
-- [ ] Обновить `pallocator.h` — STL-совместимый аллокатор через PMM.
-- [ ] Тесты `test_persist.cpp`, `test_pallocator.cpp`.
+- [x] Создан файл `fptr_pmm.h` — PMM-версия персистного указателя:
+  - `pjson::fptr_pmm<T>` — обёртка над `uintptr_t`, использует `pam_pmm_*` функции.
+  - Поддерживает `New()`, `NewArray()`, `Delete()`, `find()`, `operator[]`, разыменование.
+  - Сохраняет требования Тр.5 (`sizeof(fptr_pmm<T>) == sizeof(void*)`), Тр.13, Тр.15.
+  - Алиас `pjson::fptr<T>` = `fptr_pmm<T>` для упрощения миграции.
+- [x] Создан файл `persist_pmm.h` — PMM-версия обёртки для тривиально копируемых типов:
+  - `pjson::persist_pmm<T>` — технически избыточна в PMM, но сохранена для обратной совместимости.
+  - Сохраняет требование Тр.8 (`sizeof(persist_pmm<T>) == sizeof(T)`).
+  - Алиас `pjson::persist<T>` = `persist_pmm<T>`.
+- [x] Создан файл `pallocator_pmm.h` — STL-совместимый аллокатор через PMM:
+  - `pjson::pallocator_pmm<T>` использует `pam_pmm_create_array()` и `pam_pmm_delete()`.
+  - Полная совместимость с STL-контейнерами (`std::vector<T, pallocator_pmm<T>>`).
+  - Алиас `pjson::pallocator<T>` = `pallocator_pmm<T>`.
+- [x] Добавлено 32 теста в `tests/test_fptr_pmm.cpp` и `tests/test_pallocator_pmm.cpp` (тег `[task14.7]`).
+- [x] Все 687 тестов проходят.
 
 ---
 
@@ -1197,7 +1204,7 @@ PMM не имеет аналога `pstring`. Создана новая реал
         ↓
   ┌─────┼─────────┐
   ↓     ↓         ↓
-14.2✅ 14.4.2✅  14.7
+14.2✅ 14.4.2✅  14.7✅
 (array, (pstring) (fptr)
 vector)
   ↓     ↓

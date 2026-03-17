@@ -115,6 +115,9 @@ C++17 header-only библиотека для работы с JSON в перси
 │   pvector_pmm.h: вектор на PMM ✅           │
 │   pjson_pool_pmm.h: пул узлов на PMM ✅     │
 │   pam_pmm.h: фасад ПАМ на PMM ✅            │
+│   fptr_pmm.h: персистный указатель PMM ✅   │
+│   persist_pmm.h: обёртка persist PMM ✅     │
+│   pallocator_pmm.h: STL аллокатор PMM ✅    │
 └─────────────────────────────────────────────┘
 ```
 
@@ -133,6 +136,9 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pstringview_pmm.h` | A' | PMM-реализация интернированной строки (Задача 14.4.1): `pstringview_pmm` — адаптер для `pmm::pstringview`, O(1) сравнение |
 | `pjson_pool_pmm.h` | A' | PMM-реализация пула узлов (Задача 14.5): `pjson_pool_pmm` — быстрая аллокация O(1) через PMM + free-list |
 | `pam_pmm.h` | A' | Фасад ПАМ на PMM (Задача 14.6): `pam_pmm_init()`, `pam_pmm_create<T>()`, `pam_pmm_find()`, `pam_pmm_save()`, реестр именованных объектов |
+| `fptr_pmm.h` | A' | PMM-реализация персистного указателя (Задача 14.7): `fptr_pmm<T>` — обёртка над `uintptr_t`, `New()`, `NewArray()`, `Delete()`, `find()`, алиас `pjson::fptr<T>` |
+| `persist_pmm.h` | A' | PMM-реализация обёртки для POD-типов (Задача 14.7): `persist_pmm<T>` — для обратной совместимости, `sizeof(persist_pmm<T>) == sizeof(T)`, алиас `pjson::persist<T>` |
+| `pallocator_pmm.h` | A' | PMM-реализация STL-аллокатора (Задача 14.7): `pallocator_pmm<T>` — совместим с `std::vector<T, pallocator_pmm<T>>`, алиас `pjson::pallocator<T>` |
 | `deps/pmm/pmm.h` | A' | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14) |
 | `persist.h` | A | Базовые типы: fptr<T>, persist<T>, AddressManager |
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
