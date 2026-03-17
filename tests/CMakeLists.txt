@@ -40,6 +40,7 @@ set(TEST_SOURCES
     test_pam_pmm.cpp
     test_fptr_pmm.cpp
     test_pallocator_pmm.cpp
+    test_pjson_db_pmm.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
