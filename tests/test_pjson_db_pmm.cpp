@@ -368,7 +368,8 @@ TEST_CASE( "pjson_db_pmm: insert parses JSON value", "[pjson_db_pmm][task14.8]" 
 // clone
 // ===========================================================================
 
-TEST_CASE( "pjson_db_pmm: clone creates independent copy - pending PMM node integration", "[pjson_db_pmm][task14.8][!mayfail]" )
+TEST_CASE( "pjson_db_pmm: clone creates independent copy - pending PMM node integration",
+           "[pjson_db_pmm][task14.8][!mayfail]" )
 {
     reset_pmm();
     pjson_db_pmm db;

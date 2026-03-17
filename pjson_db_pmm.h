@@ -55,7 +55,7 @@ static constexpr const char* PJSON_DB_PMM_METRICS_NAME = "pjson_db_pmm.metrics";
 /// Доступ только на чтение через путь /$metrics/<имя_поля>.
 struct db_metrics_pmm
 {
-    uint64_t node_count_total;   ///< Всего узлов в пуле (включая свободные)
+    uint64_t node_count_total; ///< Всего узлов в пуле (включая свободные)
     uint64_t string_count_total; ///< Всего интернированных строк (не используется в PMM напрямую)
     uint64_t binary_bytes_total; ///< Всего байт в binary-узлах (приближённо)
     uint64_t ref_count;          ///< Всего ref-узлов
@@ -491,7 +491,10 @@ class pjson_db_pmm
     // $ref: разыменование
     // -----------------------------------------------------------------------
 
-    node_view resolve_ref( node_id id, uintptr_t max_depth = 32 ) const { return node_view{ id }.deref( true, max_depth ); }
+    node_view resolve_ref( node_id id, uintptr_t max_depth = 32 ) const
+    {
+        return node_view{ id }.deref( true, max_depth );
+    }
 
     void resolve_all_refs()
     {
