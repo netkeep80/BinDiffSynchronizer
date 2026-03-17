@@ -1065,13 +1065,16 @@ PMM не имеет аналога `pstring`. Создана новая реал
 
 ---
 
-### Задача 14.5. Миграция `pjson_pool` на PMM
+### Задача 14.5. Миграция `pjson_pool` на PMM ✅ ВЫПОЛНЕНО
 
 **Цель:** Пул узлов (`pjson_pool`) должен аллоцировать массив `node` через PMM.
 
-- [ ] В `pjson_pool`: заменить рост массива узлов на `PamManager::allocate_typed<node>(new_cap)`.
-- [ ] Free-list внутри пула не меняется (внутренняя логика на основе `node_tag::_free`).
-- [ ] Тесты `test_pjson_pool.cpp`.
+- [x] Создан файл `pjson_pool_pmm.h` — PMM-версия пула узлов (параллельно с оригинальным `pjson_pool.h`).
+- [x] Использует `PamManager::allocate_typed<node>(new_cap)` для аллокации массива узлов.
+- [x] Free-list внутри пула сохранён (внутренняя логика на основе `node_tag::_free`).
+- [x] Новые функции: `pjson_pool_pmm_create`, `pjson_pool_pmm_destroy`, `pjson_pool_pmm_alloc`, `pjson_pool_pmm_free`, `pjson_pool_pmm_get`, `pjson_pool_pmm_get_const`, метрики.
+- [x] Добавлено 23 теста в `tests/test_pjson_pool_pmm.cpp` (тег `[task14.5]`).
+- [x] Все 637 тестов проходят.
 
 ---
 
@@ -1187,21 +1190,21 @@ PMM не имеет аналога `pstring`. Создана новая реал
 ### Порядок выполнения задач Фазы 14
 
 ```
-Задача 14.0 (подключение PMM)
+Задача 14.0 (подключение PMM) ✅
         ↓
-Задача 14.1 (адаптер pptr ↔ uintptr_t)
+Задача 14.1 (адаптер pptr ↔ uintptr_t) ✅
         ↓
   ┌─────┼─────────┐
   ↓     ↓         ↓
-14.2  14.4.2    14.7
+14.2✅ 14.4.2✅  14.7
 (array, (pstring) (fptr)
 vector)
   ↓     ↓
-14.3  14.4.1
+14.3✅ 14.4.1✅
 (pmap) (pstringview)
   └─────┼─────────┘
         ↓
-Задача 14.5 (pjson_pool)
+Задача 14.5 (pjson_pool) ✅
         ↓
 Задача 14.6 (PersistentAddressSpace → PMM)
         ↓

@@ -36,6 +36,7 @@ set(TEST_SOURCES
     test_pmap_pmm.cpp
     test_pstring_pmm.cpp
     test_pstringview_pmm.cpp
+    test_pjson_pool_pmm.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
