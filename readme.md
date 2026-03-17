@@ -34,7 +34,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Коды ошибок** | `node_error` enum + `is_error()` / `error()` в `node_view`; `get()` возвращает типизированные ошибки (`not_found`, `wrong_type`, `index_out_of_range`, `ref_cycle`) вместо `node_view(0)` (Фаза 11) |
 | **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок (Фаза 12) |
 | **Глубокое копирование** | `node_clone()` + `pjson_db::clone()` — создание полных копий поддеревьев JSON в ПАП (Фаза 13) |
-| **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) для будущей миграции (Фаза 14, в процессе) |
+| **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14); утилита миграции `pam_migrate` (Задача 14.9) |
 
 ---
 
@@ -154,8 +154,9 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pjson_codec.h` | C | Новая сериализация/десериализация (Фаза 5): парсер/сериализатор для `node_id`-модели; поддержка `$ref` и `$base64`; Base64 кодек; функции: `node_to_string()`, `node_from_string()`, `node_parse()` |
 | `pjson_db.h` | D | Менеджер персистной JSON-БД (Фазы 6–8, 13): единственный заголовок для конечного пользователя (Тр.18); path-адресация (`/a/b/0/c`), `put`/`get`/`erase`/`exists`, разыменование `$ref`, `resolve_all_refs()`, персистные метрики (`db_metrics`) через `/$metrics`, `update_metrics()`, pmap-интерфейс (`operator[]`, `find`, `insert`), сквозной поиск по строкам (`search_strings`, `search_node_strings`), сериализация, глубокое копирование (`clone()`) |
 | `main.cpp` | — | Демонстрационная программа |
+| `pam_migrate.cpp` | — | Утилита миграции `.pam` файлов со старого формата на PMM (Задача 14.9) |
 | `tests/` | — | Тесты на Catch2 |
-| `CMakeLists.txt` | — | Система сборки (CMake 3.16+, C++17) |
+| `CMakeLists.txt` | — | Система сборки (CMake 3.16+, C++20) |
 
 ---
 
@@ -780,6 +781,34 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+---
+
+## Миграция на PMM (Фаза 14)
+
+Фаза 14 вводит новый бэкенд ПАП на основе [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager). Формат файла `.pam` полностью несовместим между старым ПАМ и новым PMM.
+
+### Утилита миграции
+
+Для миграции существующих `.pam` файлов используйте утилиту `pam_migrate`:
+
+```bash
+# Сборка
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+
+# Миграция
+./build/pam_migrate старый_файл.pam новый_файл.pam
+```
+
+Алгоритм миграции:
+1. Загрузка старого `.pam` через `PersistentAddressSpace`.
+2. Экспорт дерева JSON в строку.
+3. Создание нового `.pam` через PMM.
+4. Импорт JSON в новую БД.
+5. Сохранение.
+
+**Важно:** Рекомендуется сделать резервную копию перед миграцией.
 
 ---
 
