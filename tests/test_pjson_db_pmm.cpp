@@ -196,7 +196,7 @@ TEST_CASE( "pjson_db_pmm: cyclic ref detection", "[pjson_db_pmm][task14.8]" )
 // которые работают через PersistentAddressSpace, а не через PMM.
 // Для полной работоспособности требуется pjson_node_pmm.h (Задача 14.9+).
 
-TEST_CASE( "pjson_db_pmm: erase removes node - pending PMM node integration", "[pjson_db_pmm][task14.8][!mayfail]" )
+TEST_CASE( "pjson_db_pmm: erase removes node - pending PMM node integration", "[pjson_db_pmm][task14.8][.pending]" )
 {
     reset_pmm();
     pjson_db_pmm db;
@@ -208,7 +208,7 @@ TEST_CASE( "pjson_db_pmm: erase removes node - pending PMM node integration", "[
     REQUIRE_FALSE( db.exists( "/to_delete" ) );
 }
 
-TEST_CASE( "pjson_db_pmm: erase array element - pending PMM node integration", "[pjson_db_pmm][task14.8][!mayfail]" )
+TEST_CASE( "pjson_db_pmm: erase array element - pending PMM node integration", "[pjson_db_pmm][task14.8][.pending]" )
 {
     reset_pmm();
     pjson_db_pmm db;
@@ -369,7 +369,7 @@ TEST_CASE( "pjson_db_pmm: insert parses JSON value", "[pjson_db_pmm][task14.8]" 
 // ===========================================================================
 
 TEST_CASE( "pjson_db_pmm: clone creates independent copy - pending PMM node integration",
-           "[pjson_db_pmm][task14.8][!mayfail]" )
+           "[pjson_db_pmm][task14.8][.pending]" )
 {
     reset_pmm();
     pjson_db_pmm db;
