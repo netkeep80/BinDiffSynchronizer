@@ -86,9 +86,9 @@ static_assert( std::is_trivially_copyable<pam_pmm_name_key>::value,
  */
 struct pam_pmm_slot_info
 {
-    uintptr_t offset;     ///< Байтовое смещение объекта в ПАП
-    uintptr_t elem_size;  ///< Размер одного элемента в байтах
-    uintptr_t count;      ///< Количество элементов (для массивов)
+    uintptr_t offset;    ///< Байтовое смещение объекта в ПАП
+    uintptr_t elem_size; ///< Размер одного элемента в байтах
+    uintptr_t count;     ///< Количество элементов (для массивов)
 };
 
 static_assert( std::is_trivially_copyable<pam_pmm_slot_info>::value,
@@ -107,18 +107,17 @@ static_assert( std::is_trivially_copyable<pam_pmm_slot_info>::value,
  */
 struct pam_pmm_root
 {
-    uint32_t  magic;         ///< Магическое число для валидации (PAM_PMM_MAGIC)
-    uint32_t  version;       ///< Версия формата
-    uintptr_t registry_off;  ///< Байтовое смещение реестра
-    uintptr_t reserved[4];   ///< Зарезервировано для будущего использования
+    uint32_t  magic;        ///< Магическое число для валидации (PAM_PMM_MAGIC)
+    uint32_t  version;      ///< Версия формата
+    uintptr_t registry_off; ///< Байтовое смещение реестра
+    uintptr_t reserved[4];  ///< Зарезервировано для будущего использования
 };
 
 /// Магическое число для идентификации PMM-хранилища pjson.
 constexpr uint32_t PAM_PMM_MAGIC   = 0x504A534Eu; // 'PJSN'
 constexpr uint32_t PAM_PMM_VERSION = 1u;
 
-static_assert( std::is_trivially_copyable<pam_pmm_root>::value,
-               "pam_pmm_root должен быть тривиально копируемым" );
+static_assert( std::is_trivially_copyable<pam_pmm_root>::value, "pam_pmm_root должен быть тривиально копируемым" );
 
 /**
  * @brief Реестр именованных и безымянных объектов в PMM.
@@ -347,7 +346,7 @@ inline void pam_pmm_init( const char* filename )
         PamManager::create( PAM_PMM_INITIAL_SIZE );
 
         // Создаём корневую структуру и реестр.
-        uintptr_t root_off           = pam_pmm_create_root_and_registry();
+        uintptr_t root_off            = pam_pmm_create_root_and_registry();
         detail::pam_pmm_root_offset() = root_off;
     }
 
@@ -378,9 +377,9 @@ inline void pam_pmm_destroy()
     pam_pmm_save();
     PamManager::destroy();
 
-    detail::pam_pmm_filename()[0]   = '\0';
-    detail::pam_pmm_root_offset()   = 0;
-    detail::pam_pmm_initialized()   = false;
+    detail::pam_pmm_filename()[0] = '\0';
+    detail::pam_pmm_root_offset() = 0;
+    detail::pam_pmm_initialized() = false;
 }
 
 /**
@@ -395,7 +394,7 @@ inline void pam_pmm_reset()
     PamManager::create( PAM_PMM_INITIAL_SIZE );
 
     // Создаём корневую структуру и реестр.
-    uintptr_t root_off           = pam_pmm_create_root_and_registry();
+    uintptr_t root_off            = pam_pmm_create_root_and_registry();
     detail::pam_pmm_root_offset() = root_off;
 }
 
@@ -579,8 +578,8 @@ inline void pam_pmm_delete( uintptr_t offset )
         return;
 
     // Запоминаем информацию о слоте перед удалением.
-    (void) slot->elem_size; // Информация доступна, но не используется.
-    (void) slot->count;     // Информация доступна, но не используется.
+    (void)slot->elem_size; // Информация доступна, но не используется.
+    (void)slot->count;     // Информация доступна, но не используется.
 
     // Удаляем из name_map_ (линейный поиск по значению).
     // Это O(n), но используется редко.
@@ -878,8 +877,7 @@ inline uintptr_t pam_pmm_ptr_to_offset( const void* p )
  * @note При успехе старый блок деаллоцируется автоматически.
  *       При ошибке старый блок остаётся нетронутым.
  */
-template <typename T>
-inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, uintptr_t old_count, uintptr_t new_count )
+template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, uintptr_t old_count, uintptr_t new_count )
 {
     if ( old_offset == 0 || new_count == 0 )
         return 0;

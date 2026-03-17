@@ -354,13 +354,12 @@ TEST_CASE( "pam_pmm: create custom struct", "[pam_pmm][task14.6]" )
 {
     struct TestStruct
     {
-        int         id;
-        double      value;
-        char        name[32];
+        int    id;
+        double value;
+        char   name[32];
     };
 
-    static_assert( std::is_trivially_copyable<TestStruct>::value,
-                   "TestStruct должен быть тривиально копируемым" );
+    static_assert( std::is_trivially_copyable<TestStruct>::value, "TestStruct должен быть тривиально копируемым" );
 
     pam_pmm_init( nullptr );
 
