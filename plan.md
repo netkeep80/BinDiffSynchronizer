@@ -1104,12 +1104,13 @@ PMM не имеет аналога `pstring`. Создана новая реал
 | `GetNamedCount()` | Подсчёт записей в пользовательском реестре имён |
 | `GetStringTableOffset()` | Не нужен (PMM хранит `pstringview` автоматически) |
 
-- [ ] Создать фасад `pam_pmm.h`, реализующий совместимый API поверх PMM.
-- [ ] Реализовать реестр именованных объектов через `pmm::pmap<pptr<pstringview>, uintptr_t>`.
-- [ ] Реализовать сохранение/загрузку через `pmm::save_manager()` / `pmm::load_manager_from_file()`.
-- [ ] Обновить `pjson_db::open()` — использовать новый фасад.
-- [ ] Обновить `pjson_db::save()`.
-- [ ] Тесты `test_pam.cpp`, `test_pam_dynamic.cpp`, `test_pam_metrics.cpp`.
+- [x] Создать фасад `pam_pmm.h`, реализующий совместимый API поверх PMM.
+- [x] Реализовать реестр именованных объектов через `pmap_pmm<pam_pmm_name_key, pam_pmm_slot_info>`.
+- [x] Реализовать сохранение/загрузку через `pmm::save_manager()` / `pmm::load_manager_from_file()`.
+- [x] Добавлено 18 тестов в `tests/test_pam_pmm.cpp` (тег `[task14.6]`).
+- [x] Все 655 тестов проходят.
+- [ ] Обновить `pjson_db::open()` — использовать новый фасад (Задача 14.8).
+- [ ] Обновить `pjson_db::save()` (Задача 14.8).
 
 ---
 
@@ -1206,7 +1207,7 @@ vector)
         ↓
 Задача 14.5 (pjson_pool) ✅
         ↓
-Задача 14.6 (PersistentAddressSpace → PMM)
+Задача 14.6 (PersistentAddressSpace → PMM) ✅
         ↓
 Задача 14.8 (pjson_db)
         ↓
