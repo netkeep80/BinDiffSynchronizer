@@ -330,7 +330,7 @@ TEST_CASE( "pvector_pmm: size is 3 * sizeof(void*)", "[pvector_pmm][layout][task
     REQUIRE( sizeof( pvector_pmm<double> ) == 3 * sizeof( void* ) );
 }
 
-TEST_CASE( "pvector_pmm: push_back_direct and element access", "[pvector_pmm][push_back][task14.2]" )
+TEST_CASE( "pvector_pmm: push_back and element access", "[pvector_pmm][push_back][task14.2]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -344,9 +344,9 @@ TEST_CASE( "pvector_pmm: push_back_direct and element access", "[pvector_pmm][pu
     REQUIRE( pv->empty() );
     REQUIRE( pv->size() == 0u );
 
-    pv->push_back_direct( 10 );
-    pv->push_back_direct( 20 );
-    pv->push_back_direct( 30 );
+    pv->push_back( 10 );
+    pv->push_back( 20 );
+    pv->push_back( 30 );
 
     REQUIRE( pv->size() == 3u );
     REQUIRE( ( *pv )[0] == 10 );
@@ -365,9 +365,9 @@ TEST_CASE( "pvector_pmm: front and back", "[pvector_pmm][access][task14.2]" )
     auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
     std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
 
-    pv->push_back_direct( 100 );
-    pv->push_back_direct( 200 );
-    pv->push_back_direct( 300 );
+    pv->push_back( 100 );
+    pv->push_back( 200 );
+    pv->push_back( 300 );
 
     REQUIRE( pv->front() == 100 );
     REQUIRE( pv->back() == 300 );
@@ -384,9 +384,9 @@ TEST_CASE( "pvector_pmm: pop_back", "[pvector_pmm][pop_back][task14.2]" )
     auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
     std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
 
-    pv->push_back_direct( 1 );
-    pv->push_back_direct( 2 );
-    pv->push_back_direct( 3 );
+    pv->push_back( 1 );
+    pv->push_back( 2 );
+    pv->push_back( 3 );
 
     REQUIRE( pv->size() == 3u );
 
@@ -410,9 +410,9 @@ TEST_CASE( "pvector_pmm: clear", "[pvector_pmm][clear][task14.2]" )
     auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
     std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
 
-    pv->push_back_direct( 1 );
-    pv->push_back_direct( 2 );
-    pv->push_back_direct( 3 );
+    pv->push_back( 1 );
+    pv->push_back( 2 );
+    pv->push_back( 3 );
 
     uintptr_t cap_before = pv->capacity();
 
@@ -433,9 +433,9 @@ TEST_CASE( "pvector_pmm: iterators", "[pvector_pmm][iterator][task14.2]" )
     auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
     std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
 
-    pv->push_back_direct( 10 );
-    pv->push_back_direct( 20 );
-    pv->push_back_direct( 30 );
+    pv->push_back( 10 );
+    pv->push_back( 20 );
+    pv->push_back( 30 );
 
     int sum = 0;
     for ( auto it = pv->begin(); it != pv->end(); ++it )
@@ -458,7 +458,7 @@ TEST_CASE( "pvector_pmm: capacity grows with elements", "[pvector_pmm][capacity]
 
     for ( int i = 0; i < 20; i++ )
     {
-        pv->push_back_direct( i );
+        pv->push_back( i );
     }
 
     REQUIRE( pv->size() == 20u );

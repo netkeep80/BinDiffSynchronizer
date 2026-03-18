@@ -41,23 +41,7 @@ template <typename T> class pvector_pmm
     // Единственное поле — заголовок pmem_array_hdr_pmm (3 * sizeof(uintptr_t)).
     // NOLINTBEGIN(cppcoreguidelines-pro-type-member-init)
     pmem_array_hdr_pmm hdr_{}; ///< Заголовок персистного массива (инициализирован нулями)
-    // NOLINTEND(cppcoreguidelines-pro-type-member-init)
-
-    /**
-     * @brief Получить смещение заголовка в ПАП.
-     *
-     * Используется для realloc-безопасного доступа к полям.
-     * Предполагается, что pvector_pmm находится в PMM-памяти.
-     */
-    uintptr_t _hdr_off() const
-    {
-        // Получаем смещение через адаптер
-        // Предполагаем, что this находится в PMM-памяти
-        // и мы можем вычислить смещение
-        // В текущей реализации используем прямой доступ к hdr_
-        // (требуется доработка для полной интеграции с PMM)
-        return 0; // Placeholder - будет реализовано при полной интеграции
-    }
+                               // NOLINTEND(cppcoreguidelines-pro-type-member-init)
 
   public:
     /**
@@ -78,33 +62,11 @@ template <typename T> class pvector_pmm
     /**
      * @brief Добавить элемент в конец массива.
      *
-     * Делегирует grow/alloc в pmem_array_pmm_reserve.
-     *
-     * @param val Добавляемое значение.
-     * @param self_off Байтовое смещение этого pvector_pmm в ПАП.
-     *                 Необходимо для realloc-безопасности.
-     */
-    void push_back( const T& val, uintptr_t self_off )
-    {
-        // Резервируем место для нового элемента
-        pmem_array_pmm_reserve<T>( self_off, hdr_.size + 1 );
-
-        // После reserve this мог переместиться — используем смещение
-        pvector_pmm<T>* self = pmm_resolve<pvector_pmm<T>>( self_off );
-        T*              raw  = pmm_resolve<T>( self->hdr_.data_off );
-        raw[self->hdr_.size] = val;
-        self->hdr_.size++;
-    }
-
-    /**
-     * @brief Добавить элемент (упрощённая версия без self_off).
-     *
-     * Использует прямой доступ к hdr_. Небезопасно при realloc,
-     * если pvector_pmm находится внутри PMM-памяти.
+     * Самостоятельно управляет ростом буфера (удвоение ёмкости).
      *
      * @param val Добавляемое значение.
      */
-    void push_back_direct( const T& val )
+    void push_back( const T& val )
     {
         // Резервируем место
         uintptr_t cur_cap  = hdr_.capacity;
@@ -293,12 +255,14 @@ template <typename T> class pvector_pmm
     const_iterator cbegin() const { return const_iterator( this, 0 ); }
     const_iterator cend() const { return const_iterator( this, hdr_.size ); }
 
-  public:
-    // Конструктор по умолчанию — public для совместимости с PMM::allocate_typed.
-    // Предупреждение: создание на стеке не рекомендуется — pvector_pmm предназначен
-    // для использования внутри персистного адресного пространства.
+  private:
+    // Создание pvector_pmm<T> на стеке запрещено.
+    // Используйте fptr<pvector_pmm<T>>::New() для создания в ПАП (Тр.11).
     pvector_pmm()  = default;
     ~pvector_pmm() = default;
+
+    // Разрешаем доступ к приватному конструктору только для фабричных методов ПАМ.
+    template <typename U> friend class fptr_pmm;
 };
 
 // Проверка размера
