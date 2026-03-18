@@ -1,20 +1,15 @@
 #pragma once
 /**
  * @file pmap_pmm.h
- * @brief Реализация pmap на базе PersistMemoryManager (Задача 14.3).
- *
- * Этот файл содержит PMM-версию персистной карты (key-value map),
- * совместимую по API с оригинальным pmap.h.
+ * @brief Каноническая реализация персистной карты на базе PMM (Задача 15.3).
  *
  * pmap_pmm<K, V> — персистный sorted-array контейнер, аналог std::map<K, V>.
  * Все операции делегируются функциям из pmem_array_pmm.h.
  *
- * Ключевые отличия от оригинальной реализации:
- *   - Использует PMM для аллокации/деаллокации
- *   - Требует инициализации PamManager::create() перед использованием
- *   - Смещения кратны размеру гранулы PMM (16 байт)
+ * После консолидации (Фаза 15) это каноническая реализация.
+ * pmap.h предоставляет алиас pmap<K,V> = pjson::pmap_pmm<K,V> для обратной совместимости.
  *
- * @see plan.md Задача 14.3 — Миграция pmap на PMM
+ * @see plan.md Задача 15.3 — Консолидация pmap.h и pmap_pmm.h
  * @see pmem_array_pmm.h — примитив персистного массива на базе PMM
  */
 
@@ -121,120 +116,25 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
     }
 
     /**
-     * @brief Вставить или обновить пару (упрощённая версия без self_off).
+     * @brief Вставить или обновить пару (вычисляет смещение автоматически).
      *
-     * Использует прямой доступ к hdr_. Требует, чтобы pmap_pmm находился
-     * в PMM-памяти и смещение можно было вычислить.
+     * Вычисляет байтовое смещение hdr_ в ПАП и делегирует в 3-аргументную
+     * версию insert.
      *
      * @param k Ключ.
      * @param v Значение.
      *
-     * @warning Эта версия требует, чтобы объект находился в PMM-памяти.
+     * @warning Требует, чтобы объект находился в PMM-памяти.
      */
-    void insert_direct( const K& k, const V& v )
+    void insert( const K& k, const V& v )
     {
-        Entry e;
-        e.key   = k;
-        e.value = v;
-
-        // Вычисляем байтовое смещение this от базы PMM для realloc-безопасности.
-        // При расширении PMM-кучи (HeapStorage::expand) this может стать невалидным.
-        const std::uint8_t* base_before = PamManager::backend().base_ptr();
-        uintptr_t self_byte_off = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( this ) - base_before );
-
-        // Бинарный поиск (lower_bound) для определения позиции вставки
-        uintptr_t sz = hdr_.size;
-        uintptr_t lo = 0, hi = sz;
-
-        {
-            Entry* raw = pmm_resolve<Entry>( hdr_.data_off );
-            while ( lo < hi )
-            {
-                uintptr_t mid = ( lo + hi ) / 2;
-                if ( Less{}( raw[mid].key, k ) )
-                    lo = mid + 1;
-                else
-                    hi = mid;
-            }
-        }
-
-        uintptr_t idx = lo;
-
-        // Проверяем, существует ли уже такой ключ
-        {
-            Entry* raw = pmm_resolve<Entry>( hdr_.data_off );
-            if ( raw != nullptr && idx < sz && !Less{}( k, raw[idx].key ) && !Less{}( raw[idx].key, k ) )
-            {
-                // Ключ найден — обновляем значение
-                raw[idx].value = v;
-                return;
-            }
-        }
-
-        // Нужно вставить новый элемент в позицию idx
-        // Резервируем место
-        uintptr_t cur_cap  = hdr_.capacity;
-        uintptr_t old_data = hdr_.data_off;
-        uintptr_t new_size = sz + 1;
-
-        if ( new_size > cur_cap )
-        {
-            uintptr_t new_cap = ( cur_cap == 0 ) ? 4 : cur_cap * 2;
-            while ( new_cap < new_size )
-                new_cap *= 2;
-
-            // Выделяем новый блок (может вызвать expand → this становится невалидным!)
-            auto new_data_pptr = PamManager::template allocate_typed<Entry>( new_cap );
-            if ( new_data_pptr.is_null() )
-                return;
-
-            uintptr_t new_data_off = pptr_to_offset( new_data_pptr );
-
-            // Копируем существующие элементы
-            if ( old_data != 0 && sz > 0 )
-            {
-                Entry*       new_raw   = new_data_pptr.resolve();
-                const Entry* old_raw_p = pmm_resolve_const<Entry>( old_data );
-                if ( new_raw != nullptr && old_raw_p != nullptr )
-                    std::memcpy( new_raw, old_raw_p, sz * sizeof( Entry ) );
-            }
-
-            // Освобождаем старый буфер
-            if ( old_data != 0 )
-            {
-                auto old_pptr = offset_to_pptr<Entry>( old_data );
-                PamManager::template deallocate_typed<Entry>( old_pptr );
-            }
-
-            // Перезапрашиваем this через байтовое смещение (expand мог переместить кучу).
-            pmap_pmm* self      = reinterpret_cast<pmap_pmm*>( PamManager::backend().base_ptr() + self_byte_off );
-            self->hdr_.data_off = new_data_off;
-            self->hdr_.capacity = new_cap;
-
-            // Сдвигаем элементы [idx..sz-1] вправо
-            Entry* raw = pmm_resolve<Entry>( new_data_off );
-            if ( raw != nullptr && sz > idx )
-                std::memmove( raw + idx + 1, raw + idx, ( sz - idx ) * sizeof( Entry ) );
-
-            // Записываем новый элемент
-            if ( raw != nullptr )
-                raw[idx] = e;
-
-            self->hdr_.size++;
-            return;
-        }
-
-        // Сдвигаем элементы [idx..sz-1] вправо
-        Entry* raw = pmm_resolve<Entry>( hdr_.data_off );
-        if ( raw != nullptr && sz > idx )
-            std::memmove( raw + idx + 1, raw + idx, ( sz - idx ) * sizeof( Entry ) );
-
-        // Записываем новый элемент
-        if ( raw != nullptr )
-            raw[idx] = e;
-
-        hdr_.size++;
+        const std::uint8_t* base     = PamManager::backend().base_ptr();
+        uintptr_t           self_off = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( &hdr_ ) - base );
+        insert( k, v, self_off );
     }
+
+    /// Псевдоним для insert(k, v) — обратная совместимость.
+    void insert_direct( const K& k, const V& v ) { insert( k, v ); }
 
     /**
      * @brief Найти значение по ключу.
@@ -340,7 +240,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         // Вставляем значение по умолчанию
         V def;
         std::memset( &def, 0, sizeof( V ) );
-        insert_direct( k, def );
+        insert( k, def );
 
         // После вставки ищем снова (может быть realloc)
         V* inserted = find( k );

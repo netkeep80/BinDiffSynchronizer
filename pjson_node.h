@@ -3,6 +3,7 @@
 #include "pstring.h"
 #include "pvector.h"
 #include "pmap.h"
+#include "pmem_array.h"
 #include <cstdint>
 #include <cstring>
 #include <string>

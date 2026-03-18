@@ -35,6 +35,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок (Фаза 12) |
 | **Глубокое копирование** | `node_clone()` + `pjson_db::clone()` — создание полных копий поддеревьев JSON в ПАП (Фаза 13) |
 | **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — единственный бэкенд ПАП (Фаза 14); утилита миграции `pam_migrate` (Задача 14.9); устаревший код ПАМ удалён (Задача 14.10); все тесты и демо адаптированы для PMM (Задача 14.11) |
+| **Консолидация** | Устранение дублирования между оригинальными `.h` и `_pmm.h` файлами (Фаза 15); `_pmm.h` — канонические реализации, оригинальные файлы — тонкие обёртки-алиасы; `pmem_array.h` → `pmem_array_pmm.h` (Задача 15.1); `pvector.h` → `pvector_pmm.h` (Задача 15.2); `pmap.h` → `pmap_pmm.h` (Задача 15.3) |
 
 ---
 
@@ -103,13 +104,16 @@ C++17 header-only библиотека для работы с JSON в перси
 ├─────────────────────────────────────────────┤
 │   Слой B: pstringview + pstring + pmem_array │
 │   (readonly/readwrite строки, массивы)       │
+│   pmem_array.h → обёртка (Фаза 15) ✅       │
+│   pmap.h → обёртка (Фаза 15) ✅             │
 ├─────────────────────────────────────────────┤
 │   Слой A: PMM (Фаза 14) ✅                   │
 │   PersistMemoryManager: новый бэкенд ПАП    │
 │   pam_pmm_config.h: конфигурация PamManager │
 │   pam_adapter.h: pptr<T> ↔ uintptr_t        │
-│   pmem_array_pmm.h: массивы на PMM ✅       │
-│   pvector_pmm.h: вектор на PMM ✅           │
+│   pmem_array_pmm.h: массивы (каноник) ✅    │
+│   pvector.h → обёртка (Фаза 15) ✅          │
+│   pmap_pmm.h: карта (каноник) ✅            │
 │   pjson_pool_pmm.h: пул узлов на PMM ✅     │
 │   pam_pmm.h: фасад ПАМ на PMM ✅            │
 │   fptr_pmm.h: персистный указатель PMM ✅   │
@@ -127,7 +131,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | ~~`pam.h`~~ | ~~A~~ | Удалён (Задача 14.10): заменён на `pam_pmm.h` |
 | `pam_pmm_config.h` | A' | Конфигурация менеджера PMM: определяет `PamManager` для будущей миграции (Фаза 14) |
 | `pam_adapter.h` | A' | Адаптер pptr<T> ↔ uintptr_t: слой совместимости для плавного перехода на PMM (Задача 14.1); `pptr_to_offset()`, `offset_to_pptr()`, `pmm_resolve<T>()` |
-| `pmem_array_pmm.h` | A' | PMM-реализация персистного массива (Задача 14.2): `pmem_array_hdr_pmm`, шаблонные функции `pmem_array_pmm_*` |
+| `pmem_array_pmm.h` | A' | Каноническая реализация персистного массива (Задача 14.2, консолидация 15.1): `pmem_array_hdr_pmm`, шаблонные функции `pmem_array_pmm_*` |
 | `pvector_pmm.h` | A' | PMM-реализация динамического массива (Задача 14.2): `pvector_pmm<T>`, совместим по API с `pvector<T>` |
 | `pmap_pmm.h` | A' | PMM-реализация персистной карты (Задача 14.3): `pmap_pmm<K,V>` — sorted array, совместим по API с `pmap<K,V>` |
 | `pstring_pmm.h` | A' | PMM-реализация персистной изменяемой строки (Задача 14.4.2): `pstring_pmm` — readwrite строка с `assign()`, `clear()` |
@@ -140,9 +144,9 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pallocator_pmm.h` | A' | PMM-реализация STL-аллокатора (Задача 14.7): `pallocator_pmm<T>` — совместим с `std::vector<T, pallocator_pmm<T>>`, алиас `pjson::pallocator<T>` |
 | `deps/pmm/pmm.h` | A' | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14) |
 | ~~`persist.h`~~ | ~~A~~ | Удалён (Задача 14.10): заменён на `persist_pmm.h`, `fptr_pmm.h` |
-| `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
-| `pvector.h` | B | Персистный динамический массив (тонкая обёртка над pmem_array_hdr) |
-| `pmap.h` | B | Персистная карта (sorted array, тонкая обёртка над pmem_array_hdr) |
+| `pmem_array.h` | B | Обёртка-алиас для `pmem_array_pmm.h` (Задача 15.1): `pmem_array_hdr` = `pmem_array_hdr_pmm`, функции `pmem_array_*` делегируют в `pmem_array_pmm_*` |
+| `pvector.h` | B | Обёртка-алиас для `pvector_pmm.h` (Задача 15.2): `pvector<T>` = `pvector_pmm<T>` |
+| `pmap.h` | B | Обёртка-алиас для `pmap_pmm.h` (Задача 15.3): `pmap<K,V>` = `pmap_pmm<K,V>`, `pmap_entry<K,V>` = `pmap_entry_pmm<K,V>` |
 | `pstring.h` | B | Персистная readwrite строка для JSON string-value узлов; нет SSO; `assign()` изменяет значение на месте |
 | `pstringview.h` | B | Интернированная read-only строка + персистный словарь (`pstringview_table`); смещение таблицы хранится в `pam_header.string_table_offset`; содержит `pam_intern_string()`, `pam_search_strings()`, `pam_all_strings()` |
 | `pallocator.h` | B | STL-совместимый аллокатор поверх ПАМ |
