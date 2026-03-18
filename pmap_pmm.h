@@ -137,6 +137,11 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         e.key   = k;
         e.value = v;
 
+        // Вычисляем байтовое смещение this от базы PMM для realloc-безопасности.
+        // При расширении PMM-кучи (HeapStorage::expand) this может стать невалидным.
+        const std::uint8_t* base_before = PamManager::backend().base_ptr();
+        uintptr_t self_byte_off = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( this ) - base_before );
+
         // Бинарный поиск (lower_bound) для определения позиции вставки
         uintptr_t sz = hdr_.size;
         uintptr_t lo = 0, hi = sz;
@@ -169,6 +174,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         // Нужно вставить новый элемент в позицию idx
         // Резервируем место
         uintptr_t cur_cap  = hdr_.capacity;
+        uintptr_t old_data = hdr_.data_off;
         uintptr_t new_size = sz + 1;
 
         if ( new_size > cur_cap )
@@ -177,7 +183,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
             while ( new_cap < new_size )
                 new_cap *= 2;
 
-            // Выделяем новый блок
+            // Выделяем новый блок (может вызвать expand → this становится невалидным!)
             auto new_data_pptr = PamManager::template allocate_typed<Entry>( new_cap );
             if ( new_data_pptr.is_null() )
                 return;
@@ -185,23 +191,37 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
             uintptr_t new_data_off = pptr_to_offset( new_data_pptr );
 
             // Копируем существующие элементы
-            if ( hdr_.data_off != 0 && sz > 0 )
+            if ( old_data != 0 && sz > 0 )
             {
-                Entry*       new_raw = new_data_pptr.resolve();
-                const Entry* old_raw = pmm_resolve_const<Entry>( hdr_.data_off );
-                if ( new_raw != nullptr && old_raw != nullptr )
-                    std::memcpy( new_raw, old_raw, sz * sizeof( Entry ) );
+                Entry*       new_raw   = new_data_pptr.resolve();
+                const Entry* old_raw_p = pmm_resolve_const<Entry>( old_data );
+                if ( new_raw != nullptr && old_raw_p != nullptr )
+                    std::memcpy( new_raw, old_raw_p, sz * sizeof( Entry ) );
             }
 
             // Освобождаем старый буфер
-            if ( hdr_.data_off != 0 )
+            if ( old_data != 0 )
             {
-                auto old_pptr = offset_to_pptr<Entry>( hdr_.data_off );
+                auto old_pptr = offset_to_pptr<Entry>( old_data );
                 PamManager::template deallocate_typed<Entry>( old_pptr );
             }
 
-            hdr_.data_off = new_data_off;
-            hdr_.capacity = new_cap;
+            // Перезапрашиваем this через байтовое смещение (expand мог переместить кучу).
+            pmap_pmm* self      = reinterpret_cast<pmap_pmm*>( PamManager::backend().base_ptr() + self_byte_off );
+            self->hdr_.data_off = new_data_off;
+            self->hdr_.capacity = new_cap;
+
+            // Сдвигаем элементы [idx..sz-1] вправо
+            Entry* raw = pmm_resolve<Entry>( new_data_off );
+            if ( raw != nullptr && sz > idx )
+                std::memmove( raw + idx + 1, raw + idx, ( sz - idx ) * sizeof( Entry ) );
+
+            // Записываем новый элемент
+            if ( raw != nullptr )
+                raw[idx] = e;
+
+            self->hdr_.size++;
+            return;
         }
 
         // Сдвигаем элементы [idx..sz-1] вправо

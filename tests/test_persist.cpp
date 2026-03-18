@@ -3,14 +3,17 @@
 #include <cstring>
 #include <type_traits>
 
-#include "persist.h"
+#include "fptr_pmm.h"
+#include "persist_pmm.h"
+#include "pam_pmm.h"
+
+using namespace pjson;
 
 // =============================================================================
-// Тесты для persist<T>, AddressManager<T> и fptr<T> (фаза 2)
+// Тесты для persist<T>, fptr<T> (обновлено для PMM — Задача 14.11)
 //
-// В фазе 2 persist<T> не содержит файловой логики (Тр.7, Тр.8).
-// Создание объектов — через AddressManager / fptr (Тр.2, Тр.12).
-// Файловая персистность обеспечивается PersistentAddressSpace (pam.h).
+// persist<T> = persist_pmm<T> (Тр.8).
+// fptr<T> = fptr_pmm<T> (Тр.5, Тр.12).
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -37,7 +40,7 @@ TEST_CASE( "fptr<T>: sizeof(fptr<T>) == sizeof(void*) (Tr.5)", "[fptr][layout]" 
 }
 
 // ---------------------------------------------------------------------------
-// fptr<T> — тривиально копируем (может быть embedded в persist<> структуры)
+// fptr<T> — тривиально копируем
 // ---------------------------------------------------------------------------
 TEST_CASE( "fptr<T>: is trivially copyable", "[fptr][layout]" )
 {
@@ -54,8 +57,9 @@ TEST_CASE( "fptr<int>: set_addr and addr -- get and set offset", "[fptr]" )
     fptr<int> p;
     REQUIRE( p.addr() == 0u );
 
-    p.set_addr( 7u );
-    REQUIRE( p.addr() == 7u );
+    // В PMM смещения кратны размеру гранулы (16 байт).
+    p.set_addr( 16u );
+    REQUIRE( p.addr() == 16u );
 
     p.set_addr( 0u );
     REQUIRE( p.addr() == 0u );
@@ -66,6 +70,8 @@ TEST_CASE( "fptr<int>: set_addr and addr -- get and set offset", "[fptr]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "fptr<double>: New / dereference / Delete", "[fptr]" )
 {
+    pam_pmm_init( nullptr );
+
     fptr<double> p;
     REQUIRE( p.addr() == 0u );
 
@@ -77,6 +83,8 @@ TEST_CASE( "fptr<double>: New / dereference / Delete", "[fptr]" )
 
     p.Delete();
     REQUIRE( p.addr() == 0u );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +92,8 @@ TEST_CASE( "fptr<double>: New / dereference / Delete", "[fptr]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "fptr<int>: NewArray / operator[] / count / DeleteArray", "[fptr]" )
 {
+    pam_pmm_init( nullptr );
+
     fptr<int> arr;
     arr.NewArray( 6 );
     REQUIRE( arr.addr() != 0u );
@@ -98,16 +108,20 @@ TEST_CASE( "fptr<int>: NewArray / operator[] / count / DeleteArray", "[fptr]" )
     arr.DeleteArray();
     REQUIRE( arr.addr() == 0u );
     REQUIRE( arr.count() == 0u );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// AddressManager — Create / доступ / Delete
+// Create / доступ / Delete через PMM (замена AddressManager)
 // ---------------------------------------------------------------------------
-TEST_CASE( "AddressManager<double>: Create / access / Delete", "[address_manager]" )
+TEST_CASE( "fptr<double>: Create with name / access / Delete", "[fptr][named]" )
 {
+    pam_pmm_init( nullptr );
+
     // Создаём объект с именем для поиска.
     const char* name   = "test_am_create_delete_v2";
-    uintptr_t   offset = AddressManager<double>::Create( name );
+    uintptr_t   offset = pam_pmm_create<double>( name );
     REQUIRE( offset != 0u );
 
     // Записываем значение через fptr.
@@ -118,63 +132,77 @@ TEST_CASE( "AddressManager<double>: Create / access / Delete", "[address_manager
     REQUIRE( val == 3.14 );
 
     // Поиск по имени.
-    uintptr_t found = AddressManager<double>::Find( name );
+    uintptr_t found = pam_pmm_find( name );
     REQUIRE( found == offset );
 
     // Удаляем и проверяем, что слот освобождён.
-    AddressManager<double>::Delete( offset );
-    uintptr_t found2 = AddressManager<double>::Find( name );
+    pam_pmm_delete( offset );
+    dp.set_addr( 0 );
+    uintptr_t found2 = pam_pmm_find( name );
     REQUIRE( found2 == 0u );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// AddressManager — CreateArray / GetCount / GetArrayElement / DeleteArray
+// CreateArray / GetCount / GetArrayElement / DeleteArray через PMM
 // ---------------------------------------------------------------------------
-TEST_CASE( "AddressManager<int>: CreateArray / GetArrayElement / DeleteArray", "[address_manager]" )
+TEST_CASE( "fptr<int>: CreateArray with name / access array", "[fptr][array]" )
 {
-    const char* name   = "test_am_array_v2";
-    uintptr_t   offset = AddressManager<int>::CreateArray( 5, name );
-    REQUIRE( offset != 0u );
-    REQUIRE( AddressManager<int>::GetCount( offset ) == 5u );
+    pam_pmm_init( nullptr );
 
-    // Записываем элементы.
+    const char* name   = "test_am_array_v2";
+    uintptr_t   offset = pam_pmm_create_array<int>( 5, name );
+    REQUIRE( offset != 0u );
+    REQUIRE( pam_pmm_get_count( offset ) == 5u );
+
+    // Записываем элементы через fptr.
+    fptr<int> arr;
+    arr.set_addr( offset );
     for ( unsigned i = 0; i < 5; i++ )
-        AddressManager<int>::GetArrayElement( offset, i ) = static_cast<int>( i * 10 );
+        arr[i] = static_cast<int>( i * 10 );
 
     // Читаем обратно.
     for ( unsigned i = 0; i < 5; i++ )
-        REQUIRE( AddressManager<int>::GetArrayElement( offset, i ) == static_cast<int>( i * 10 ) );
+        REQUIRE( arr[i] == static_cast<int>( i * 10 ) );
 
-    AddressManager<int>::DeleteArray( offset );
-    REQUIRE( AddressManager<int>::Find( name ) == 0u );
+    pam_pmm_delete( offset );
+    arr.set_addr( 0 );
+    REQUIRE( pam_pmm_find( name ) == 0u );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// AddressManager — FindByPtr
+// PtrToOffset — обратный поиск по указателю
 // ---------------------------------------------------------------------------
-TEST_CASE( "AddressManager<int>: FindByPtr returns offset by pointer", "[address_manager]" )
+TEST_CASE( "fptr<int>: PtrToOffset returns offset by pointer", "[fptr][find_by_ptr]" )
 {
-    uintptr_t offset = AddressManager<int>::CreateArray( 3, nullptr );
+    pam_pmm_init( nullptr );
+
+    uintptr_t offset = pam_pmm_create_array<int>( 3 );
     REQUIRE( offset != 0u );
 
-    int* p = &AddressManager<int>::GetArrayElement( offset, 0 );
+    int* p = pam_pmm_resolve<int>( offset );
     REQUIRE( p != nullptr );
 
-    uintptr_t found = AddressManager<int>::FindByPtr( p );
+    uintptr_t found = pam_pmm_ptr_to_offset( p );
     REQUIRE( found == offset );
 
-    AddressManager<int>::DeleteArray( offset );
+    pam_pmm_delete( offset );
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// Единое ПАП — объекты разных типов в одном адресном пространстве (Тр.4)
+// Единое ПАП — объекты разных типов (Тр.4)
 // ---------------------------------------------------------------------------
-TEST_CASE( "AddressManager: int and double objects in unified PAP via AddressManager (Tr.4)",
-           "[address_manager][unified_space]" )
+TEST_CASE( "fptr: int and double objects in unified PAP (Tr.4)", "[fptr][unified_space]" )
 {
+    pam_pmm_init( nullptr );
+
     // Создаём объекты разных типов.
-    uintptr_t off_i = AddressManager<int>::Create( "test_unified_int" );
-    uintptr_t off_d = AddressManager<double>::Create( "test_unified_double" );
+    uintptr_t off_i = pam_pmm_create<int>( "test_unified_int" );
+    uintptr_t off_d = pam_pmm_create<double>( "test_unified_double" );
 
     REQUIRE( off_i != 0u );
     REQUIRE( off_d != 0u );
@@ -193,8 +221,9 @@ TEST_CASE( "AddressManager: int and double objects in unified PAP via AddressMan
     REQUIRE( *pd == 3.14 );
 
     // Убираем за собой.
-    AddressManager<int>::Delete( off_i );
-    AddressManager<double>::Delete( off_d );
+    pam_pmm_delete( off_i );
+    pam_pmm_delete( off_d );
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -202,8 +231,10 @@ TEST_CASE( "AddressManager: int and double objects in unified PAP via AddressMan
 // ---------------------------------------------------------------------------
 TEST_CASE( "fptr<int>: find() initializes by object name (Tr.15)", "[fptr][find]" )
 {
+    pam_pmm_init( nullptr );
+
     // Создаём объект с именем.
-    uintptr_t offset = AddressManager<int>::Create( "find_test_named_int" );
+    uintptr_t offset = pam_pmm_create<int>( "find_test_named_int" );
     REQUIRE( offset != 0u );
 
     fptr<int> p1;
@@ -216,5 +247,6 @@ TEST_CASE( "fptr<int>: find() initializes by object name (Tr.15)", "[fptr][find]
     REQUIRE( p2.addr() != 0u );
     REQUIRE( *p2 == 999 );
 
-    AddressManager<int>::Delete( offset );
+    pam_pmm_delete( offset );
+    pam_pmm_destroy();
 }

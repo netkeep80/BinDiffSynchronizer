@@ -34,7 +34,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Коды ошибок** | `node_error` enum + `is_error()` / `error()` в `node_view`; `get()` возвращает типизированные ошибки (`not_found`, `wrong_type`, `index_out_of_range`, `ref_cycle`) вместо `node_view(0)` (Фаза 11) |
 | **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок (Фаза 12) |
 | **Глубокое копирование** | `node_clone()` + `pjson_db::clone()` — создание полных копий поддеревьев JSON в ПАП (Фаза 13) |
-| **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14); утилита миграции `pam_migrate` (Задача 14.9) |
+| **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14); утилита миграции `pam_migrate` (Задача 14.9); все тесты и демо адаптированы для PMM (Задача 14.11) |
 
 ---
 
@@ -107,7 +107,7 @@ C++17 header-only библиотека для работы с JSON в перси
 │   Слой A: pam_core + pam                    │
 │   (ПАП: аллокатор, слоты, realloc)         │
 ├─────────────────────────────────────────────┤
-│   Слой A': PMM (Фаза 14, в процессе) 🚧     │
+│   Слой A': PMM (Фаза 14) ✅                  │
 │   PersistMemoryManager: новый бэкенд ПАП    │
 │   pam_pmm_config.h: конфигурация PamManager │
 │   pam_adapter.h: pptr<T> ↔ uintptr_t        │

@@ -5,10 +5,14 @@
 #include <vector>
 #include <cstddef>
 
-#include "pallocator.h"
+#include "pallocator_pmm.h"
+#include "pam_pmm.h"
+
+using namespace pjson;
 
 // =============================================================================
-// Tests for pallocator<T> (persistent STL-compatible allocator)
+// Tests for pallocator<T> (persistent STL-compatible allocator via PMM)
+// Обновлено для PMM — Задача 14.11.
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -63,11 +67,15 @@ TEST_CASE( "pallocator: cross-type copy constructor compiles", "[pallocator][con
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator<int>: allocate(n) returns non-null pointer for n > 0", "[pallocator][allocate]" )
 {
+    pam_pmm_init( nullptr );
+
     pallocator<int> a;
     int*            p = a.allocate( 4 );
     REQUIRE( p != nullptr );
     // Deallocate to avoid leaking the persistent slot.
     a.deallocate( p, 4 );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -75,9 +83,13 @@ TEST_CASE( "pallocator<int>: allocate(n) returns non-null pointer for n > 0", "[
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator<int>: allocate(0) returns nullptr", "[pallocator][allocate]" )
 {
+    pam_pmm_init( nullptr );
+
     pallocator<int> a;
     int*            p = a.allocate( 0 );
     REQUIRE( p == nullptr );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +97,8 @@ TEST_CASE( "pallocator<int>: allocate(0) returns nullptr", "[pallocator][allocat
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator<int>: allocated memory is readable and writable", "[pallocator][allocate][readwrite]" )
 {
+    pam_pmm_init( nullptr );
+
     pallocator<int>   a;
     const std::size_t N = 5;
     int*              p = a.allocate( N );
@@ -97,6 +111,7 @@ TEST_CASE( "pallocator<int>: allocated memory is readable and writable", "[pallo
         REQUIRE( p[i] == static_cast<int>( i * 11 ) );
 
     a.deallocate( p, N );
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +119,8 @@ TEST_CASE( "pallocator<int>: allocated memory is readable and writable", "[pallo
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator<int>: construct places value and destroy cleans up", "[pallocator][construct_destroy]" )
 {
+    pam_pmm_init( nullptr );
+
     pallocator<int> a;
     int*            p = a.allocate( 1 );
     REQUIRE( p != nullptr );
@@ -113,6 +130,8 @@ TEST_CASE( "pallocator<int>: construct places value and destroy cleans up", "[pa
 
     a.destroy( p );
     a.deallocate( p, 1 );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +159,8 @@ TEST_CASE( "pallocator: any two pallocator instances compare equal", "[pallocato
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator<int>: std::vector<int, pallocator<int>> push_back and read back", "[pallocator][std_vector]" )
 {
+    pam_pmm_init( nullptr );
+
     std::vector<int, pallocator<int>> v;
     v.push_back( 10 );
     v.push_back( 20 );
@@ -149,6 +170,8 @@ TEST_CASE( "pallocator<int>: std::vector<int, pallocator<int>> push_back and rea
     REQUIRE( v[0] == 10 );
     REQUIRE( v[1] == 20 );
     REQUIRE( v[2] == 30 );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +179,8 @@ TEST_CASE( "pallocator<int>: std::vector<int, pallocator<int>> push_back and rea
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator<int>: std::vector grows capacity using pallocator", "[pallocator][std_vector][capacity]" )
 {
+    pam_pmm_init( nullptr );
+
     std::vector<int, pallocator<int>> v;
     for ( int i = 0; i < 20; i++ )
         v.push_back( i );
@@ -163,6 +188,8 @@ TEST_CASE( "pallocator<int>: std::vector grows capacity using pallocator", "[pal
     REQUIRE( v.size() == 20u );
     for ( int i = 0; i < 20; i++ )
         REQUIRE( v[static_cast<std::size_t>( i )] == i );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +197,8 @@ TEST_CASE( "pallocator<int>: std::vector grows capacity using pallocator", "[pal
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator<double>: multiple independent allocations do not alias", "[pallocator][allocate][no_alias]" )
 {
+    pam_pmm_init( nullptr );
+
     pallocator<double> a;
     double*            p1 = a.allocate( 3 );
     double*            p2 = a.allocate( 3 );
@@ -190,6 +219,8 @@ TEST_CASE( "pallocator<double>: multiple independent allocations do not alias", 
 
     a.deallocate( p1, 3 );
     a.deallocate( p2, 3 );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +228,11 @@ TEST_CASE( "pallocator<double>: multiple independent allocations do not alias", 
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator<int>: deallocate(nullptr) is safe", "[pallocator][deallocate]" )
 {
+    pam_pmm_init( nullptr );
+
     pallocator<int> a;
     // Should not crash.
     a.deallocate( nullptr, 0 );
+
+    pam_pmm_destroy();
 }
