@@ -1,422 +1,113 @@
 #pragma once
-#include "fptr_pmm.h"
-#include <cstring>
-#include <type_traits>
-
-using namespace pjson;
-
-// pmem_array.h — Общий примитив персистного массива на базе PMM (задача #1.1–1.2).
+// pmem_array.h — Алиасы для совместимости: делегирует в pmem_array_pmm.h (Задача 15.1).
 //
-// Цель: устранить дублирование кода grow/copy/sync в pvector, pmap и внутренних
-// структурах ПАМ. Сейчас аналогичные паттерны повторяются независимо в каждом месте.
+// После консолидации (Фаза 15) каноническая реализация массива находится
+// в pmem_array_pmm.h (namespace pjson). Этот файл предоставляет имена
+// без суффикса _pmm в глобальном пространстве имён для обратной совместимости.
 //
-// Принцип работы:
-//   pmem_array_hdr — 3-полевой заголовок, совместимый с pvector<T> и pmap<K,V>.
-//   Шаблонные функции реализуют всю логику grow/copy/sort/search.
-//
-// Все операции realloc-безопасны: используют смещения (offsets) вместо
-// сырых указателей и повторно разрешают this после любой аллокации.
-//
-// Бэкенд: PMM (PersistMemoryManager) через fptr_pmm.h / pam_pmm.h / pam_adapter.h.
+// @see pmem_array_pmm.h — каноническая реализация
+// @see plan.md Задача 15.1 — Консолидация pmem_array.h и pmem_array_pmm.h
 //
 // Все комментарии — на русском языке (Тр.6).
 
-// ---------------------------------------------------------------------------
-// pmem_array_hdr — заголовок персистного массива
-// ---------------------------------------------------------------------------
-//
-// Раскладка идентична pvector<T> и pmap<K,V>:
-//   [size | capacity | data_off]  — 3 * sizeof(uintptr_t) = 3 * sizeof(void*)
-//
-// Все поля хранятся как uintptr_t для совместимости с ПАП (Тр.1, Тр.12).
-//
-// Использование:
-//   pmem_array_hdr содержится как первое поле в pvector/pmap внутри ПАП.
-//   Доступ к заголовку только через смещение (hdr_off) или fptr<pmem_array_hdr>.
+#include "pmem_array_pmm.h"
 
-struct pmem_array_hdr
-{
-    uintptr_t size;     ///< Текущее количество элементов
-    uintptr_t capacity; ///< Ёмкость (число элементов в выделенном буфере)
-    uintptr_t data_off; ///< Смещение массива данных в ПАП; 0 = не выделено
-};
+using namespace pjson;
 
-static_assert( std::is_trivially_copyable<pmem_array_hdr>::value, "pmem_array_hdr должен быть тривиально копируемым" );
-static_assert( sizeof( pmem_array_hdr ) == 3 * sizeof( void* ),
-               "pmem_array_hdr должен занимать 3 * sizeof(void*) байт" );
+// ═══════════════════════════════════════════════════════════════════════════
+// Алиас типа заголовка (Задача 15.1)
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ---------------------------------------------------------------------------
-// Шаблонные функции для работы с pmem_array_hdr
-// ---------------------------------------------------------------------------
-//
-// Все функции принимают hdr_off — смещение pmem_array_hdr в ПАП.
-// Это обеспечивает realloc-безопасность: указатель на hdr может инвалидироваться
-// после любой аллокации, но смещение всегда остаётся корректным.
-//
-// Тип T должен быть тривиально копируемым (требование ПАП).
+/// pmem_array_hdr — алиас для pjson::pmem_array_hdr_pmm (обратная совместимость).
+using pmem_array_hdr = pjson::pmem_array_hdr_pmm;
 
-// ---------------------------------------------------------------------------
-// pmem_array_init<T> — инициализировать заголовок нулями (пустой массив)
-// ---------------------------------------------------------------------------
-//
-// Устанавливает size=0, capacity=0, data_off=0.
-// Вызывается при создании нового массива через fptr<pvector<T>>::New() или аналог.
+// ═══════════════════════════════════════════════════════════════════════════
+// Алиасы функций (Задача 15.1)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Инициализация — делегирует в pjson::pmem_array_pmm_init<T>.
 template <typename T> inline void pmem_array_init( uintptr_t hdr_off )
 {
-    static_assert( std::is_trivially_copyable<T>::value, "pmem_array<T> требует, чтобы T был тривиально копируемым" );
-    if ( hdr_off == 0 )
-        return;
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    if ( hdr != nullptr )
-    {
-        hdr->size     = 0;
-        hdr->capacity = 0;
-        hdr->data_off = 0;
-    }
+    pjson::pmem_array_pmm_init<T>( hdr_off );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_reserve<T> — зарезервировать ёмкость >= min_cap
-// ---------------------------------------------------------------------------
-//
-// Если текущая ёмкость уже достаточна — ничего не делает.
-// PMM не поддерживает in-place Realloc, поэтому всегда используется путь:
-// выделить новый блок → скопировать данные → освободить старый блок.
-//
-// Возвращает hdr_off (смещение заголовка не меняется, только data_off внутри).
+/// Резервирование — делегирует в pjson::pmem_array_pmm_reserve<T>.
 template <typename T> inline void pmem_array_reserve( uintptr_t hdr_off, uintptr_t min_cap )
 {
-    static_assert( std::is_trivially_copyable<T>::value, "pmem_array<T> требует, чтобы T был тривиально копируемым" );
-    if ( hdr_off == 0 )
-        return;
-
-    {
-        pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-        if ( hdr == nullptr || min_cap <= hdr->capacity )
-            return;
-    }
-
-    uintptr_t old_data_off;
-    uintptr_t old_cap;
-    uintptr_t old_size;
-    {
-        pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-        old_data_off        = hdr->data_off;
-        old_cap             = hdr->capacity;
-        old_size            = hdr->size;
-    }
-
-    // Новая ёмкость: удваиваем до тех пор, пока >= min_cap.
-    uintptr_t new_cap = ( old_cap == 0 ) ? 4 : old_cap * 2;
-    while ( new_cap < min_cap )
-        new_cap *= 2;
-
-    // Выделяем новый блок через PMM.
-    uintptr_t new_data_off = pam_pmm_create_array<T>( static_cast<unsigned>( new_cap ), nullptr );
-
-    // После аллокации буфер PMM мог переместиться — повторно разрешаем заголовок.
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-
-    // Копируем существующие элементы.
-    if ( old_data_off != 0 && old_size > 0 )
-    {
-        T* new_raw = pmm_resolve<T>( new_data_off );
-        T* old_raw = pmm_resolve<T>( old_data_off );
-        if ( new_raw != nullptr && old_raw != nullptr )
-            std::memcpy( new_raw, old_raw, old_size * sizeof( T ) );
-    }
-
-    // Освобождаем старый буфер.
-    if ( old_data_off != 0 )
-    {
-        pam_pmm_delete( old_data_off );
-        // После деаллокации буфер PMM мог переместиться — повторно разрешаем заголовок.
-        hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    }
-
-    hdr->data_off = new_data_off;
-    hdr->capacity = new_cap;
+    pjson::pmem_array_pmm_reserve<T>( hdr_off, min_cap );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_push_back<T> — добавить элемент в конец массива
-// ---------------------------------------------------------------------------
-//
-// Возвращает ссылку на новый элемент (инициализирован нулями).
-// При необходимости расширяет массив через pmem_array_reserve.
-//
-// ВАЖНО: возвращаемая ссылка действительна только до следующей аллокации.
+/// Добавить элемент в конец — делегирует в pjson::pmem_array_pmm_push_back<T>.
 template <typename T> inline T& pmem_array_push_back( uintptr_t hdr_off )
 {
-    static_assert( std::is_trivially_copyable<T>::value, "pmem_array<T> требует, чтобы T был тривиально копируемым" );
-
-    // Получаем текущий размер.
-    uintptr_t cur_size;
-    {
-        pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-        cur_size            = hdr->size;
-    }
-
-    // Резервируем место для нового элемента.
-    pmem_array_reserve<T>( hdr_off, cur_size + 1 );
-
-    // Обновляем размер и возвращаем ссылку на новый элемент.
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    T*              raw = pmm_resolve<T>( hdr->data_off );
-    // Инициализируем новый слот нулями.
-    std::memset( raw + hdr->size, 0, sizeof( T ) );
-    hdr->size++;
-    return raw[hdr->size - 1];
+    return pjson::pmem_array_pmm_push_back<T>( hdr_off );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_pop_back<T> — удалить последний элемент массива
-// ---------------------------------------------------------------------------
-//
-// Уменьшает size на 1. Не освобождает память (capacity остаётся).
-// Ничего не делает, если массив пуст.
+/// Удалить последний элемент — делегирует в pjson::pmem_array_pmm_pop_back<T>.
 template <typename T> inline void pmem_array_pop_back( uintptr_t hdr_off )
 {
-    if ( hdr_off == 0 )
-        return;
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    if ( hdr != nullptr && hdr->size > 0 )
-        hdr->size--;
+    pjson::pmem_array_pmm_pop_back<T>( hdr_off );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_at<T> — доступ к элементу по индексу
-// ---------------------------------------------------------------------------
-//
-// Возвращает ссылку на элемент по индексу idx.
-// Не проверяет границы (undefined behavior при idx >= size).
-//
-// ВАЖНО: ссылка действительна только до следующей аллокации.
+/// Доступ по индексу — делегирует в pjson::pmem_array_pmm_at<T>.
 template <typename T> inline T& pmem_array_at( uintptr_t hdr_off, uintptr_t idx )
 {
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    T*              raw = pmm_resolve<T>( hdr->data_off );
-    return raw[idx];
+    return pjson::pmem_array_pmm_at<T>( hdr_off, idx );
 }
 
+/// Доступ по индексу (const) — делегирует в pjson::pmem_array_pmm_at_const<T>.
 template <typename T> inline const T& pmem_array_at_const( uintptr_t hdr_off, uintptr_t idx )
 {
-    const pmem_array_hdr* hdr = pmm_resolve_const<pmem_array_hdr>( hdr_off );
-    const T*              raw = pmm_resolve_const<T>( hdr->data_off );
-    return raw[idx];
+    return pjson::pmem_array_pmm_at_const<T>( hdr_off, idx );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_erase_at<T> — удалить элемент по индексу (сдвиг влево)
-// ---------------------------------------------------------------------------
-//
-// Сдвигает элементы [idx+1..size-1] влево на одну позицию.
-// Уменьшает size на 1. Не освобождает память.
+/// Удаление по индексу — делегирует в pjson::pmem_array_pmm_erase_at<T>.
 template <typename T> inline void pmem_array_erase_at( uintptr_t hdr_off, uintptr_t idx )
 {
-    if ( hdr_off == 0 )
-        return;
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    if ( hdr == nullptr || idx >= hdr->size )
-        return;
-    T* raw = pmm_resolve<T>( hdr->data_off );
-    if ( raw != nullptr && idx + 1 < hdr->size )
-        std::memmove( raw + idx, raw + idx + 1, ( hdr->size - idx - 1 ) * sizeof( T ) );
-    hdr->size--;
+    pjson::pmem_array_pmm_erase_at<T>( hdr_off, idx );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_insert_sorted<T, KeyOf, Less> — вставка в отсортированный массив
-// ---------------------------------------------------------------------------
-//
-// KeyOf — функтор T → ключ (возвращает ключ из элемента).
-// Less  — функтор сравнения ключей (по умолчанию operator<).
-//
-// Если ключ уже существует — обновляет элемент (возвращает указатель на него).
-// Если не существует — вставляет в правильную позицию, сохраняя порядок.
-//
-// Возвращает указатель на вставленный/обновлённый элемент.
-//
-// ВАЖНО: возвращаемый указатель действителен только до следующей аллокации.
+/// Вставка в отсортированный массив — делегирует в pjson::pmem_array_pmm_insert_sorted<T>.
 template <typename T, typename KeyOf, typename Less>
 inline T* pmem_array_insert_sorted( uintptr_t hdr_off, const T& value, KeyOf key_of, Less less )
 {
-    static_assert( std::is_trivially_copyable<T>::value, "pmem_array<T> требует, чтобы T был тривиально копируемым" );
-    if ( hdr_off == 0 )
-        return nullptr;
-
-    // Бинарный поиск (lower_bound).
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    uintptr_t       sz  = hdr->size;
-    uintptr_t       lo = 0, hi = sz;
-
-    {
-        T* raw = pmm_resolve<T>( hdr->data_off );
-        while ( lo < hi )
-        {
-            uintptr_t mid = ( lo + hi ) / 2;
-            if ( less( key_of( raw[mid] ), key_of( value ) ) )
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-    }
-
-    uintptr_t idx = lo;
-
-    // Проверяем, существует ли уже такой ключ.
-    {
-        T* raw = pmm_resolve<T>( hdr->data_off );
-        if ( raw != nullptr && idx < sz && !less( key_of( value ), key_of( raw[idx] ) ) &&
-             !less( key_of( raw[idx] ), key_of( value ) ) )
-        {
-            // Ключ найден — обновляем элемент.
-            raw[idx] = value;
-            return &raw[idx];
-        }
-    }
-
-    // Нужно вставить новый элемент в позицию idx.
-    pmem_array_reserve<T>( hdr_off, sz + 1 );
-
-    // После reserve заголовок и данные могли переместиться.
-    hdr    = pmm_resolve<pmem_array_hdr>( hdr_off );
-    T* raw = pmm_resolve<T>( hdr->data_off );
-
-    // Сдвигаем элементы [idx..sz-1] вправо.
-    if ( raw != nullptr && sz > idx )
-        std::memmove( raw + idx + 1, raw + idx, ( sz - idx ) * sizeof( T ) );
-
-    // Записываем новый элемент.
-    if ( raw != nullptr )
-        raw[idx] = value;
-
-    hdr->size++;
-
-    hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    raw = pmm_resolve<T>( hdr->data_off );
-    return ( raw != nullptr ) ? &raw[idx] : nullptr;
+    return pjson::pmem_array_pmm_insert_sorted<T, KeyOf, Less>( hdr_off, value, key_of, less );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_find_sorted<T, KeyOf, Less> — бинарный поиск в отсортированном массиве
-// ---------------------------------------------------------------------------
-//
-// KeyType — тип ключа поиска.
-// KeyOf   — функтор T → ключ.
-// Less    — функтор сравнения ключей.
-//
-// Возвращает указатель на найденный элемент или nullptr.
-//
-// ВАЖНО: возвращаемый указатель действителен только до следующей аллокации.
+/// Бинарный поиск — делегирует в pjson::pmem_array_pmm_find_sorted<T>.
 template <typename T, typename KeyType, typename KeyOf, typename Less>
 inline T* pmem_array_find_sorted( uintptr_t hdr_off, const KeyType& key, KeyOf key_of, Less less )
 {
-    if ( hdr_off == 0 )
-        return nullptr;
-
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    if ( hdr == nullptr || hdr->size == 0 || hdr->data_off == 0 )
-        return nullptr;
-
-    T*        raw = pmm_resolve<T>( hdr->data_off );
-    uintptr_t lo = 0, hi = hdr->size;
-    while ( lo < hi )
-    {
-        uintptr_t mid = ( lo + hi ) / 2;
-        if ( less( key_of( raw[mid] ), key ) )
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-
-    if ( lo < hdr->size && !less( key, key_of( raw[lo] ) ) && !less( key_of( raw[lo] ), key ) )
-        return &raw[lo];
-
-    return nullptr;
+    return pjson::pmem_array_pmm_find_sorted<T, KeyType, KeyOf, Less>( hdr_off, key, key_of, less );
 }
 
+/// Бинарный поиск (const) — делегирует в pjson::pmem_array_pmm_find_sorted_const<T>.
 template <typename T, typename KeyType, typename KeyOf, typename Less>
 inline const T* pmem_array_find_sorted_const( uintptr_t hdr_off, const KeyType& key, KeyOf key_of, Less less )
 {
-    if ( hdr_off == 0 )
-        return nullptr;
-
-    const pmem_array_hdr* hdr = pmm_resolve_const<pmem_array_hdr>( hdr_off );
-    if ( hdr == nullptr || hdr->size == 0 || hdr->data_off == 0 )
-        return nullptr;
-
-    const T*  raw = pmm_resolve_const<T>( hdr->data_off );
-    uintptr_t lo = 0, hi = hdr->size;
-    while ( lo < hi )
-    {
-        uintptr_t mid = ( lo + hi ) / 2;
-        if ( less( key_of( raw[mid] ), key ) )
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-
-    if ( lo < hdr->size && !less( key, key_of( raw[lo] ) ) && !less( key_of( raw[lo] ), key ) )
-        return &raw[lo];
-
-    return nullptr;
+    return pjson::pmem_array_pmm_find_sorted_const<T, KeyType, KeyOf, Less>( hdr_off, key, key_of, less );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_free<T> — освободить весь выделенный буфер
-// ---------------------------------------------------------------------------
-//
-// Освобождает data_off и обнуляет size/capacity/data_off.
-// После вызова заголовок снова пустой (как после pmem_array_init).
+/// Освобождение буфера — делегирует в pjson::pmem_array_pmm_free<T>.
 template <typename T> inline void pmem_array_free( uintptr_t hdr_off )
 {
-    if ( hdr_off == 0 )
-        return;
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    if ( hdr == nullptr )
-        return;
-    if ( hdr->data_off != 0 )
-    {
-        pam_pmm_delete( hdr->data_off );
-        // После деаллокации буфер PMM мог переместиться — повторно разрешаем.
-        hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    }
-    if ( hdr != nullptr )
-    {
-        hdr->size     = 0;
-        hdr->capacity = 0;
-        hdr->data_off = 0;
-    }
+    pjson::pmem_array_pmm_free<T>( hdr_off );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_clear<T> — обнулить размер без освобождения буфера
-// ---------------------------------------------------------------------------
+/// Обнуление размера — делегирует в pjson::pmem_array_pmm_clear<T>.
 template <typename T> inline void pmem_array_clear( uintptr_t hdr_off )
 {
-    if ( hdr_off == 0 )
-        return;
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    if ( hdr != nullptr )
-        hdr->size = 0;
+    pjson::pmem_array_pmm_clear<T>( hdr_off );
 }
 
-// ---------------------------------------------------------------------------
-// pmem_array_size / pmem_array_capacity — геттеры для size и capacity
-// ---------------------------------------------------------------------------
+/// Получить размер — делегирует в pjson::pmem_array_pmm_size.
 inline uintptr_t pmem_array_size( uintptr_t hdr_off )
 {
-    if ( hdr_off == 0 )
-        return 0;
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    return ( hdr != nullptr ) ? hdr->size : 0;
+    return pjson::pmem_array_pmm_size( hdr_off );
 }
 
+/// Получить ёмкость — делегирует в pjson::pmem_array_pmm_capacity.
 inline uintptr_t pmem_array_capacity( uintptr_t hdr_off )
 {
-    if ( hdr_off == 0 )
-        return 0;
-    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
-    return ( hdr != nullptr ) ? hdr->capacity : 0;
+    return pjson::pmem_array_pmm_capacity( hdr_off );
 }
