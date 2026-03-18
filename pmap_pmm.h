@@ -140,8 +140,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         // Вычисляем байтовое смещение this от базы PMM для realloc-безопасности.
         // При расширении PMM-кучи (HeapStorage::expand) this может стать невалидным.
         const std::uint8_t* base_before = PamManager::backend().base_ptr();
-        uintptr_t self_byte_off = static_cast<uintptr_t>(
-            reinterpret_cast<const std::uint8_t*>( this ) - base_before );
+        uintptr_t self_byte_off = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( this ) - base_before );
 
         // Бинарный поиск (lower_bound) для определения позиции вставки
         uintptr_t sz = hdr_.size;
@@ -174,9 +173,9 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
 
         // Нужно вставить новый элемент в позицию idx
         // Резервируем место
-        uintptr_t cur_cap   = hdr_.capacity;
-        uintptr_t old_data  = hdr_.data_off;
-        uintptr_t new_size  = sz + 1;
+        uintptr_t cur_cap  = hdr_.capacity;
+        uintptr_t old_data = hdr_.data_off;
+        uintptr_t new_size = sz + 1;
 
         if ( new_size > cur_cap )
         {
@@ -194,7 +193,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
             // Копируем существующие элементы
             if ( old_data != 0 && sz > 0 )
             {
-                Entry*       new_raw = new_data_pptr.resolve();
+                Entry*       new_raw   = new_data_pptr.resolve();
                 const Entry* old_raw_p = pmm_resolve_const<Entry>( old_data );
                 if ( new_raw != nullptr && old_raw_p != nullptr )
                     std::memcpy( new_raw, old_raw_p, sz * sizeof( Entry ) );
@@ -208,8 +207,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
             }
 
             // Перезапрашиваем this через байтовое смещение (expand мог переместить кучу).
-            pmap_pmm* self = reinterpret_cast<pmap_pmm*>(
-                PamManager::backend().base_ptr() + self_byte_off );
+            pmap_pmm* self      = reinterpret_cast<pmap_pmm*>( PamManager::backend().base_ptr() + self_byte_off );
             self->hdr_.data_off = new_data_off;
             self->hdr_.capacity = new_cap;
 

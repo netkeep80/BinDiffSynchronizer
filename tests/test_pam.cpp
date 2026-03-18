@@ -669,8 +669,7 @@ TEST_CASE( "pam_pmm_name_key: has correct size", "[pam][layout][name_registry]" 
 // ---------------------------------------------------------------------------
 // Карта слотов: GetCount и GetElemSize работают через бинарный поиск
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_pmm: slot map -- GetCount and GetElemSize via binary search",
-           "[pam][slot_map]" )
+TEST_CASE( "pam_pmm: slot map -- GetCount and GetElemSize via binary search", "[pam][slot_map]" )
 {
     pam_pmm_init( nullptr );
 
@@ -722,8 +721,7 @@ TEST_CASE( "pam_pmm: slot map -- grows correctly with many objects", "[pam][slot
 // ---------------------------------------------------------------------------
 // Save и Init сохраняют/восстанавливают карту слотов
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_pmm: slot map -- Save and Init restore slot map",
-           "[pam][slot_map][save_reload]" )
+TEST_CASE( "pam_pmm: slot map -- Save and Init restore slot map", "[pam][slot_map][save_reload]" )
 {
     const char* fname = "./test_pam_slot_map.pam";
 
@@ -820,8 +818,7 @@ TEST_CASE( "pam_pmm: name map -- duplicate name returns 0", "[pam][name_map]" )
 // ---------------------------------------------------------------------------
 // Карта имён — рост за пределы начальной ёмкости
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_pmm: name map -- grows correctly with many named objects",
-           "[pam][name_map][grow]" )
+TEST_CASE( "pam_pmm: name map -- grows correctly with many named objects", "[pam][name_map][grow]" )
 {
     pam_pmm_init( nullptr );
 
@@ -864,8 +861,7 @@ TEST_CASE( "pam_pmm: name map -- grows correctly with many named objects",
 // ---------------------------------------------------------------------------
 // Карта имён — Save и Init восстанавливают карту имён из файла
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_pmm: name map -- Save and Init restore name map",
-           "[pam][name_map][save_reload]" )
+TEST_CASE( "pam_pmm: name map -- Save and Init restore name map", "[pam][name_map][save_reload]" )
 {
     const char* fname = "./test_pam_name_map.pam";
     rm_file( fname );
@@ -931,8 +927,7 @@ TEST_CASE( "pam_pmm: GetElemSize returns correct size", "[pam][elem_size]" )
 // ---------------------------------------------------------------------------
 // Много именованных объектов — рост корректен
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_pmm: grows correctly with many named objects",
-           "[pam][grow]" )
+TEST_CASE( "pam_pmm: grows correctly with many named objects", "[pam][grow]" )
 {
     pam_pmm_init( nullptr );
 
@@ -967,8 +962,7 @@ TEST_CASE( "pam_pmm: grows correctly with many named objects",
 // ---------------------------------------------------------------------------
 // Save и Init восстанавливают всё состояние
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_pmm: Save and Init restore full state",
-           "[pam][save_reload]" )
+TEST_CASE( "pam_pmm: Save and Init restore full state", "[pam][save_reload]" )
 {
     const char* fname = "./test_pam_full_state.pam";
     rm_file( fname );

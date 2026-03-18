@@ -167,7 +167,7 @@ TEST_CASE( "PAM dynamic: pstring content is unique for each named entry", "[pam]
     // Проверяем 100 случайных пар (i, i+COUNT/2) на неравенство содержимого.
     for ( unsigned i = 0; i < 100u; i++ )
     {
-        unsigned             j    = i + COUNT / 2;
+        unsigned           j    = i + COUNT / 2;
         const pstring_pmm* ps_i = pam_pmm_resolve<pstring_pmm>( offsets[i] );
         const pstring_pmm* ps_j = pam_pmm_resolve<pstring_pmm>( offsets[j] );
         REQUIRE( ps_i != nullptr );

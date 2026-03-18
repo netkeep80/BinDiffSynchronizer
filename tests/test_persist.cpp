@@ -196,8 +196,7 @@ TEST_CASE( "fptr<int>: PtrToOffset returns offset by pointer", "[fptr][find_by_p
 // ---------------------------------------------------------------------------
 // Единое ПАП — объекты разных типов (Тр.4)
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr: int and double objects in unified PAP (Tr.4)",
-           "[fptr][unified_space]" )
+TEST_CASE( "fptr: int and double objects in unified PAP (Tr.4)", "[fptr][unified_space]" )
 {
     pam_pmm_init( nullptr );
 
