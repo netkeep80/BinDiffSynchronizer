@@ -23,5 +23,4 @@ using namespace pjson;
 using pstring = pjson::pstring_pmm;
 
 // Проверки размера (обратная совместимость).
-static_assert( sizeof( pstring ) == 2 * sizeof( void* ),
-               "pstring должна занимать 2 * sizeof(void*) байт (Phase 3)" );
+static_assert( sizeof( pstring ) == 2 * sizeof( void* ), "pstring должна занимать 2 * sizeof(void*) байт (Phase 3)" );
