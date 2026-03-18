@@ -132,8 +132,8 @@ struct node
 
         double real_val; ///< real: double
 
-        /// string: pstring (readwrite, length + chars).
-        /// Раскладка идентична pstring: { uintptr_t length; fptr<char> chars; }.
+        /// string: pstring (readwrite, length + chars_off).
+        /// Раскладка идентична pstring_pmm: { uintptr_t length; uintptr_t chars_off; }.
         /// Строковые значения JSON — изменяемые на лету (необходимо для jsonRVM).
         struct
         {

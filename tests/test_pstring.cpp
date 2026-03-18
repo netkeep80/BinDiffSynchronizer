@@ -26,8 +26,8 @@ TEST_CASE( "pstring: length field is uintptr_t (Phase 3)", "[pstring][layout][ph
 {
     // sizeof(uintptr_t) == sizeof(void*) на любой платформе.
     REQUIRE( sizeof( pstring::length ) == sizeof( void* ) );
-    // Поле chars (fptr<char>) также хранит uintptr_t.
-    REQUIRE( sizeof( pstring::chars ) == sizeof( void* ) );
+    // Поле chars_off (uintptr_t) — смещение массива char в ПАП.
+    REQUIRE( sizeof( pstring::chars_off ) == sizeof( void* ) );
     // Phase 3: pstring должен занимать 2 * sizeof(void*) байт.
     REQUIRE( sizeof( pstring ) == 2 * sizeof( void* ) );
 }
@@ -155,7 +155,7 @@ TEST_CASE( "pstring: clear resets to empty", "[pstring][clear]" )
     fps->clear();
     REQUIRE( fps->empty() );
     REQUIRE( fps->size() == 0u );
-    REQUIRE( fps->chars.addr() == 0u );
+    REQUIRE( fps->chars_off == 0u );
 
     fps.Delete();
 }
@@ -233,22 +233,22 @@ TEST_CASE( "pstring: operator< gives lexicographic order", "[pstring][compare]" 
 }
 
 // ---------------------------------------------------------------------------
-// pstring — chars.addr() reflects allocation state
+// pstring — chars_off reflects allocation state
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: chars.addr() is non-zero after assign, zero after clear", "[pstring][data]" )
+TEST_CASE( "pstring: chars_off is non-zero after assign, zero after clear", "[pstring][data]" )
 {
     ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 
-    REQUIRE( fps->chars.addr() == 0u );
+    REQUIRE( fps->chars_off == 0u );
 
     fps->assign( "test" );
-    REQUIRE( fps->chars.addr() != 0u );
+    REQUIRE( fps->chars_off != 0u );
     REQUIRE( fps->length == 4u );
 
     fps->clear();
-    REQUIRE( fps->chars.addr() == 0u );
+    REQUIRE( fps->chars_off == 0u );
     REQUIRE( fps->length == 0u );
 
     fps.Delete();
