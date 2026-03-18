@@ -6,6 +6,8 @@
 
 #include "pjson_pool.h"
 
+using namespace pjson;
+
 // =============================================================================
 // Tests for Phase 4 — pjson_pool: пул памяти для узлов node
 // =============================================================================
@@ -16,7 +18,7 @@ namespace
 void reset_pam()
 {
     pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }
 
 void rm_file( const char* path )
@@ -147,7 +149,7 @@ TEST_CASE( "pjson_pool: freed node is tagged as _free", "[pjson_pool][free]" )
     pool->free( id );
 
     // Проверяем тег через PAM (не через get, т.к. слот помечен _free).
-    const node* n = PersistentAddressSpace::Get().Resolve<node>( id );
+    const node* n = pmm_resolve<node>( id );
     REQUIRE( n != nullptr );
     REQUIRE( n->tag == node_tag::_free );
 
@@ -420,7 +422,7 @@ TEST_CASE( "pjson_pool: save and load PAM image with pool", "[pjson_pool][persis
 
     // Сохраняем пул с одним узлом.
     {
-        PersistentAddressSpace::Init( fname );
+        pam_pmm_init( fname );
         pstringview_manager::reset();
 
         fptr<pjson_pool> pool;
@@ -431,20 +433,19 @@ TEST_CASE( "pjson_pool: save and load PAM image with pool", "[pjson_pool][persis
         node_set_int( id, 9999 );
         saved_id = id;
 
-        PersistentAddressSpace::Get().Save();
+        pam_pmm_save();
     }
 
     // Загружаем образ и проверяем данные.
     {
-        PersistentAddressSpace::Init( fname );
-        auto& pam = PersistentAddressSpace::Get();
+        pam_pmm_init( fname );
 
         // Ищем пул по имени.
-        uintptr_t off = pam.Find( "test_pool" );
+        uintptr_t off = pam_pmm_find( "test_pool" );
         REQUIRE( off != 0u );
         REQUIRE( off == pool_offset );
 
-        pjson_pool* pool = pam.Resolve<pjson_pool>( off );
+        pjson_pool* pool = pmm_resolve<pjson_pool>( off );
         REQUIRE( pool != nullptr );
         REQUIRE( pool->total_count() >= 1u );
 
@@ -453,7 +454,7 @@ TEST_CASE( "pjson_pool: save and load PAM image with pool", "[pjson_pool][persis
         REQUIRE( node_view{ saved_id }.as_int() == 9999 );
 
         pool->free_pool();
-        pam.Delete( off );
+        pam_pmm_delete( off );
     }
 
     rm_file( fname );

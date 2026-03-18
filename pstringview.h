@@ -1,9 +1,12 @@
 #pragma once
 #include "pstring.h"
 #include "pmap.h"
+#include "fptr_pmm.h"
 #include <cstring>
 #include <string>
 #include <vector>
+
+using namespace pjson;
 
 // pstringview — персистная строка только для чтения с интернированием (аналог string_view).
 //
@@ -51,8 +54,7 @@ struct pstringview
     {
         if ( chars_offset == 0 )
             return "";
-        auto& pam = PersistentAddressSpace::Get();
-        return pam.Resolve<char>( chars_offset );
+        return pmm_resolve<char>( chars_offset );
     }
 
     uintptr_t size() const { return length; }
@@ -85,8 +87,7 @@ struct pstringview
     ~pstringview() = default;
 
     // Разрешаем доступ к приватному конструктору только для фабричных методов ПАМ.
-    template <class U> friend class AddressManager;
-    friend class PersistentAddressSpace;
+    template <typename U> friend class fptr_pmm;
 };
 
 static_assert( sizeof( pstringview ) == 2 * sizeof( void* ), "pstringview должна занимать 2 * sizeof(void*) байт" );
@@ -147,8 +148,7 @@ struct pstringview_table
 
         uintptr_t len      = static_cast<uintptr_t>( std::strlen( s ) );
         uint64_t  hash     = fnv1a( s );
-        auto&     pam      = PersistentAddressSpace::Get();
-        uintptr_t self_off = pam.PtrToOffset( this );
+        uintptr_t self_off = pam_pmm_ptr_to_offset( this );
 
         // Убеждаемся, что таблица инициализирована.
         if ( capacity_ == 0 )
@@ -156,19 +156,19 @@ struct pstringview_table
 
         // Перехэшируем, если load factor > 0.5.
         {
-            pstringview_table* self = pam.Resolve<pstringview_table>( self_off );
+            pstringview_table* self = pmm_resolve<pstringview_table>( self_off );
             if ( self->count_ * 2 >= self->capacity_ )
                 self->_rehash( self_off, self->capacity_ * 2 );
         }
 
         // Ищем ячейку.
-        pstringview_table* self = pam.Resolve<pstringview_table>( self_off );
+        pstringview_table* self = pmm_resolve<pstringview_table>( self_off );
         uintptr_t          cap  = self->capacity_;
         uintptr_t          idx  = static_cast<uintptr_t>( hash % cap );
 
         for ( uintptr_t probe = 0; probe < cap; probe++ )
         {
-            self                    = pam.Resolve<pstringview_table>( self_off );
+            self                    = pmm_resolve<pstringview_table>( self_off );
             cap                     = self->capacity_;
             pstringview_entry& cell = self->_bucket( idx );
 
@@ -177,7 +177,7 @@ struct pstringview_table
                 // Пустая ячейка — строки нет, создаём новый массив char в ПАП.
                 uintptr_t new_chars = _create_chars( self_off, s, len );
                 // Переразрешаем self и ячейку после возможного realloc.
-                self = pam.Resolve<pstringview_table>( self_off );
+                self = pmm_resolve<pstringview_table>( self_off );
                 cap  = self->capacity_;
                 // Пересчитываем idx (capacity могла вырасти при _rehash).
                 idx = static_cast<uintptr_t>( hash % cap );
@@ -203,7 +203,7 @@ struct pstringview_table
             if ( cell.hash == hash && cell.length == len )
             {
                 uintptr_t   co = cell.chars_offset;
-                const char* cs = pam.Resolve<char>( co );
+                const char* cs = pmm_resolve<char>( co );
                 if ( cs != nullptr && std::strcmp( cs, s ) == 0 )
                     return { co, len }; // найдено — возвращаем существующее смещение
             }
@@ -219,26 +219,23 @@ struct pstringview_table
     /// Доступ к ячейке хэш-таблицы по индексу.
     pstringview_entry& _bucket( uintptr_t idx )
     {
-        auto& pam = PersistentAddressSpace::Get();
-        return *( pam.Resolve<pstringview_entry>( buckets_.addr() ) + idx );
+        return *( pmm_resolve<pstringview_entry>( buckets_.addr() ) + idx );
     }
 
     /// Инициализировать массив ячеек нулями (initial_cap ячеек).
     void _init_buckets( uintptr_t self_off, uintptr_t initial_cap )
     {
-        auto&                   pam = PersistentAddressSpace::Get();
-        fptr<pstringview_entry> arr;
-        arr.NewArray( static_cast<unsigned>( initial_cap ) );
+        uintptr_t arr_off = pam_pmm_create_array<pstringview_entry>( static_cast<unsigned>( initial_cap ), nullptr );
         // Инициализируем нулями (пустые ячейки).
-        auto* raw = pam.Resolve<pstringview_entry>( arr.addr() );
+        auto* raw = pmm_resolve<pstringview_entry>( arr_off );
         for ( uintptr_t i = 0; i < initial_cap; i++ )
         {
             raw[i].hash         = 0;
             raw[i].chars_offset = 0;
             raw[i].length       = 0;
         }
-        pstringview_table* self = pam.Resolve<pstringview_table>( self_off );
-        self->buckets_.set_addr( arr.addr() );
+        pstringview_table* self = pmm_resolve<pstringview_table>( self_off );
+        self->buckets_.set_addr( arr_off );
         self->capacity_ = initial_cap;
         self->count_    = 0;
     }
@@ -246,11 +243,8 @@ struct pstringview_table
     /// Создать новый массив char в ПАП со строкой s длиной len. Возвращает смещение.
     static uintptr_t _create_chars( uintptr_t /*self_off*/, const char* s, uintptr_t len )
     {
-        auto&      pam = PersistentAddressSpace::Get();
-        fptr<char> arr;
-        arr.NewArray( static_cast<unsigned>( len + 1 ) );
-        uintptr_t off = arr.addr();
-        char*     dst = pam.Resolve<char>( off );
+        uintptr_t off = pam_pmm_create_array<char>( static_cast<unsigned>( len + 1 ), nullptr );
+        char*     dst = pmm_resolve<char>( off );
         if ( dst != nullptr )
             std::memcpy( dst, s, static_cast<std::size_t>( len + 1 ) );
         return off;
@@ -259,16 +253,13 @@ struct pstringview_table
     /// Перехэшировать таблицу в новую ёмкость new_cap.
     void _rehash( uintptr_t self_off, uintptr_t new_cap )
     {
-        auto& pam = PersistentAddressSpace::Get();
-
-        pstringview_table* self    = pam.Resolve<pstringview_table>( self_off );
+        pstringview_table* self    = pmm_resolve<pstringview_table>( self_off );
         uintptr_t          old_cap = self->capacity_;
         uintptr_t          old_bkt = self->buckets_.addr();
 
         // Выделяем новый массив ячеек.
-        fptr<pstringview_entry> new_arr;
-        new_arr.NewArray( static_cast<unsigned>( new_cap ) );
-        auto* new_raw = pam.Resolve<pstringview_entry>( new_arr.addr() );
+        uintptr_t new_arr_off = pam_pmm_create_array<pstringview_entry>( static_cast<unsigned>( new_cap ), nullptr );
+        auto* new_raw = pmm_resolve<pstringview_entry>( new_arr_off );
         for ( uintptr_t i = 0; i < new_cap; i++ )
         {
             new_raw[i].hash         = 0;
@@ -277,7 +268,7 @@ struct pstringview_table
         }
 
         // Переносим все существующие записи.
-        auto* old_raw = pam.Resolve<pstringview_entry>( old_bkt );
+        auto* old_raw = pmm_resolve<pstringview_entry>( old_bkt );
         for ( uintptr_t i = 0; i < old_cap; i++ )
         {
             if ( old_raw[i].chars_offset == 0 )
@@ -286,8 +277,8 @@ struct pstringview_table
             uintptr_t ins = static_cast<uintptr_t>( h % new_cap );
             for ( uintptr_t p = 0; p < new_cap; p++ )
             {
-                // Переразрешаем (после NewArray возможен realloc).
-                new_raw = pam.Resolve<pstringview_entry>( new_arr.addr() );
+                // Переразрешаем (после аллокации возможен realloc).
+                new_raw = pmm_resolve<pstringview_entry>( new_arr_off );
                 if ( new_raw[ins].chars_offset == 0 )
                 {
                     new_raw[ins] = old_raw[i];
@@ -300,14 +291,12 @@ struct pstringview_table
         // Освобождаем старый массив.
         if ( old_bkt != 0 )
         {
-            fptr<pstringview_entry> old_fptr;
-            old_fptr.set_addr( old_bkt );
-            old_fptr.DeleteArray();
+            pam_pmm_delete( old_bkt );
         }
 
         // Обновляем self.
-        self = pam.Resolve<pstringview_table>( self_off );
-        self->buckets_.set_addr( new_arr.addr() );
+        self = pmm_resolve<pstringview_table>( self_off );
+        self->buckets_.set_addr( new_arr_off );
         self->capacity_ = new_cap;
         // count_ не изменяется (deleted записи не используются: строки бессмертны).
     }
@@ -316,8 +305,7 @@ struct pstringview_table
     pstringview_table()  = default;
     ~pstringview_table() = default;
 
-    template <class U> friend class AddressManager;
-    friend class PersistentAddressSpace;
+    template <typename U> friend class fptr_pmm;
 };
 
 static_assert( sizeof( pstringview_table ) == 3 * sizeof( void* ),
@@ -337,25 +325,21 @@ struct pstringview_manager
     // При создании новой таблицы регистрирует смещение в заголовке ПАП.
     static pstringview_table* get_table()
     {
-        auto& pam = PersistentAddressSpace::Get();
-        // Синхронизируем _table_offset с заголовком ПАП (восстановление после Load).
+        // Синхронизируем _table_offset с реестром PMM (восстановление после Load).
         if ( _table_offset == 0 )
         {
-            uintptr_t stored = pam.GetStringTableOffset();
+            uintptr_t stored = pam_pmm_find( "pstringview_table" );
             if ( stored != 0 )
             {
                 _table_offset = stored;
             }
             else
             {
-                // Создаём новую таблицу и регистрируем её в заголовке ПАП.
-                fptr<pstringview_table> ft;
-                ft.New();
-                _table_offset = ft.addr();
-                pam.SetStringTableOffset( _table_offset );
+                // Создаём новую таблицу и регистрируем её в реестре PMM.
+                _table_offset = pam_pmm_create<pstringview_table>( "pstringview_table" );
             }
         }
-        return pam.Resolve<pstringview_table>( _table_offset );
+        return pmm_resolve<pstringview_table>( _table_offset );
     }
 
     // Сбросить синглтон (для тестов).
@@ -376,10 +360,8 @@ inline void pstringview::intern( const char* s )
     if ( s == nullptr )
         s = "";
 
-    auto& pam = PersistentAddressSpace::Get();
-
     // Сохраняем собственное смещение до любых аллокаций.
-    uintptr_t self_off = pam.PtrToOffset( this );
+    uintptr_t self_off = pam_pmm_ptr_to_offset( this );
 
     // Получаем (или создаём) таблицу интернирования через менеджер.
     pstringview_table* tbl = pstringview_manager::get_table();
@@ -387,20 +369,20 @@ inline void pstringview::intern( const char* s )
     uintptr_t tbl_off = pstringview_manager::_table_offset;
 
     // Интернируем строку.
-    tbl         = pam.Resolve<pstringview_table>( tbl_off );
+    tbl         = pmm_resolve<pstringview_table>( tbl_off );
     auto result = tbl->intern( s );
 
     // Переразрешаем себя после возможного realloc.
-    pstringview* self  = ( self_off != 0 ) ? pam.Resolve<pstringview>( self_off ) : this;
+    pstringview* self  = ( self_off != 0 ) ? pmm_resolve<pstringview>( self_off ) : this;
     self->chars_offset = result.chars_offset;
     self->length       = result.length;
 }
 
 // ---------------------------------------------------------------------------
-// PersistentAddressSpace — расширение API словаря строк (фаза 2)
+// PMM — расширение API словаря строк (фаза 2)
 //
-// Эти методы определяются здесь (в pstringview.h), а не в pam_core.h,
-// поскольку они зависят от pstringview_table, которая не доступна в pam_core.h
+// Эти методы определяются здесь (в pstringview.h), а не в pam_pmm.h,
+// поскольку они зависят от pstringview_table, которая не доступна в pam_pmm.h
 // из-за запрета на циклические включения.
 //
 // Задача 2.2: InternString — интернирование строки через ПАМ.
@@ -429,15 +411,14 @@ struct pstringview_search_result
 /// Использование:
 ///   auto r = pam_intern_string("hello");
 ///   // r.chars_offset != 0, r.length == 5
-///   // PersistentAddressSpace::Get().Resolve<char>(r.chars_offset) == "hello"
+///   // pmm_resolve<char>(r.chars_offset) == "hello"
 inline pstringview_table::InternResult pam_intern_string( const char* s )
 {
     if ( s == nullptr )
         s = "";
     pstringview_table* tbl     = pstringview_manager::get_table();
     uintptr_t          tbl_off = pstringview_manager::_table_offset;
-    auto&              pam     = PersistentAddressSpace::Get();
-    tbl                        = pam.Resolve<pstringview_table>( tbl_off );
+    tbl                        = pmm_resolve<pstringview_table>( tbl_off );
     return tbl->intern( s );
 }
 
@@ -454,8 +435,7 @@ inline std::vector<pstringview_search_result> pam_search_strings( const char* pa
 
     pstringview_table* tbl     = pstringview_manager::get_table();
     uintptr_t          tbl_off = pstringview_manager::_table_offset;
-    auto&              pam     = PersistentAddressSpace::Get();
-    tbl                        = pam.Resolve<pstringview_table>( tbl_off );
+    tbl                        = pmm_resolve<pstringview_table>( tbl_off );
     if ( tbl == nullptr )
         return results;
 
@@ -466,16 +446,16 @@ inline std::vector<pstringview_search_result> pam_search_strings( const char* pa
     for ( uintptr_t i = 0; i < cap; i++ )
     {
         // Переразрешаем tbl на каждой итерации (нет аллокаций — оптимизация не нужна).
-        tbl = pam.Resolve<pstringview_table>( tbl_off );
+        tbl = pmm_resolve<pstringview_table>( tbl_off );
         if ( tbl == nullptr )
             break;
-        const pstringview_entry* raw = pam.Resolve<pstringview_entry>( tbl->buckets_.addr() );
+        const pstringview_entry* raw = pmm_resolve<pstringview_entry>( tbl->buckets_.addr() );
         if ( raw == nullptr )
             break;
         const pstringview_entry& cell = raw[i];
         if ( cell.chars_offset == 0 )
             continue; // пустая ячейка
-        const char* str = pam.Resolve<char>( cell.chars_offset );
+        const char* str = pmm_resolve<char>( cell.chars_offset );
         if ( str == nullptr )
             continue;
         if ( std::strstr( str, pattern ) != nullptr )
@@ -493,7 +473,7 @@ inline std::vector<pstringview_search_result> pam_search_strings( const char* pa
 /// Вернуть все интернированные строки из словаря ПАП.
 /// Удобно для полного перебора словаря (итерация по всем ключам объектов).
 ///
-/// Задача 2.5: PersistentAddressSpace::AllStrings() — перебор всех pstringview в словаре.
+/// Задача 2.5: pam_all_strings() — перебор всех pstringview в словаре.
 inline std::vector<pstringview_search_result> pam_all_strings()
 {
     return pam_search_strings( "" );

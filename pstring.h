@@ -1,7 +1,9 @@
 #pragma once
-#include "persist.h"
+#include "fptr_pmm.h"
 #include <cstring>
 #include <algorithm>
+
+using namespace pjson;
 
 // pstring — персистная строка, аналог std::string.
 //
@@ -16,7 +18,7 @@
 //   - Пустая/нулевая pstring имеет chars.addr() == 0 и length == 0.
 //
 // Phase 3: поле length имеет тип uintptr_t для полной совместимости
-//   с Phase 2 PAM API (PersistentAddressSpace использует uintptr_t для всех смещений).
+//   с Phase 2 PAM API (PMM использует uintptr_t для всех смещений).
 //
 // Использование:
 //   fptr<pstring> fps;
@@ -40,25 +42,23 @@ struct pstring
     // assign: сохранить C-строку в ПАП.
     // Сохраняем self_offset и old_chars_addr ДО Delete/New, так как любое из них
     // может вызвать realloc буфера ПАМ и сделать this недействительным.
-    // Используем pam.Delete() вместо chars.DeleteArray(), чтобы избежать записи
+    // Используем pam_pmm_delete() вместо chars.DeleteArray(), чтобы избежать записи
     // __addr = 0 по устаревшему (освобождённому realloc'ом) адресу.
     void assign( const char* s )
     {
-        auto& pam = PersistentAddressSpace::Get();
-
         // Сохраняем смещение до любых операций с памятью.
-        uintptr_t self_offset = pam.PtrToOffset( this );
+        uintptr_t self_offset = pam_pmm_ptr_to_offset( this );
         uintptr_t old_chars   = chars.addr();
 
         if ( old_chars != 0 )
         {
-            pam.Delete( old_chars ); // не пишем в chars после возможного realloc
+            pam_pmm_delete( old_chars ); // не пишем в chars после возможного realloc
         }
 
         if ( s == nullptr || s[0] == '\0' )
         {
             // Обнуляем поля через переприведённый указатель.
-            pstring* self = ( self_offset != 0 ) ? pam.Resolve<pstring>( self_offset ) : this;
+            pstring* self = ( self_offset != 0 ) ? pmm_resolve<pstring>( self_offset ) : this;
             self->chars   = fptr<char>{};
             self->length  = 0;
             return;
@@ -71,13 +71,13 @@ struct pstring
         new_chars.NewArray( static_cast<unsigned>( len + 1 ) );
 
         // После NewArray() буфер ПАМ мог переместиться — переприводим this.
-        pstring* self = ( self_offset != 0 ) ? pam.Resolve<pstring>( self_offset ) : this;
+        pstring* self = ( self_offset != 0 ) ? pmm_resolve<pstring>( self_offset ) : this;
 
         self->chars  = new_chars;
         self->length = len;
 
         // Записываем символы через offset-based доступ (безопасно после realloc).
-        char* dst = pam.Resolve<char>( self->chars.addr() );
+        char* dst = pmm_resolve<char>( self->chars.addr() );
         std::memcpy( dst, s, static_cast<std::size_t>( len + 1 ) );
     }
 
@@ -96,17 +96,16 @@ struct pstring
     // clear: освободить символьные данные и обнулить длину.
     // Запоминаем собственное смещение и адрес chars ДО Delete(), так как
     // удаление может вызвать realloc буфера ПАМ и сделать this недействительным.
-    // Используем pam.Delete() вместо chars.DeleteArray(), чтобы избежать
+    // Используем pam_pmm_delete() вместо chars.DeleteArray(), чтобы избежать
     // записи __addr = 0 в устаревший (освобождённый realloc'ом) указатель.
     void clear()
     {
         if ( chars.addr() != 0 )
         {
-            auto&     pam         = PersistentAddressSpace::Get();
-            uintptr_t self_offset = pam.PtrToOffset( this );
+            uintptr_t self_offset = pam_pmm_ptr_to_offset( this );
             uintptr_t chars_addr  = chars.addr();
-            pam.Delete( chars_addr ); // не пишем в chars после realloc
-            pstring* self = ( self_offset != 0 ) ? pam.Resolve<pstring>( self_offset ) : this;
+            pam_pmm_delete( chars_addr ); // не пишем в chars после realloc
+            pstring* self = ( self_offset != 0 ) ? pmm_resolve<pstring>( self_offset ) : this;
             self->chars   = fptr<char>{};
             self->length  = 0;
         }
@@ -148,8 +147,9 @@ struct pstring
     ~pstring() = default;
 
     // Разрешаем доступ к приватному конструктору только для фабричных методов ПАМ.
-    template <class U> friend class AddressManager;
-    friend class PersistentAddressSpace;
+    // PMM выделяет сырую память без вызова конструкторов (Тр.10),
+    // поэтому friend-доступ к конструктору не требуется.
+    template <typename U> friend class fptr_pmm;
 };
 
 // Phase 3: проверяем, что оба поля имеют размер void* (uintptr_t) для согласованности с Phase 2.

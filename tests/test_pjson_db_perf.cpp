@@ -31,17 +31,19 @@
 
 #include "pjson_db.h"
 
+using namespace pjson;
+
 // ===========================================================================
 // Вспомогательные функции
 // ===========================================================================
 
 namespace
 {
-/// Сбросить ПАП в начальное состояние перед каждым тестом.
+/// Сбросить PMM в начальное состояние перед каждым тестом.
 static void reset_pam_perf()
 {
     pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }
 
 /// Текущее время для замеров.
@@ -316,7 +318,7 @@ TEST_CASE( "pjson_db perf: ReserveSlots before bulk insert", "[pjson_db][phase9]
     {
         reset_pam_perf();
         pjson_db db;
-        db.pam().ReserveSlots( PERF_N + 64u );
+        pam_pmm_reserve_slots( PERF_N + 64u );
 
         char path[64];
 

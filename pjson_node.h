@@ -109,7 +109,7 @@ using node_id = uintptr_t;
 //   union: 3 * sizeof(void*) байт — payload (максимальный из вариантов)
 //
 // Все поля — POD (тривиально копируемые), живут только в ПАП.
-// Доступ — только через смещение (node_id) и PersistentAddressSpace::Resolve<node>.
+// Доступ — только через смещение (node_id) и pmm_resolve<node>.
 //
 // Типы строк:
 //   string_val: pstring (readwrite) — JSON string-value узлы, изменяемые на лету.
@@ -238,7 +238,7 @@ struct array_range;        ///< Диапазон для range-based for по м�
 // ---------------------------------------------------------------------------
 //
 // node_view хранит node_id (смещение узла в ПАП) и предоставляет типобезопасный
-// read-only интерфейс для работы с узлами через PersistentAddressSpace.
+// read-only интерфейс для работы с узлами через PMM.
 //
 // Использование:
 //   node_view v{ some_node_id };
@@ -377,8 +377,7 @@ struct node_view
             return std::string_view{};
         if ( n->string_val.chars_offset == 0 )
             return std::string_view{};
-        auto&       pam = PersistentAddressSpace::Get();
-        const char* s   = pam.Resolve<char>( n->string_val.chars_offset );
+        const char* s = pmm_resolve<char>( n->string_val.chars_offset );
         if ( s == nullptr )
             return std::string_view{};
         return std::string_view{ s, static_cast<std::size_t>( n->string_val.length ) };
@@ -393,8 +392,7 @@ struct node_view
             return std::string_view{};
         if ( n->ref_val.path_chars_offset == 0 )
             return std::string_view{};
-        auto&       pam = PersistentAddressSpace::Get();
-        const char* s   = pam.Resolve<char>( n->ref_val.path_chars_offset );
+        const char* s = pmm_resolve<char>( n->ref_val.path_chars_offset );
         if ( s == nullptr )
             return std::string_view{};
         return std::string_view{ s, static_cast<std::size_t>( n->ref_val.path_length ) };
@@ -442,8 +440,7 @@ struct node_view
             return node_view{};
         if ( n->array_val.data_off == 0 )
             return node_view{};
-        auto&          pam = PersistentAddressSpace::Get();
-        const node_id* arr = pam.Resolve<node_id>( n->array_val.data_off );
+        const node_id* arr = pmm_resolve<node_id>( n->array_val.data_off );
         if ( arr == nullptr )
             return node_view{};
         return node_view{ arr[idx] };
@@ -462,10 +459,9 @@ struct node_view
         if ( n->object_val.size == 0 || n->object_val.data_off == 0 )
             return node_view{};
 
-        auto&               pam      = PersistentAddressSpace::Get();
         uintptr_t           sz       = n->object_val.size;
         uintptr_t           data_off = n->object_val.data_off;
-        const object_entry* entries  = pam.Resolve<object_entry>( data_off );
+        const object_entry* entries  = pmm_resolve<object_entry>( data_off );
         if ( entries == nullptr )
             return node_view{};
 
@@ -474,14 +470,14 @@ struct node_view
         while ( lo < hi )
         {
             uintptr_t mid         = ( lo + hi ) / 2;
-            entries               = pam.Resolve<object_entry>( data_off );
+            entries               = pmm_resolve<object_entry>( data_off );
             const object_entry& e = entries[mid];
             int                 cmp;
             if ( e.key_chars_offset == 0 )
                 cmp = ( key[0] == '\0' ) ? 0 : 1;
             else
             {
-                const char* ks = pam.Resolve<char>( e.key_chars_offset );
+                const char* ks = pmm_resolve<char>( e.key_chars_offset );
                 cmp            = ( ks != nullptr ) ? std::strcmp( ks, key ) : -1;
             }
             if ( cmp < 0 )
@@ -503,14 +499,13 @@ struct node_view
             return std::string_view{};
         if ( idx >= n->object_val.size || n->object_val.data_off == 0 )
             return std::string_view{};
-        auto&               pam     = PersistentAddressSpace::Get();
-        const object_entry* entries = pam.Resolve<object_entry>( n->object_val.data_off );
+        const object_entry* entries = pmm_resolve<object_entry>( n->object_val.data_off );
         if ( entries == nullptr )
             return std::string_view{};
         const object_entry& e = entries[idx];
         if ( e.key_chars_offset == 0 )
             return std::string_view{};
-        const char* s = pam.Resolve<char>( e.key_chars_offset );
+        const char* s = pmm_resolve<char>( e.key_chars_offset );
         if ( s == nullptr )
             return std::string_view{};
         return std::string_view{ s, static_cast<std::size_t>( e.key_length ) };
@@ -524,8 +519,7 @@ struct node_view
             return node_view{};
         if ( idx >= n->object_val.size || n->object_val.data_off == 0 )
             return node_view{};
-        auto&               pam     = PersistentAddressSpace::Get();
-        const object_entry* entries = pam.Resolve<object_entry>( n->object_val.data_off );
+        const object_entry* entries = pmm_resolve<object_entry>( n->object_val.data_off );
         if ( entries == nullptr )
             return node_view{};
         return node_view{ entries[idx].value };
@@ -593,7 +587,7 @@ struct node_view
     {
         if ( id == 0 )
             return nullptr;
-        return PersistentAddressSpace::Get().Resolve<node>( id );
+        return pmm_resolve<node>( id );
     }
 };
 
@@ -618,8 +612,7 @@ inline void node_init_null( uintptr_t node_off )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->tag                       = node_tag::null;
@@ -634,8 +627,7 @@ inline void node_set_bool( uintptr_t node_off, bool v )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->tag         = node_tag::boolean;
@@ -648,8 +640,7 @@ inline void node_set_int( uintptr_t node_off, int64_t v )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->tag     = node_tag::integer;
@@ -662,8 +653,7 @@ inline void node_set_uint( uintptr_t node_off, uint64_t v )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->tag      = node_tag::uinteger;
@@ -676,8 +666,7 @@ inline void node_set_real( uintptr_t node_off, double v )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->tag      = node_tag::real;
@@ -692,19 +681,18 @@ inline void node_set_string( uintptr_t node_off, const char* s )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
 
     // Освобождаем предыдущие данные (если были).
     {
-        node* n = pam.Resolve<node>( node_off );
+        node* n = pmm_resolve<node>( node_off );
         if ( n == nullptr )
             return;
         if ( n->tag == node_tag::string && n->string_val.chars_offset != 0 )
         {
             uintptr_t old_chars = n->string_val.chars_offset;
-            pam.Delete( old_chars );
+            pam_pmm_delete( old_chars );
             // После Delete — re-resolve.
-            n = pam.Resolve<node>( node_off );
+            n = pmm_resolve<node>( node_off );
             if ( n == nullptr )
                 return;
         }
@@ -725,14 +713,14 @@ inline void node_set_string( uintptr_t node_off, const char* s )
     uintptr_t chars_off = arr.addr();
 
     // Переразрешаем node после возможного realloc.
-    node* n = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->string_val.length       = len;
     n->string_val.chars_offset = chars_off;
 
     // Копируем строку.
-    char* dst = pam.Resolve<char>( chars_off );
+    char* dst = pmm_resolve<char>( chars_off );
     if ( dst != nullptr )
         std::memcpy( dst, s, static_cast<std::size_t>( len + 1 ) );
 }
@@ -749,8 +737,7 @@ inline void node_set_array( uintptr_t node_off )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->tag                = node_tag::array;
@@ -765,8 +752,7 @@ inline void node_set_object( uintptr_t node_off )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->tag                 = node_tag::object;
@@ -781,8 +767,7 @@ inline void node_set_binary( uintptr_t node_off )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->tag                 = node_tag::binary;
@@ -798,9 +783,8 @@ inline void node_set_ref( uintptr_t node_off, const char* path )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
     {
-        node* n = pam.Resolve<node>( node_off );
+        node* n = pmm_resolve<node>( node_off );
         if ( n == nullptr )
             return;
         n->tag                       = node_tag::ref;
@@ -817,7 +801,7 @@ inline void node_set_ref( uintptr_t node_off, const char* path )
     auto result = pam_intern_string( path );
 
     // Переразрешаем node после возможного realloc внутри intern().
-    node* n = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
     n->ref_val.path_length       = result.length;
@@ -829,8 +813,7 @@ inline void node_set_ref_target( uintptr_t node_off, node_id target )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr || n->tag != node_tag::ref )
         return;
     n->ref_val.target = target;
@@ -843,7 +826,6 @@ inline node_id node_array_push_back( uintptr_t node_off )
 {
     if ( node_off == 0 )
         return 0;
-    auto& pam = PersistentAddressSpace::Get();
 
     // Аллоцируем новый node-слот (null).
     fptr<node> new_slot;
@@ -851,7 +833,7 @@ inline node_id node_array_push_back( uintptr_t node_off )
     uintptr_t slot_off = new_slot.addr();
 
     // Инициализируем слот нулями.
-    node* slot = pam.Resolve<node>( slot_off );
+    node* slot = pmm_resolve<node>( slot_off );
     if ( slot != nullptr )
     {
         slot->tag                       = node_tag::null;
@@ -862,7 +844,7 @@ inline node_id node_array_push_back( uintptr_t node_off )
     }
 
     // Переразрешаем array-узел после возможного realloc.
-    node* n = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr || n->tag != node_tag::array )
         return slot_off;
 
@@ -882,7 +864,7 @@ inline node_id node_array_push_back( uintptr_t node_off )
         uintptr_t new_data = new_arr.addr();
 
         // Инициализируем новые слоты нулём.
-        node_id* new_raw = pam.Resolve<node_id>( new_data );
+        node_id* new_raw = pmm_resolve<node_id>( new_data );
         if ( new_raw != nullptr )
         {
             for ( uintptr_t i = 0; i < new_cap; i++ )
@@ -892,8 +874,8 @@ inline node_id node_array_push_back( uintptr_t node_off )
         // Копируем существующие элементы.
         if ( old_data != 0 )
         {
-            const node_id* old_raw = pam.Resolve<node_id>( old_data );
-            new_raw                = pam.Resolve<node_id>( new_data );
+            const node_id* old_raw = pmm_resolve<node_id>( old_data );
+            new_raw                = pmm_resolve<node_id>( new_data );
             if ( old_raw != nullptr && new_raw != nullptr )
             {
                 for ( uintptr_t i = 0; i < old_size; i++ )
@@ -906,7 +888,7 @@ inline node_id node_array_push_back( uintptr_t node_off )
         }
 
         // Переразрешаем n после возможного realloc.
-        n = pam.Resolve<node>( node_off );
+        n = pmm_resolve<node>( node_off );
         if ( n == nullptr )
             return slot_off;
         n->array_val.data_off = new_data;
@@ -914,10 +896,10 @@ inline node_id node_array_push_back( uintptr_t node_off )
     }
 
     // Записываем slot_off в массив.
-    n = pam.Resolve<node>( node_off );
+    n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return slot_off;
-    node_id* arr = pam.Resolve<node_id>( n->array_val.data_off );
+    node_id* arr = pmm_resolve<node_id>( n->array_val.data_off );
     if ( arr != nullptr )
         arr[old_size] = slot_off;
     n->array_val.size = new_size;
@@ -934,12 +916,10 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     if ( node_off == 0 || key == nullptr )
         return 0;
 
-    auto& pam = PersistentAddressSpace::Get();
-
     // Интернируем ключ через pstringview_table (readonly).
     auto key_result = pam_intern_string( key );
     // После intern — переразрешаем node.
-    node* n = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr || n->tag != node_tag::object )
         return 0;
 
@@ -949,12 +929,12 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     // Ищем существующий ключ через бинарный поиск по key_chars_offset.
     if ( sz > 0 && data_off != 0 )
     {
-        object_entry* entries = pam.Resolve<object_entry>( data_off );
+        object_entry* entries = pmm_resolve<object_entry>( data_off );
         uintptr_t     lo = 0, hi = sz;
         while ( lo < hi )
         {
             uintptr_t mid = ( lo + hi ) / 2;
-            entries       = pam.Resolve<object_entry>( data_off );
+            entries       = pmm_resolve<object_entry>( data_off );
             if ( entries == nullptr )
                 break;
             const object_entry& e = entries[mid];
@@ -963,7 +943,7 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
                 cmp = ( key[0] == '\0' ) ? 0 : 1;
             else
             {
-                const char* ks = pam.Resolve<char>( e.key_chars_offset );
+                const char* ks = pmm_resolve<char>( e.key_chars_offset );
                 cmp            = ( ks != nullptr ) ? std::strcmp( ks, key ) : -1;
             }
             if ( cmp < 0 )
@@ -981,7 +961,7 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     uintptr_t slot_off = new_slot.addr();
 
     // Инициализируем слот нулями.
-    node* slot = pam.Resolve<node>( slot_off );
+    node* slot = pmm_resolve<node>( slot_off );
     if ( slot != nullptr )
     {
         slot->tag                       = node_tag::null;
@@ -992,7 +972,7 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     }
 
     // Переразрешаем node после realloc.
-    n = pam.Resolve<node>( node_off );
+    n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return slot_off;
 
@@ -1008,15 +988,14 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
         // Оба chars_offset должны указывать на интернированные строки.
         bool operator()( uintptr_t a_offset, uintptr_t b_offset ) const
         {
-            auto& pam = PersistentAddressSpace::Get();
             if ( a_offset == 0 && b_offset == 0 )
                 return false;
             if ( a_offset == 0 )
                 return true; // "" < any non-empty
             if ( b_offset == 0 )
                 return false;
-            const char* a = pam.Resolve<char>( a_offset );
-            const char* b = pam.Resolve<char>( b_offset );
+            const char* a = pmm_resolve<char>( a_offset );
+            const char* b = pmm_resolve<char>( b_offset );
             if ( a == nullptr || b == nullptr )
                 return false;
             return std::strcmp( a, b ) < 0;
@@ -1032,7 +1011,7 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     // object_val.{size, capacity, data_off} имеют ту же раскладку что pmem_array_hdr,
     // поэтому reinterpret_cast допустим (только для POD-структур).
     uintptr_t hdr_off =
-        pam.PtrToOffset( reinterpret_cast<pmem_array_hdr*>( &( pam.Resolve<node>( node_off )->object_val.size ) ) );
+        pam_pmm_ptr_to_offset( reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->object_val.size ) ) );
 
     pmem_array_insert_sorted<object_entry, ObjKeyOf, ObjLess>( hdr_off, new_entry, ObjKeyOf{}, ObjLess{} );
 
@@ -1044,11 +1023,9 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
 {
     if ( node_off == 0 )
         return;
-    auto& pam = PersistentAddressSpace::Get();
-
     // Получаем заголовок массива binary_val.
     uintptr_t hdr_off =
-        pam.PtrToOffset( reinterpret_cast<pmem_array_hdr*>( &( pam.Resolve<node>( node_off )->binary_val.size ) ) );
+        pam_pmm_ptr_to_offset( reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->binary_val.size ) ) );
 
     uint8_t& slot = pmem_array_push_back<uint8_t>( hdr_off );
     slot          = byte;
@@ -1073,10 +1050,8 @@ inline node_id node_clone( node_id src_id )
     if ( src_id == 0 )
         return 0;
 
-    auto& pam = PersistentAddressSpace::Get();
-
     // Разрешаем исходный узел.
-    const node* src = pam.Resolve<node>( src_id );
+    const node* src = pmm_resolve<node>( src_id );
     if ( src == nullptr )
         return 0;
 
@@ -1086,7 +1061,7 @@ inline node_id node_clone( node_id src_id )
     node_id dst_id = dst_fptr.addr();
 
     // Переразрешаем src после возможного realloc.
-    src = pam.Resolve<node>( src_id );
+    src = pmm_resolve<node>( src_id );
     if ( src == nullptr )
         return dst_id;
 
@@ -1126,13 +1101,13 @@ inline node_id node_clone( node_id src_id )
         // Инициализируем binary-узел и копируем данные побайтно.
         node_set_binary( dst_id );
         // Переразрешаем src после set_binary (может вызвать realloc).
-        src = pam.Resolve<node>( src_id );
+        src = pmm_resolve<node>( src_id );
         if ( src == nullptr )
             break;
         uintptr_t bin_size = src->binary_val.size;
         if ( bin_size > 0 && src->binary_val.data_off != 0 )
         {
-            const uint8_t* bin_data = pam.Resolve<uint8_t>( src->binary_val.data_off );
+            const uint8_t* bin_data = pmm_resolve<uint8_t>( src->binary_val.data_off );
             if ( bin_data != nullptr )
             {
                 for ( uintptr_t i = 0; i < bin_size; ++i )
@@ -1140,10 +1115,10 @@ inline node_id node_clone( node_id src_id )
                     uint8_t byte = bin_data[i];
                     node_binary_push_back( dst_id, byte );
                     // Переразрешаем bin_data после push_back (может вызвать realloc).
-                    src = pam.Resolve<node>( src_id );
+                    src = pmm_resolve<node>( src_id );
                     if ( src == nullptr || src->binary_val.data_off == 0 )
                         break;
-                    bin_data = pam.Resolve<uint8_t>( src->binary_val.data_off );
+                    bin_data = pmm_resolve<uint8_t>( src->binary_val.data_off );
                     if ( bin_data == nullptr )
                         break;
                 }
@@ -1157,7 +1132,7 @@ inline node_id node_clone( node_id src_id )
         // Инициализируем array-узел и рекурсивно копируем элементы.
         node_set_array( dst_id );
         // Переразрешаем src после set_array.
-        src = pam.Resolve<node>( src_id );
+        src = pmm_resolve<node>( src_id );
         if ( src == nullptr )
             break;
         uintptr_t arr_size = src->array_val.size;
@@ -1174,10 +1149,10 @@ inline node_id node_clone( node_id src_id )
             // Копируем содержимое склонированного элемента в слот.
             // Так как push_back создаёт null-узел, а clone создаёт полную копию,
             // нужно переместить данные. Проще: записываем node_id прямо в массив.
-            node* dst_node = pam.Resolve<node>( dst_id );
+            node* dst_node = pmm_resolve<node>( dst_id );
             if ( dst_node != nullptr && dst_node->tag == node_tag::array && dst_node->array_val.data_off != 0 )
             {
-                node_id* arr = pam.Resolve<node_id>( dst_node->array_val.data_off );
+                node_id* arr = pmm_resolve<node_id>( dst_node->array_val.data_off );
                 if ( arr != nullptr && dst_node->array_val.size > 0 )
                 {
                     arr[dst_node->array_val.size - 1] = elem_clone;
@@ -1212,10 +1187,10 @@ inline node_id node_clone( node_id src_id )
             // Вставляем ключ в целевой объект.
             node_id slot_id = node_object_insert( dst_id, key_s.c_str() );
             // Записываем склонированное значение в слот.
-            node* dst_node = pam.Resolve<node>( dst_id );
+            node* dst_node = pmm_resolve<node>( dst_id );
             if ( dst_node != nullptr && dst_node->tag == node_tag::object && dst_node->object_val.data_off != 0 )
             {
-                object_entry* entries = pam.Resolve<object_entry>( dst_node->object_val.data_off );
+                object_entry* entries = pmm_resolve<object_entry>( dst_node->object_val.data_off );
                 if ( entries != nullptr )
                 {
                     // Ищем запись по slot_id (value) и заменяем.

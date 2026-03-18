@@ -104,10 +104,7 @@ C++17 header-only библиотека для работы с JSON в перси
 │   Слой B: pstringview + pstring + pmem_array │
 │   (readonly/readwrite строки, массивы)       │
 ├─────────────────────────────────────────────┤
-│   Слой A: pam_core + pam                    │
-│   (ПАП: аллокатор, слоты, realloc)         │
-├─────────────────────────────────────────────┤
-│   Слой A': PMM (Фаза 14) ✅                  │
+│   Слой A: PMM (Фаза 14) ✅                   │
 │   PersistMemoryManager: новый бэкенд ПАП    │
 │   pam_pmm_config.h: конфигурация PamManager │
 │   pam_adapter.h: pptr<T> ↔ uintptr_t        │
@@ -126,8 +123,8 @@ C++17 header-only библиотека для работы с JSON в перси
 
 | Файл | Слой | Описание |
 |------|------|----------|
-| `pam_core.h` | A | Ядро ПАМ: аллокатор, слоты, карта имён, realloc; внутренние массивы через pam_array_hdr (≡ pmem_array_hdr) |
-| `pam.h` | A | Фасад: включает pvector, pmap, pstring |
+| ~~`pam_core.h`~~ | ~~A~~ | Удалён (Задача 14.10): старое ядро ПАМ заменено на PMM |
+| ~~`pam.h`~~ | ~~A~~ | Удалён (Задача 14.10): заменён на `pam_pmm.h` |
 | `pam_pmm_config.h` | A' | Конфигурация менеджера PMM: определяет `PamManager` для будущей миграции (Фаза 14) |
 | `pam_adapter.h` | A' | Адаптер pptr<T> ↔ uintptr_t: слой совместимости для плавного перехода на PMM (Задача 14.1); `pptr_to_offset()`, `offset_to_pptr()`, `pmm_resolve<T>()` |
 | `pmem_array_pmm.h` | A' | PMM-реализация персистного массива (Задача 14.2): `pmem_array_hdr_pmm`, шаблонные функции `pmem_array_pmm_*` |
@@ -142,7 +139,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `persist_pmm.h` | A' | PMM-реализация обёртки для POD-типов (Задача 14.7): `persist_pmm<T>` — для обратной совместимости, `sizeof(persist_pmm<T>) == sizeof(T)`, алиас `pjson::persist<T>` |
 | `pallocator_pmm.h` | A' | PMM-реализация STL-аллокатора (Задача 14.7): `pallocator_pmm<T>` — совместим с `std::vector<T, pallocator_pmm<T>>`, алиас `pjson::pallocator<T>` |
 | `deps/pmm/pmm.h` | A' | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14) |
-| `persist.h` | A | Базовые типы: fptr<T>, persist<T>, AddressManager |
+| ~~`persist.h`~~ | ~~A~~ | Удалён (Задача 14.10): заменён на `persist_pmm.h`, `fptr_pmm.h` |
 | `pmem_array.h` | B | Общий примитив персистного массива: pmem_array_hdr + шаблонные функции init/reserve/push_back/pop_back/at/insert_sorted/find_sorted/erase_at/free/clear |
 | `pvector.h` | B | Персистный динамический массив (тонкая обёртка над pmem_array_hdr) |
 | `pmap.h` | B | Персистная карта (sorted array, тонкая обёртка над pmem_array_hdr) |
@@ -630,13 +627,12 @@ fptr<pjson_pool> pool;
 pool.New( "my_pool" );
 node_id id = pool->alloc();
 node_set_string( id, "hello" );
-PersistentAddressSpace::Get().Save();
+pam_pmm_save();
 
 // Загрузка
-PersistentAddressSpace::Init( "data.pam" );
-auto& pam = PersistentAddressSpace::Get();
-uintptr_t off = pam.Find( "my_pool" );
-pjson_pool* p = pam.Resolve<pjson_pool>( off );
+pam_pmm_init( "data.pam" );
+uintptr_t off = pam_pmm_find( "my_pool" );
+pjson_pool* p = pmm_resolve<pjson_pool>( off );
 REQUIRE( node_view{ id }.as_string() == "hello" );
 ```
 
@@ -802,7 +798,7 @@ cmake --build build
 ```
 
 Алгоритм миграции:
-1. Загрузка старого `.pam` через `PersistentAddressSpace`.
+1. Загрузка старого `.pam` через PMM.
 2. Экспорт дерева JSON в строку.
 3. Создание нового `.pam` через PMM.
 4. Импорт JSON в новую БД.

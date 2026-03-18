@@ -4,6 +4,16 @@
 #include <type_traits>
 
 #include "pstring.h"
+#include "pam_pmm.h"
+
+using namespace pjson;
+
+// Вспомогательная функция: инициализировать PMM перед каждым тестом.
+static void ensure_pmm()
+{
+    if ( !pam_pmm_is_initialized() )
+        pam_pmm_init( nullptr );
+}
 
 // =============================================================================
 // Tests for pstring (persistent string)
@@ -27,6 +37,7 @@ TEST_CASE( "pstring: length field is uintptr_t (Phase 3)", "[pstring][layout][ph
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: zero-initialised pstring (via fptr) gives empty string", "[pstring][construct]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 
@@ -42,6 +53,7 @@ TEST_CASE( "pstring: zero-initialised pstring (via fptr) gives empty string", "[
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: assign short string stores correct content", "[pstring][assign]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 
@@ -59,6 +71,7 @@ TEST_CASE( "pstring: assign short string stores correct content", "[pstring][ass
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: assign longer string stores correct content", "[pstring][assign]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 
@@ -76,6 +89,7 @@ TEST_CASE( "pstring: assign longer string stores correct content", "[pstring][as
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: reassigning frees old allocation and stores new content", "[pstring][reassign]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 
@@ -95,6 +109,7 @@ TEST_CASE( "pstring: reassigning frees old allocation and stores new content", "
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: assign empty string clears content", "[pstring][assign]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 
@@ -113,6 +128,7 @@ TEST_CASE( "pstring: assign empty string clears content", "[pstring][assign]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: assign nullptr gives empty string", "[pstring][assign]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 
@@ -129,6 +145,7 @@ TEST_CASE( "pstring: assign nullptr gives empty string", "[pstring][assign]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: clear resets to empty", "[pstring][clear]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 
@@ -148,6 +165,7 @@ TEST_CASE( "pstring: clear resets to empty", "[pstring][clear]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: operator== compares correctly", "[pstring][compare]" )
 {
+    ensure_pmm();
     fptr<pstring> fps1;
     fps1.New();
     fps1->assign( "hello" );
@@ -178,6 +196,7 @@ TEST_CASE( "pstring: operator== compares correctly", "[pstring][compare]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: operator[] accesses individual characters", "[pstring][index]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
     fps->assign( "abc" );
@@ -195,6 +214,7 @@ TEST_CASE( "pstring: operator[] accesses individual characters", "[pstring][inde
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: operator< gives lexicographic order", "[pstring][compare]" )
 {
+    ensure_pmm();
     fptr<pstring> fps_a;
     fps_a.New();
     fps_a->assign( "apple" );
@@ -217,6 +237,7 @@ TEST_CASE( "pstring: operator< gives lexicographic order", "[pstring][compare]" 
 // ---------------------------------------------------------------------------
 TEST_CASE( "pstring: chars.addr() is non-zero after assign, zero after clear", "[pstring][data]" )
 {
+    ensure_pmm();
     fptr<pstring> fps;
     fps.New();
 

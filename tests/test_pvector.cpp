@@ -3,6 +3,15 @@
 #include <type_traits>
 
 #include "pvector.h"
+#include "pam_pmm.h"
+
+using namespace pjson;
+
+static void ensure_pmm()
+{
+    if ( !pam_pmm_is_initialized() )
+        pam_pmm_init( nullptr );
+}
 
 // =============================================================================
 // Tests for pvector<T> (persistent dynamic array)
@@ -24,6 +33,7 @@ TEST_CASE( "pvector<int>: size and capacity are uintptr_t (Phase 3)", "[pvector]
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<int>: zero-initialised pvector (via fptr) gives empty vector", "[pvector][construct]" )
 {
+    ensure_pmm();
     fptr<pvector<int>> fv;
     fv.New();
 
@@ -39,6 +49,7 @@ TEST_CASE( "pvector<int>: zero-initialised pvector (via fptr) gives empty vector
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<int>: push_back increases size and stores correct values", "[pvector][push_back]" )
 {
+    ensure_pmm();
     fptr<pvector<int>> fv;
     fv.New();
 
@@ -60,6 +71,7 @@ TEST_CASE( "pvector<int>: push_back increases size and stores correct values", "
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<int>: capacity grows to accommodate elements", "[pvector][capacity]" )
 {
+    ensure_pmm();
     fptr<pvector<int>> fv;
     fv.New();
 
@@ -81,6 +93,7 @@ TEST_CASE( "pvector<int>: capacity grows to accommodate elements", "[pvector][ca
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<int>: pop_back decreases size", "[pvector][pop_back]" )
 {
+    ensure_pmm();
     fptr<pvector<int>> fv;
     fv.New();
 
@@ -111,6 +124,7 @@ TEST_CASE( "pvector<int>: pop_back decreases size", "[pvector][pop_back]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<int>: clear resets size to 0", "[pvector][clear]" )
 {
+    ensure_pmm();
     fptr<pvector<int>> fv;
     fv.New();
 
@@ -133,6 +147,7 @@ TEST_CASE( "pvector<int>: clear resets size to 0", "[pvector][clear]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<int>: free releases allocation and resets capacity", "[pvector][free]" )
 {
+    ensure_pmm();
     fptr<pvector<int>> fv;
     fv.New();
 
@@ -150,6 +165,7 @@ TEST_CASE( "pvector<int>: free releases allocation and resets capacity", "[pvect
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<int>: front() and back() return correct elements", "[pvector][access]" )
 {
+    ensure_pmm();
     fptr<pvector<int>> fv;
     fv.New();
 
@@ -169,6 +185,7 @@ TEST_CASE( "pvector<int>: front() and back() return correct elements", "[pvector
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<int>: range-based iteration produces correct values", "[pvector][iterator]" )
 {
+    ensure_pmm();
     fptr<pvector<int>> fv;
     fv.New();
 
@@ -191,6 +208,7 @@ TEST_CASE( "pvector<int>: range-based iteration produces correct values", "[pvec
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector<double>: push_back and read back doubles", "[pvector][double]" )
 {
+    ensure_pmm();
     fptr<pvector<double>> fv;
     fv.New();
 

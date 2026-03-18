@@ -8,13 +8,15 @@
 
 #include "pjson_node.h"
 
-// Вспомогательная функция: сбросить ПАП перед каждым тестом.
+using namespace pjson;
+
+// Вспомогательная функция: сбросить PMM перед каждым тестом.
 namespace
 {
 void reset_pam()
 {
     pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }
 } // anonymous namespace
 
@@ -290,9 +292,8 @@ TEST_CASE( "node: ref node path is interned (pstringview - readonly)", "[pjson_n
     node_set_ref( off2, "/a/b/c" );
 
     // Оба ref-узла должны иметь один и тот же path_chars_offset (интернирование).
-    auto&       pam = PersistentAddressSpace::Get();
-    const node* n1  = pam.Resolve<node>( off1 );
-    const node* n2  = pam.Resolve<node>( off2 );
+    const node* n1 = pmm_resolve<node>( off1 );
+    const node* n2 = pmm_resolve<node>( off2 );
     REQUIRE( n1->ref_val.path_chars_offset == n2->ref_val.path_chars_offset );
 
     fn1.Delete();
@@ -591,17 +592,15 @@ TEST_CASE( "node: object keys are interned (pstringview) - same chars_offset", "
     node_object_insert( obj2_off, "shared_key" );
 
     // Оба объекта должны использовать один и тот же chars_offset для ключа.
-    auto& pam = PersistentAddressSpace::Get();
-
-    const node* n1 = pam.Resolve<node>( obj1_off );
-    const node* n2 = pam.Resolve<node>( obj2_off );
+    const node* n1 = pmm_resolve<node>( obj1_off );
+    const node* n2 = pmm_resolve<node>( obj2_off );
 
     // Доступ к first entry каждого object_val.
     REQUIRE( n1->object_val.size == 1u );
     REQUIRE( n2->object_val.size == 1u );
 
-    const object_entry* e1 = pam.Resolve<object_entry>( n1->object_val.data_off );
-    const object_entry* e2 = pam.Resolve<object_entry>( n2->object_val.data_off );
+    const object_entry* e1 = pmm_resolve<object_entry>( n1->object_val.data_off );
+    const object_entry* e2 = pmm_resolve<object_entry>( n2->object_val.data_off );
 
     REQUIRE( e1 != nullptr );
     REQUIRE( e2 != nullptr );
@@ -697,11 +696,9 @@ TEST_CASE( "node: ref_val.path uses pstringview (readonly, interned) - same offs
     uintptr_t off2 = fn2.addr();
     node_set_ref( off2, "/same/path" );
 
-    auto& pam = PersistentAddressSpace::Get();
-
     // Оба ref-узла должны иметь одинаковый path_chars_offset (интернирование).
-    const node* n1 = pam.Resolve<node>( off1 );
-    const node* n2 = pam.Resolve<node>( off2 );
+    const node* n1 = pmm_resolve<node>( off1 );
+    const node* n2 = pmm_resolve<node>( off2 );
     REQUIRE( n1->ref_val.path_chars_offset != 0 );
     REQUIRE( n1->ref_val.path_chars_offset == n2->ref_val.path_chars_offset );
 
@@ -724,10 +721,9 @@ TEST_CASE( "node: object keys are pstringview (readonly) - not pstring (readwrit
     node_object_insert( obj_off, "my_key" );
 
     // После вставки ключ должен иметь тот же chars_offset что pam_intern_string.
-    auto&       pam = PersistentAddressSpace::Get();
-    const node* n   = pam.Resolve<node>( obj_off );
+    const node* n = pmm_resolve<node>( obj_off );
     REQUIRE( n->object_val.size == 1u );
-    const object_entry* e = pam.Resolve<object_entry>( n->object_val.data_off );
+    const object_entry* e = pmm_resolve<object_entry>( n->object_val.data_off );
     REQUIRE( e->key_chars_offset == r1.chars_offset ); // тот же интернированный offset
 
     fn_obj.Delete();

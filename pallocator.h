@@ -1,17 +1,19 @@
 #pragma once
-#include "pam.h"
+#include "fptr_pmm.h"
 #include <cstddef>
 #include <limits>
 
+using namespace pjson;
+
 // pallocator<T> — персистный STL-совместимый аллокатор.
 //
-// Реализован непосредственно на основе PersistentAddressSpace.
+// Реализован непосредственно на основе PMM (pam_pmm).
 // Выделяет/освобождает непрерывные массивы T в персистном адресном
-// пространстве через CreateArray/Delete.
+// пространстве через pam_pmm_create_array/pam_pmm_delete.
 //
 // Ограничения:
 //   - Возвращает raw-указатели C++ (через разрешение смещения ПАП → указатель).
-//     Указатель действителен, пока PersistentAddressSpace жив.
+//     Указатель действителен, пока PMM жив.
 //   - Стандартные STL-контейнеры, использующие этот аллокатор
 //     (например, std::vector<T, pallocator<T>>), живут только пока ПАП жив.
 //   - Аллокатор сам по себе НЕ обеспечивает межпроцессную персистность —
@@ -50,22 +52,22 @@ template <typename T> class pallocator
     {
         if ( n == 0 )
             return nullptr;
-        uintptr_t offset = PersistentAddressSpace::Get().CreateArray<T>( static_cast<unsigned>( n ), nullptr );
+        uintptr_t offset = pam_pmm_create_array<T>( static_cast<unsigned>( n ), nullptr );
         if ( offset == 0 )
             throw std::bad_alloc{};
-        return PersistentAddressSpace::Get().Resolve<T>( offset );
+        return pmm_resolve<T>( offset );
     }
 
     // deallocate: освободить массив по указателю.
-    // Использует PersistentAddressSpace::FindByPtr() для обратного поиска смещения.
+    // Использует pam_pmm_ptr_to_offset() для обратного поиска смещения.
     void deallocate( pointer p, size_type /*n*/ ) noexcept
     {
         if ( p == nullptr )
             return;
-        uintptr_t offset = PersistentAddressSpace::Get().FindByPtr( static_cast<const void*>( p ) );
+        uintptr_t offset = pam_pmm_ptr_to_offset( static_cast<const void*>( p ) );
         if ( offset != 0 )
         {
-            PersistentAddressSpace::Get().Delete( offset );
+            pam_pmm_delete( offset );
         }
         else
         {
