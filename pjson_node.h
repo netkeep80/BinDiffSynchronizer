@@ -1010,8 +1010,8 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     // Получаем смещение заголовка pmem_array_hdr внутри object_val.
     // object_val.{size, capacity, data_off} имеют ту же раскладку что pmem_array_hdr,
     // поэтому reinterpret_cast допустим (только для POD-структур).
-    uintptr_t hdr_off =
-        pam_pmm_ptr_to_offset( reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->object_val.size ) ) );
+    uintptr_t hdr_off = pam_pmm_ptr_to_offset(
+        reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->object_val.size ) ) );
 
     pmem_array_insert_sorted<object_entry, ObjKeyOf, ObjLess>( hdr_off, new_entry, ObjKeyOf{}, ObjLess{} );
 
@@ -1024,8 +1024,8 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
     if ( node_off == 0 )
         return;
     // Получаем заголовок массива binary_val.
-    uintptr_t hdr_off =
-        pam_pmm_ptr_to_offset( reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->binary_val.size ) ) );
+    uintptr_t hdr_off = pam_pmm_ptr_to_offset(
+        reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->binary_val.size ) ) );
 
     uint8_t& slot = pmem_array_push_back<uint8_t>( hdr_off );
     slot          = byte;

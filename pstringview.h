@@ -217,10 +217,7 @@ struct pstringview_table
 
   private:
     /// Доступ к ячейке хэш-таблицы по индексу.
-    pstringview_entry& _bucket( uintptr_t idx )
-    {
-        return *( pmm_resolve<pstringview_entry>( buckets_.addr() ) + idx );
-    }
+    pstringview_entry& _bucket( uintptr_t idx ) { return *( pmm_resolve<pstringview_entry>( buckets_.addr() ) + idx ); }
 
     /// Инициализировать массив ячеек нулями (initial_cap ячеек).
     void _init_buckets( uintptr_t self_off, uintptr_t initial_cap )
@@ -259,7 +256,7 @@ struct pstringview_table
 
         // Выделяем новый массив ячеек.
         uintptr_t new_arr_off = pam_pmm_create_array<pstringview_entry>( static_cast<unsigned>( new_cap ), nullptr );
-        auto* new_raw = pmm_resolve<pstringview_entry>( new_arr_off );
+        auto*     new_raw     = pmm_resolve<pstringview_entry>( new_arr_off );
         for ( uintptr_t i = 0; i < new_cap; i++ )
         {
             new_raw[i].hash         = 0;
