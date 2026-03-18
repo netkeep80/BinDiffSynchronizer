@@ -105,8 +105,7 @@ inline void pjson_count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64
     case node_tag::binary:
         // Считаем байты из binary_val.size.
         {
-            const auto& pam = PersistentAddressSpace::Get();
-            const node* n   = pam.Resolve<node>( id );
+            const node* n = pmm_resolve<node>( id );
             if ( n != nullptr )
                 binary_bytes += static_cast<uint64_t>( n->binary_val.size );
         }

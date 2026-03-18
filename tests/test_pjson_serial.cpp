@@ -15,11 +15,13 @@
 
 #include "pjson_codec.h"
 
-// Вспомогательная функция: сбросить ПАП перед каждым тестом.
+using namespace pjson;
+
+// Вспомогательная функция: сбросить PMM перед каждым тестом.
 static void reset_pam()
 {
     pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }
 
 // Вспомогательная функция: нормализовать JSON через node_from_string + node_to_string.
@@ -432,7 +434,7 @@ TEST_CASE( "pjson serial: round-trip test.json via node_from_string and node_to_
 {
     // Предварительно резервируем ёмкость карты слотов ПАМ.
     reset_pam();
-    PersistentAddressSpace::Get().ReserveSlots( 200000 );
+    pam_pmm_reserve_slots( 200000 );
 
     // Загружаем test.json как строку.
     std::ifstream fin( TEST_JSON_PATH );
@@ -459,5 +461,5 @@ TEST_CASE( "pjson serial: round-trip test.json via node_from_string and node_to_
     REQUIRE( original_normalized == restored_str );
 
     // Сбрасываем ПАМ целиком — быстрее O(1) vs O(n²) поэлементной очистки.
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }

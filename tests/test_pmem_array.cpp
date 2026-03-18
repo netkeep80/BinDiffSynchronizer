@@ -4,6 +4,10 @@
 #include <type_traits>
 
 #include "pmem_array.h"
+#include "pam_pmm.h"
+#include "pstringview.h"
+
+using namespace pjson;
 
 // =============================================================================
 // Tests for pmem_array (persistent array primitive)
@@ -30,7 +34,8 @@ TEST_CASE( "pmem_array_hdr: struct size is 3 * sizeof(void*)", "[pmem_array][lay
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_init: initialises header to zeroes", "[pmem_array][init]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -50,7 +55,8 @@ TEST_CASE( "pmem_array_init: initialises header to zeroes", "[pmem_array][init]"
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_push_back: appends elements and increases size", "[pmem_array][push_back]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -62,8 +68,7 @@ TEST_CASE( "pmem_array_push_back: appends elements and increases size", "[pmem_a
     pmem_array_push_back<int>( hdr_off ) = 20;
     pmem_array_push_back<int>( hdr_off ) = 30;
 
-    auto&           pam = PersistentAddressSpace::Get();
-    pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
+    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
 
     REQUIRE( hdr->size == 3u );
     REQUIRE( pmem_array_at<int>( hdr_off, 0 ) == 10 );
@@ -79,7 +84,8 @@ TEST_CASE( "pmem_array_push_back: appends elements and increases size", "[pmem_a
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_reserve: capacity grows to accommodate elements", "[pmem_array][reserve]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -89,8 +95,7 @@ TEST_CASE( "pmem_array_reserve: capacity grows to accommodate elements", "[pmem_
 
     pmem_array_reserve<int>( hdr_off, 100 );
 
-    auto&           pam = PersistentAddressSpace::Get();
-    pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
+    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
 
     REQUIRE( hdr->capacity >= 100u );
     REQUIRE( hdr->size == 0u ); // reserve не изменяет size
@@ -104,7 +109,8 @@ TEST_CASE( "pmem_array_reserve: capacity grows to accommodate elements", "[pmem_
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_pop_back: decreases size by one", "[pmem_array][pop_back]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -129,7 +135,8 @@ TEST_CASE( "pmem_array_pop_back: decreases size by one", "[pmem_array][pop_back]
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_erase_at: removes element at given index and shifts remaining", "[pmem_array][erase]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -180,7 +187,8 @@ struct TestLess
 
 TEST_CASE( "pmem_array_insert_sorted: inserts in sorted key order", "[pmem_array][sorted]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -208,7 +216,8 @@ TEST_CASE( "pmem_array_insert_sorted: inserts in sorted key order", "[pmem_array
 
 TEST_CASE( "pmem_array_insert_sorted: updates existing key without growing", "[pmem_array][sorted]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -239,7 +248,8 @@ TEST_CASE( "pmem_array_insert_sorted: updates existing key without growing", "[p
 
 TEST_CASE( "pmem_array_find_sorted: finds existing element", "[pmem_array][sorted]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -263,7 +273,8 @@ TEST_CASE( "pmem_array_find_sorted: finds existing element", "[pmem_array][sorte
 
 TEST_CASE( "pmem_array_find_sorted: returns nullptr for missing element", "[pmem_array][sorted]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -287,7 +298,8 @@ TEST_CASE( "pmem_array_find_sorted: returns nullptr for missing element", "[pmem
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_clear: resets size to 0 without freeing buffer", "[pmem_array][clear]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -313,7 +325,8 @@ TEST_CASE( "pmem_array_clear: resets size to 0 without freeing buffer", "[pmem_a
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_free: releases allocation and resets all fields", "[pmem_array][free]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -325,8 +338,7 @@ TEST_CASE( "pmem_array_free: releases allocation and resets all fields", "[pmem_
 
     pmem_array_free<int>( hdr_off );
 
-    auto&           pam = PersistentAddressSpace::Get();
-    pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
+    pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
 
     REQUIRE( hdr->size == 0u );
     REQUIRE( hdr->capacity == 0u );
@@ -340,7 +352,8 @@ TEST_CASE( "pmem_array_free: releases allocation and resets all fields", "[pmem_
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_size and pmem_array_capacity return correct values", "[pmem_array][getters]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();
@@ -366,7 +379,8 @@ TEST_CASE( "pmem_array_size and pmem_array_capacity return correct values", "[pm
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmem_array_push_back: 10000 elements stored and retrieved correctly", "[pmem_array][large]" )
 {
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     fptr<pmem_array_hdr> fhdr;
     fhdr.New();

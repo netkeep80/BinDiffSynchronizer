@@ -107,6 +107,43 @@ template <typename T> inline typename PamManager::template pptr<T> offset_to_ppt
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// РАЗРЕШЕНИЕ СМЕЩЕНИЙ В УКАЗАТЕЛИ
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @brief Разрешить байтовое смещение в указатель T* через PMM.
+ *
+ * Поддерживает как выровненные (гранульные) смещения, так и невыровненные
+ * (смещения на подобъекты внутри гранулы, напр. поля структуры).
+ *
+ * @tparam T Тип данных.
+ * @param off Байтовое смещение.
+ * @return T* — сырой указатель или nullptr для off==0.
+ */
+template <typename T> inline T* pmm_resolve( uintptr_t off )
+{
+    if ( off == 0 )
+        return nullptr;
+    std::uint8_t* base = PamManager::backend().base_ptr();
+    if ( base == nullptr )
+        return nullptr;
+    return reinterpret_cast<T*>( base + off );
+}
+
+/**
+ * @brief Разрешить байтовое смещение в const T* через PMM.
+ */
+template <typename T> inline const T* pmm_resolve_const( uintptr_t off )
+{
+    if ( off == 0 )
+        return nullptr;
+    const std::uint8_t* base = PamManager::backend().base_ptr();
+    if ( base == nullptr )
+        return nullptr;
+    return reinterpret_cast<const T*>( base + off );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ВСПОМОГАТЕЛЬНЫЕ ТИПЫ И ФУНКЦИИ
 // ═══════════════════════════════════════════════════════════════════════════
 

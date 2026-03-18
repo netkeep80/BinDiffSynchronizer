@@ -40,6 +40,8 @@
 #include <cstdint>
 #include <cstring>
 
+using namespace pjson;
+
 // ===========================================================================
 // pjson_pool — пул памяти для узлов node (Фаза 4)
 // ===========================================================================
@@ -74,26 +76,24 @@ struct pjson_pool
     /// O(1) амортизированно: сначала берём из free-list, иначе push_back.
     node_id alloc()
     {
-        auto& pam = PersistentAddressSpace::Get();
-
         // Сохраняем self_offset ДО любых аллокаций (realloc-безопасность).
-        uintptr_t self_off = pam.PtrToOffset( this );
+        uintptr_t self_off = pam_pmm_ptr_to_offset( this );
 
         if ( free_head_ != 0 )
         {
             // Берём голову free-list.
             node_id slot_id = free_head_;
-            // Читаем _free_next через Resolve (безопасно при realloc).
-            node*   fn  = pam.Resolve<node>( slot_id );
+            // Читаем _free_next через pmm_resolve (безопасно при realloc).
+            node*   fn  = pmm_resolve<node>( slot_id );
             node_id nxt = ( fn != nullptr ) ? fn->_free_next : 0;
 
             // Обновляем self.
-            pjson_pool* self = pam.Resolve<pjson_pool>( self_off );
+            pjson_pool* self = pmm_resolve<pjson_pool>( self_off );
             self->free_head_ = nxt;
             self->free_count_--;
 
             // Инициализируем слот нулём (null-узел).
-            node* n = pam.Resolve<node>( slot_id );
+            node* n = pmm_resolve<node>( slot_id );
             if ( n != nullptr )
             {
                 std::memset( n, 0, sizeof( node ) );
@@ -113,10 +113,9 @@ struct pjson_pool
     {
         if ( id == 0 )
             return;
-        auto& pam = PersistentAddressSpace::Get();
 
         // Помечаем узел как свободный и записываем текущую голову free-list.
-        node* n = pam.Resolve<node>( id );
+        node* n = pmm_resolve<node>( id );
         if ( n == nullptr )
             return;
         n->tag        = node_tag::_free;
@@ -132,16 +131,14 @@ struct pjson_pool
     /// Вызывающий код не должен хранить указатель после любой аллокации в ПАП.
     node& get( node_id id )
     {
-        auto& pam = PersistentAddressSpace::Get();
-        node* n   = pam.Resolve<node>( id );
+        node* n = pmm_resolve<node>( id );
         return *n;
     }
 
     /// Получить константную ссылку на узел по node_id.
     const node& get( node_id id ) const
     {
-        const auto& pam = PersistentAddressSpace::Get();
-        const node* n   = pam.Resolve<node>( id );
+        const node* n = pmm_resolve<node>( id );
         return *n;
     }
 
@@ -190,10 +187,8 @@ struct pjson_pool
     /// Безопасна при realloc: все обращения к self выполняются через self_off.
     node_id _push_node( uintptr_t self_off )
     {
-        auto& pam = PersistentAddressSpace::Get();
-
         // Получаем текущее состояние.
-        pjson_pool* self = pam.Resolve<pjson_pool>( self_off );
+        pjson_pool* self = pmm_resolve<pjson_pool>( self_off );
         if ( self == nullptr )
             return 0;
 
@@ -211,12 +206,12 @@ struct pjson_pool
             uintptr_t new_data = new_arr.addr();
 
             // Переразрешаем self после возможного realloc.
-            self = pam.Resolve<pjson_pool>( self_off );
+            self = pmm_resolve<pjson_pool>( self_off );
             if ( self == nullptr )
                 return 0;
 
             // Инициализируем новые слоты нулём.
-            node* raw = pam.Resolve<node>( new_data );
+            node* raw = pmm_resolve<node>( new_data );
             if ( raw != nullptr )
                 std::memset( raw, 0, new_cap * sizeof( node ) );
 
@@ -224,8 +219,8 @@ struct pjson_pool
             uintptr_t old_data = self->nodes_data_off_;
             if ( old_data != 0 && sz > 0 )
             {
-                const node* old_raw = pam.Resolve<node>( old_data );
-                raw                 = pam.Resolve<node>( new_data );
+                const node* old_raw = pmm_resolve<node>( old_data );
+                raw                 = pmm_resolve<node>( new_data );
                 if ( old_raw != nullptr && raw != nullptr )
                     std::memcpy( raw, old_raw, sz * sizeof( node ) );
 
@@ -235,7 +230,7 @@ struct pjson_pool
                 old_fptr.DeleteArray();
 
                 // Переразрешаем self после Delete.
-                self = pam.Resolve<pjson_pool>( self_off );
+                self = pmm_resolve<pjson_pool>( self_off );
                 if ( self == nullptr )
                     return 0;
             }
@@ -245,23 +240,23 @@ struct pjson_pool
         }
 
         // Вычисляем смещение нового слота в ПАП.
-        self           = pam.Resolve<pjson_pool>( self_off );
+        self           = pmm_resolve<pjson_pool>( self_off );
         uintptr_t idx  = self->nodes_size_;
         uintptr_t data = self->nodes_data_off_;
 
         // node_id — это смещение узла в ПАП.
-        node*   raw     = pam.Resolve<node>( data );
+        node*   raw     = pmm_resolve<node>( data );
         node_id slot_id = 0;
         if ( raw != nullptr )
         {
             node* slot = &raw[idx];
             std::memset( slot, 0, sizeof( node ) );
             slot->tag = node_tag::null;
-            slot_id   = pam.PtrToOffset( slot );
+            slot_id   = pam_pmm_ptr_to_offset( slot );
         }
 
         // Увеличиваем размер.
-        self = pam.Resolve<pjson_pool>( self_off );
+        self = pmm_resolve<pjson_pool>( self_off );
         self->nodes_size_++;
 
         return slot_id;
@@ -270,8 +265,7 @@ struct pjson_pool
     pjson_pool()  = default;
     ~pjson_pool() = default;
 
-    template <class U> friend class AddressManager;
-    friend class PersistentAddressSpace;
+    template <typename U> friend class pjson::fptr_pmm;
 };
 
 static_assert( std::is_trivially_copyable<pjson_pool>::value, "pjson_pool должен быть тривиально копируемым" );

@@ -25,6 +25,8 @@
 #include "pjson_codec.h"
 #include "pjson_pool.h"
 
+using namespace pjson;
+
 using bench_clk = std::chrono::high_resolution_clock;
 using bench_ms  = std::chrono::milliseconds;
 
@@ -38,7 +40,7 @@ template <typename T> static long long bench_elapsed_ms( const T& start )
 static void reset_pam()
 {
     pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }
 
 // ============================================================================
@@ -251,7 +253,7 @@ TEST_CASE( "pjson bench: round-trip test.json direct", "[pjson][bench][roundtrip
     std::printf( "[bench] test.json size: %zu bytes\n", json_text.size() );
 
     reset_pam();
-    PersistentAddressSpace::Get().ReserveSlots( 200000 );
+    pam_pmm_reserve_slots( 200000 );
 
     // Парсинг через node_from_string.
     auto       t1 = bench_clk::now();
@@ -269,6 +271,7 @@ TEST_CASE( "pjson bench: round-trip test.json direct", "[pjson][bench][roundtrip
     std::printf( "[bench] direct: parse=%lld ms, serialize=%lld ms, output_size=%zu\n", parse_ms, ser_ms,
                  s_out.size() );
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
     REQUIRE( true );
 }

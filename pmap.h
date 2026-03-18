@@ -1,6 +1,10 @@
 #pragma once
 #include "pmem_array.h"
+#include "pam_pmm.h"
+#include "fptr_pmm.h"
 #include <cstring>
+
+using namespace pjson;
 
 // pmap<K, V> — персистный ключ-значение контейнер (карта), аналог std::map<K, V>.
 //
@@ -59,7 +63,7 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     pmem_array_hdr hdr_; ///< Заголовок персистного массива (size, capacity, data_off)
 
     // Получить смещение заголовка в ПАП (realloc-безопасно).
-    uintptr_t _hdr_off() const { return PersistentAddressSpace::Get().PtrToOffset( &hdr_ ); }
+    uintptr_t _hdr_off() const { return pam_pmm_ptr_to_offset( &hdr_ ); }
 
     // Вспомогательные функторы для pmem_array_insert_sorted / pmem_array_find_sorted.
     struct KeyOf
@@ -107,12 +111,11 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     {
         uintptr_t hdr_off = _hdr_off();
         // Бинарный поиск для нахождения индекса.
-        auto&           pam = PersistentAddressSpace::Get();
-        pmem_array_hdr* hdr = pam.Resolve<pmem_array_hdr>( hdr_off );
+        pmem_array_hdr* hdr = pmm_resolve<pmem_array_hdr>( hdr_off );
         if ( hdr == nullptr || hdr->size == 0 || hdr->data_off == 0 )
             return false;
 
-        Entry*    raw = pam.Resolve<Entry>( hdr->data_off );
+        Entry*    raw = pmm_resolve<Entry>( hdr->data_off );
         uintptr_t lo = 0, hi = hdr->size;
         while ( lo < hi )
         {
@@ -170,14 +173,12 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
         iterator( pmap<K, V>* pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
         Entry& operator*()
         {
-            auto&  pam = PersistentAddressSpace::Get();
-            Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
+            Entry* raw = pmm_resolve<Entry>( _pm->hdr_.data_off );
             return raw[_idx];
         }
         Entry* operator->()
         {
-            auto&  pam = PersistentAddressSpace::Get();
-            Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
+            Entry* raw = pmm_resolve<Entry>( _pm->hdr_.data_off );
             return &raw[_idx];
         }
         iterator& operator++()
@@ -204,14 +205,12 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
         const_iterator( const pmap<K, V>* pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
         const Entry& operator*() const
         {
-            const auto&  pam = PersistentAddressSpace::Get();
-            const Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
+            const Entry* raw = pmm_resolve<Entry>( _pm->hdr_.data_off );
             return raw[_idx];
         }
         const Entry* operator->() const
         {
-            const auto&  pam = PersistentAddressSpace::Get();
-            const Entry* raw = pam.Resolve<Entry>( _pm->hdr_.data_off );
+            const Entry* raw = pmm_resolve<Entry>( _pm->hdr_.data_off );
             return &raw[_idx];
         }
         const_iterator& operator++()
@@ -241,6 +240,5 @@ template <typename K, typename V> class pmap : pmap_trivial_check<K, V>
     ~pmap() = default;
 
     // Разрешаем доступ к приватному конструктору только для фабричных методов ПАМ.
-    template <class U> friend class AddressManager;
-    friend class PersistentAddressSpace;
+    template <typename U> friend class pjson::fptr_pmm;
 };

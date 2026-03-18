@@ -18,11 +18,13 @@
 #include "pjson_codec.h"
 #include "pjson_pool.h"
 
-// Вспомогательная функция: сбросить ПАП перед каждым тестом.
+using namespace pjson;
+
+// Вспомогательная функция: сбросить PMM перед каждым тестом.
 static void reset_pam()
 {
     pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }
 
 // ============================================================================
@@ -409,9 +411,8 @@ TEST_CASE( "pjson opt F3: pam_intern_string content is accessible via chars_offs
 {
     reset_pam();
 
-    auto        r   = pam_intern_string( "test_string" );
-    auto&       pam = PersistentAddressSpace::Get();
-    const char* s   = pam.Resolve<char>( r.chars_offset );
+    auto        r = pam_intern_string( "test_string" );
+    const char* s = pmm_resolve<char>( r.chars_offset );
     REQUIRE( std::strcmp( s, "test_string" ) == 0 );
 }
 
@@ -429,12 +430,11 @@ TEST_CASE( "pjson opt F3: pam_intern_string many strings all deduplicated", "[pj
         offsets[i] = pam_intern_string( strings[i] ).chars_offset;
 
     // Проверяем что каждая строка возвращает то же смещение при повторном интернировании.
-    auto& pam = PersistentAddressSpace::Get();
     for ( int i = 0; i < N; i++ )
     {
         uintptr_t off2 = pam_intern_string( strings[i] ).chars_offset;
         REQUIRE( off2 == offsets[i] );
-        REQUIRE( std::strcmp( pam.Resolve<char>( offsets[i] ), strings[i] ) == 0 );
+        REQUIRE( std::strcmp( pmm_resolve<char>( offsets[i] ), strings[i] ) == 0 );
     }
 }
 
@@ -471,9 +471,8 @@ TEST_CASE( "pjson opt F3: pstringview deduplicates object keys", "[pjson][opt][f
     node_set_int( s2, 2 );
 
     // Оба объекта должны использовать одно и то же смещение для ключа "shared_key".
-    auto& pam = PersistentAddressSpace::Get();
-    auto* e1  = pam.Resolve<object_entry>( pam.Resolve<node>( fn.addr() )->object_val.data_off );
-    auto* e2  = pam.Resolve<object_entry>( pam.Resolve<node>( fn2.addr() )->object_val.data_off );
+    auto* e1 = pmm_resolve<object_entry>( pmm_resolve<node>( fn.addr() )->object_val.data_off );
+    auto* e2 = pmm_resolve<object_entry>( pmm_resolve<node>( fn2.addr() )->object_val.data_off );
     // key_chars_offset одинаков для одинаковых ключей (дедупликация через pstringview_table).
     REQUIRE( e1->key_chars_offset == e2->key_chars_offset );
 
@@ -494,8 +493,7 @@ TEST_CASE( "pjson opt F2: pool alloc returns valid node offset", "[pjson][opt][f
     node_id node_off = pool->alloc();
     REQUIRE( node_off != 0u );
 
-    auto& pam = PersistentAddressSpace::Get();
-    node* n   = pam.Resolve<node>( node_off );
+    node* n = pmm_resolve<node>( node_off );
     REQUIRE( n != nullptr );
     // Новый узел должен быть нулевым (null).
     REQUIRE( node_view{ node_off }.is_null() );

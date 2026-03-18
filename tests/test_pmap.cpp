@@ -3,6 +3,15 @@
 #include <type_traits>
 
 #include "pmap.h"
+#include "pam_pmm.h"
+
+using namespace pjson;
+
+static void ensure_pmm()
+{
+    if ( !pam_pmm_is_initialized() )
+        pam_pmm_init( nullptr );
+}
 
 // =============================================================================
 // Tests for pmap<K, V> (persistent key-value map)
@@ -31,6 +40,7 @@ TEST_CASE( "pmap<int,int>: size is 3 * sizeof(void*) (size, capacity, data_)", "
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: zero-initialised pmap (via fptr) gives empty map", "[pmap][construct]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -45,6 +55,7 @@ TEST_CASE( "pmap<int,int>: zero-initialised pmap (via fptr) gives empty map", "[
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: insert single entry and find it", "[pmap][insert][find]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -65,6 +76,7 @@ TEST_CASE( "pmap<int,int>: insert single entry and find it", "[pmap][insert][fin
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: find missing key returns nullptr", "[pmap][find]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -80,6 +92,7 @@ TEST_CASE( "pmap<int,int>: find missing key returns nullptr", "[pmap][find]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: insert multiple entries in sorted order", "[pmap][insert][sorted]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -111,6 +124,7 @@ TEST_CASE( "pmap<int,int>: insert multiple entries in sorted order", "[pmap][ins
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: inserting existing key updates value", "[pmap][insert][update]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -133,6 +147,7 @@ TEST_CASE( "pmap<int,int>: inserting existing key updates value", "[pmap][insert
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: erase removes the correct entry", "[pmap][erase]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -157,6 +172,7 @@ TEST_CASE( "pmap<int,int>: erase removes the correct entry", "[pmap][erase]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: erase missing key returns false", "[pmap][erase]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -174,6 +190,7 @@ TEST_CASE( "pmap<int,int>: erase missing key returns false", "[pmap][erase]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: operator[] inserts default value for missing key", "[pmap][operator_index]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -192,6 +209,7 @@ TEST_CASE( "pmap<int,int>: operator[] inserts default value for missing key", "[
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: clear resets size to 0", "[pmap][clear]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -212,6 +230,7 @@ TEST_CASE( "pmap<int,int>: clear resets size to 0", "[pmap][clear]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: free releases underlying allocation", "[pmap][free]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 
@@ -229,6 +248,7 @@ TEST_CASE( "pmap<int,int>: free releases underlying allocation", "[pmap][free]" 
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,double>: insert and find double values", "[pmap][double]" )
 {
+    ensure_pmm();
     fptr<pmap<int, double>> fm;
     fm.New();
 
@@ -250,6 +270,7 @@ TEST_CASE( "pmap<int,double>: insert and find double values", "[pmap][double]" )
 // ---------------------------------------------------------------------------
 TEST_CASE( "pmap<int,int>: range-based iteration visits all entries", "[pmap][iterator]" )
 {
+    ensure_pmm();
     fptr<pmap<int, int>> fm;
     fm.New();
 

@@ -18,11 +18,12 @@
 #include <cstring>
 #include <string>
 
-// Старый API ПАМ (pam_core.h, persist.h).
+// API PMM (pam_pmm.h, pjson_db_pmm.h).
 #include "pjson_db.h"
-
-// Новый API PMM (pam_pmm.h, pjson_db_pmm.h).
 #include "pjson_db_pmm.h"
+#include "pstringview.h"
+
+using namespace pjson;
 
 // ===========================================================================
 // Вспомогательные функции
@@ -59,6 +60,10 @@ TEST_CASE( "migration: empty database", "[task14.9][migration]" )
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
 
+    // Сбрасываем PMM перед тестом для изоляции.
+    pstringview_manager::reset();
+    pam_pmm_reset();
+
     // Шаг 1: Создаём пустую БД в старом формате.
     {
         pjson_db old_db = pjson_db::open( old_file );
@@ -66,7 +71,8 @@ TEST_CASE( "migration: empty database", "[task14.9][migration]" )
     }
 
     // Сбрасываем старый ПАМ.
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     REQUIRE( file_exists( old_file ) );
 
@@ -78,7 +84,8 @@ TEST_CASE( "migration: empty database", "[task14.9][migration]" )
     }
 
     // Сбрасываем старый ПАМ перед созданием нового.
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 3: Импортируем в новую БД PMM.
     {
@@ -99,7 +106,8 @@ TEST_CASE( "migration: empty database", "[task14.9][migration]" )
     REQUIRE( file_exists( new_file ) );
 
     // Очистка PMM.
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Удаляем файлы после теста.
     remove_file_if_exists( old_file );
@@ -114,6 +122,10 @@ TEST_CASE( "migration: simple data types", "[task14.9][migration]" )
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
 
+    // Сбрасываем PMM перед тестом для изоляции.
+    pstringview_manager::reset();
+    pam_pmm_reset();
+
     // Шаг 1: Создаём БД в старом формате с разными типами данных.
     {
         pjson_db old_db = pjson_db::open( old_file );
@@ -125,7 +137,8 @@ TEST_CASE( "migration: simple data types", "[task14.9][migration]" )
         old_db.save();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 2: Экспортируем JSON.
     std::string json_export;
@@ -144,7 +157,8 @@ TEST_CASE( "migration: simple data types", "[task14.9][migration]" )
         REQUIRE( !json_export.empty() );
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 3: Импортируем в новую БД PMM и проверяем данные.
     {
@@ -169,7 +183,8 @@ TEST_CASE( "migration: simple data types", "[task14.9][migration]" )
         new_db.save();
     }
 
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
@@ -183,6 +198,10 @@ TEST_CASE( "migration: nested objects and arrays", "[task14.9][migration]" )
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
 
+    // Сбрасываем PMM перед тестом для изоляции.
+    pstringview_manager::reset();
+    pam_pmm_reset();
+
     // Шаг 1: Создаём БД в старом формате с вложенными структурами.
     {
         pjson_db old_db = pjson_db::open( old_file );
@@ -192,7 +211,8 @@ TEST_CASE( "migration: nested objects and arrays", "[task14.9][migration]" )
         old_db.save();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 2: Экспортируем JSON.
     std::string json_export;
@@ -208,7 +228,8 @@ TEST_CASE( "migration: nested objects and arrays", "[task14.9][migration]" )
         REQUIRE( !json_export.empty() );
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 3: Импортируем в новую БД PMM и проверяем данные.
     {
@@ -233,7 +254,8 @@ TEST_CASE( "migration: nested objects and arrays", "[task14.9][migration]" )
         new_db.save();
     }
 
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
@@ -247,6 +269,10 @@ TEST_CASE( "migration: $ref nodes", "[task14.9][migration]" )
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
 
+    // Сбрасываем PMM перед тестом для изоляции.
+    pstringview_manager::reset();
+    pam_pmm_reset();
+
     // Шаг 1: Создаём БД в старом формате с $ref узлами.
     {
         pjson_db old_db = pjson_db::open( old_file );
@@ -256,7 +282,8 @@ TEST_CASE( "migration: $ref nodes", "[task14.9][migration]" )
         old_db.save();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 2: Экспортируем JSON (ref сериализуется как {"$ref": "/path"}).
     std::string json_export;
@@ -277,7 +304,8 @@ TEST_CASE( "migration: $ref nodes", "[task14.9][migration]" )
         REQUIRE( json_export.find( "$ref" ) != std::string::npos );
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 3: Импортируем в новую БД PMM и проверяем $ref.
     {
@@ -300,7 +328,8 @@ TEST_CASE( "migration: $ref nodes", "[task14.9][migration]" )
         new_db.save();
     }
 
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
@@ -320,6 +349,10 @@ TEST_CASE( "migration: $base64 binary data", "[task14.9][migration][.hidden]" )
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
 
+    // Сбрасываем PMM перед тестом для изоляции.
+    pstringview_manager::reset();
+    pam_pmm_reset();
+
     // Шаг 1: Создаём БД в старом формате с бинарными данными.
     {
         pjson_db old_db = pjson_db::open( old_file );
@@ -328,7 +361,8 @@ TEST_CASE( "migration: $base64 binary data", "[task14.9][migration][.hidden]" )
         old_db.save();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 2: Экспортируем JSON.
     std::string json_export;
@@ -345,7 +379,8 @@ TEST_CASE( "migration: $base64 binary data", "[task14.9][migration][.hidden]" )
         REQUIRE( json_export.find( "$base64" ) != std::string::npos );
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 3: Импортируем в новую БД PMM и проверяем бинарные данные.
     {
@@ -362,7 +397,8 @@ TEST_CASE( "migration: $base64 binary data", "[task14.9][migration][.hidden]" )
         new_db.save();
     }
 
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
@@ -376,6 +412,10 @@ TEST_CASE( "migration: unicode strings", "[task14.9][migration]" )
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
 
+    // Сбрасываем PMM перед тестом для изоляции.
+    pstringview_manager::reset();
+    pam_pmm_reset();
+
     // Шаг 1: Создаём БД в старом формате с Unicode строками.
     {
         pjson_db old_db = pjson_db::open( old_file );
@@ -385,7 +425,8 @@ TEST_CASE( "migration: unicode strings", "[task14.9][migration]" )
         old_db.save();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 2: Экспортируем JSON.
     std::string json_export;
@@ -399,7 +440,8 @@ TEST_CASE( "migration: unicode strings", "[task14.9][migration]" )
         json_export = old_db.dump();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 3: Импортируем в новую БД PMM и проверяем Unicode.
     {
@@ -417,7 +459,8 @@ TEST_CASE( "migration: unicode strings", "[task14.9][migration]" )
         new_db.save();
     }
 
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
@@ -430,6 +473,10 @@ TEST_CASE( "migration: large number of nodes", "[task14.9][migration]" )
 
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
+
+    // Сбрасываем PMM перед тестом для изоляции.
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     const int NODE_COUNT = 100;
 
@@ -444,7 +491,8 @@ TEST_CASE( "migration: large number of nodes", "[task14.9][migration]" )
         old_db.save();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 2: Экспортируем JSON.
     std::string json_export;
@@ -459,7 +507,8 @@ TEST_CASE( "migration: large number of nodes", "[task14.9][migration]" )
         json_export = old_db.dump();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 3: Импортируем в новую БД PMM и проверяем данные.
     {
@@ -480,7 +529,8 @@ TEST_CASE( "migration: large number of nodes", "[task14.9][migration]" )
         new_db.save();
     }
 
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
@@ -494,6 +544,10 @@ TEST_CASE( "migration: persisted and reloaded", "[task14.9][migration]" )
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );
 
+    // Сбрасываем PMM перед тестом для изоляции.
+    pstringview_manager::reset();
+    pam_pmm_reset();
+
     // Шаг 1: Создаём БД в старом формате.
     {
         pjson_db old_db = pjson_db::open( old_file );
@@ -501,7 +555,8 @@ TEST_CASE( "migration: persisted and reloaded", "[task14.9][migration]" )
         old_db.save();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 2: Экспортируем JSON.
     std::string json_export;
@@ -510,7 +565,8 @@ TEST_CASE( "migration: persisted and reloaded", "[task14.9][migration]" )
         json_export     = old_db.dump();
     }
 
-    PersistentAddressSpace::Get().Reset();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 3: Импортируем в новую БД PMM и сохраняем.
     {
@@ -520,7 +576,8 @@ TEST_CASE( "migration: persisted and reloaded", "[task14.9][migration]" )
         new_db.save();
     }
 
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     // Шаг 4: Перезагружаем новый файл и проверяем данные.
     {
@@ -528,7 +585,8 @@ TEST_CASE( "migration: persisted and reloaded", "[task14.9][migration]" )
         REQUIRE( new_db.get( "/test/value" ).as_int() == 12345 );
     }
 
-    pjson::pam_pmm_destroy();
+    pstringview_manager::reset();
+    pam_pmm_reset();
 
     remove_file_if_exists( old_file );
     remove_file_if_exists( new_file );

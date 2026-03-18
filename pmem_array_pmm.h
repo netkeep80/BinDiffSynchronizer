@@ -54,35 +54,7 @@ static_assert( std::is_trivially_copyable<pmem_array_hdr_pmm>::value,
 static_assert( sizeof( pmem_array_hdr_pmm ) == 3 * sizeof( void* ),
                "pmem_array_hdr_pmm должен занимать 3 * sizeof(void*) байт" );
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Вспомогательные функции для работы с PMM
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * @brief Разрешить байтовое смещение в сырой указатель через PMM.
- *
- * @tparam T Тип данных.
- * @param off Байтовое смещение (кратно PMM_GRANULE_SIZE).
- * @return T* — сырой указатель или nullptr для off==0.
- */
-template <typename T> inline T* pmm_resolve( uintptr_t off )
-{
-    if ( off == 0 )
-        return nullptr;
-    auto p = offset_to_pptr<T>( off );
-    return p.resolve();
-}
-
-/**
- * @brief Разрешить байтовое смещение в сырой указатель (const версия).
- */
-template <typename T> inline const T* pmm_resolve_const( uintptr_t off )
-{
-    if ( off == 0 )
-        return nullptr;
-    auto p = offset_to_pptr<T>( off );
-    return p.resolve();
-}
+// pmm_resolve<T> и pmm_resolve_const<T> определены в pam_adapter.h
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Шаблонные функции для работы с pmem_array_hdr_pmm

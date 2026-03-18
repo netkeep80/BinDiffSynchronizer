@@ -396,6 +396,7 @@ inline void pam_pmm_reset()
     // Создаём корневую структуру и реестр.
     uintptr_t root_off            = pam_pmm_create_root_and_registry();
     detail::pam_pmm_root_offset() = root_off;
+    detail::pam_pmm_initialized() = true;
 }
 
 /**

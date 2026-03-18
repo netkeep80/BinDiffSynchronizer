@@ -904,15 +904,14 @@ inline void node_serialize_to( node_id id, std::string& out )
     case node_tag::binary:
     {
         // Задача 5.4: binary -> {"$base64": "..."}
-        auto&       pam = PersistentAddressSpace::Get();
-        const node* n   = pam.Resolve<node>( id );
+        const node* n = pmm_resolve<node>( id );
         if ( n == nullptr || n->binary_val.size == 0 )
         {
             out += "{\"$base64\":\"\"}";
         }
         else
         {
-            const uint8_t* data = pam.Resolve<uint8_t>( n->binary_val.data_off );
+            const uint8_t* data = pmm_resolve<uint8_t>( n->binary_val.data_off );
             std::string    b64  = base64_encode( data, n->binary_val.size );
             out += "{\"$base64\":\"";
             out += b64;

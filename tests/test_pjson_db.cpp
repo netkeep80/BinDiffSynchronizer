@@ -20,16 +20,18 @@
 
 #include "pjson_db.h"
 
+using namespace pjson;
+
 // ===========================================================================
 // Вспомогательные функции
 // ===========================================================================
 
-/// Сбросить ПАП в начальное состояние перед каждым тестом.
-/// Используем Reset() для O(1) очистки.
+/// Сбросить PMM в начальное состояние перед каждым тестом.
+/// Используем reset для O(1) очистки.
 static void reset_pam()
 {
     pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }
 
 // ===========================================================================
@@ -576,8 +578,8 @@ TEST_CASE( "pjson_db: metrics last_save_time is updated after save", "[pjson_db]
     // Создаём БД и сохраняем.
     {
         pstringview_manager::reset();
-        PersistentAddressSpace::Get().Reset();
-        PersistentAddressSpace::Init( pam_file );
+        pam_pmm_reset();
+        pam_pmm_init( pam_file );
         pjson_db db;
         db.put( "/test", "data" );
         db.save();
@@ -728,8 +730,8 @@ TEST_CASE( "pjson_db: save and reload preserves data", "[pjson_db]" )
     // Создаём и заполняем БД.
     {
         pstringview_manager::reset();
-        PersistentAddressSpace::Get().Reset();
-        PersistentAddressSpace::Init( pam_file );
+        pam_pmm_reset();
+        pam_pmm_init( pam_file );
         pjson_db db;
         db.put( "/greeting", "hello" );
         db.put( "/count", static_cast<int64_t>( 99 ) );
@@ -739,8 +741,8 @@ TEST_CASE( "pjson_db: save and reload preserves data", "[pjson_db]" )
     // Загружаем БД и проверяем данные.
     {
         pstringview_manager::reset();
-        PersistentAddressSpace::Get().Reset();
-        PersistentAddressSpace::Init( pam_file );
+        pam_pmm_reset();
+        pam_pmm_init( pam_file );
         pjson_db  db;
         node_view greeting = db.get( "/greeting" );
         REQUIRE( greeting.is_string() );

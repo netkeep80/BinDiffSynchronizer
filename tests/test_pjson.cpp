@@ -14,13 +14,15 @@
 
 #include "pjson_node.h"
 
+using namespace pjson;
+
 // Вспомогательная функция: сбросить ПАП перед каждым тестом.
 namespace
 {
 void reset_pam()
 {
     pstringview_manager::reset();
-    PersistentAddressSpace::Get().Reset();
+    pam_pmm_reset();
 }
 } // anonymous namespace
 
