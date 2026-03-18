@@ -34,7 +34,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Коды ошибок** | `node_error` enum + `is_error()` / `error()` в `node_view`; `get()` возвращает типизированные ошибки (`not_found`, `wrong_type`, `index_out_of_range`, `ref_cycle`) вместо `node_view(0)` (Фаза 11) |
 | **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок (Фаза 12) |
 | **Глубокое копирование** | `node_clone()` + `pjson_db::clone()` — создание полных копий поддеревьев JSON в ПАП (Фаза 13) |
-| **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — новый бэкенд ПАП (Фаза 14); утилита миграции `pam_migrate` (Задача 14.9); все тесты и демо адаптированы для PMM (Задача 14.11) |
+| **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — единственный бэкенд ПАП (Фаза 14); утилита миграции `pam_migrate` (Задача 14.9); устаревший код ПАМ удалён (Задача 14.10); все тесты и демо адаптированы для PMM (Задача 14.11) |
 
 ---
 
@@ -670,28 +670,30 @@ REQUIRE( node_view{ id }.as_string() == "hello" );
 
 ## Персистентность и управление памятью
 
-### Структура файла ПАМ
+### Бэкенд: PersistMemoryManager (PMM)
+
+С Фазы 14 всё управление ПАП осуществляется через [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) (PMM). PMM предоставляет:
+
+- Типобезопасные персистные указатели (`pptr<T>`)
+- AVL-дерево свободных блоков (best-fit аллокатор)
+- Настраиваемые адресные пространства (16/32/64-bit)
+- Бэкенды хранения: `HeapStorage` / `StaticStorage` / `MMapStorage`
 
 ```
-[pam_header]          — заголовок (magic, version=10, offsets, bump, string_table_offset)
+[PMM header]          — заголовок PMM (magic, stats, конфигурация)
 [данные ПАП]
-  [type_vec]          — вектор типов TypeInfo
-  [slot_map]          — карта слотов
-  [name_map]          — карта имён объектов
-  [free_list]         — список свободных областей (reuse)
-  [string_table]      — словарь интернированных строк (pstringview_table, фаза 2)
-  [node_pool]         — пул узлов JSON (pjson_pool)
-  [db_metrics]        — персистная структура метрик БД (db_metrics, фаза 7)
+  [name_registry]     — реестр именованных объектов (pmap_pmm)
+  [string_table]      — словарь интернированных строк (pmm::pstringview)
+  [node_pool]         — пул узлов JSON (pjson_pool_pmm)
+  [db_metrics]        — персистная структура метрик БД (db_metrics_pmm, фаза 7)
   [пользовательские данные]
 ```
 
-Смещение `string_table` хранится в поле `pam_header.string_table_offset` (фаза 2, PAM_VERSION 10) и восстанавливается при загрузке образа без вызова конструкторов.
-
 ### Управление памятью
 
-- **Bump-allocator**: новые объекты выделяются линейно в конце ПАП.
-- **Free-list**: удалённые блоки возвращаются в список свободных, повторно используются (first-fit).
-- **Realloc**: `pvector::grow` / `pmap::grow` расширяют последний блок ПАП без копирования.
+- **AVL-аллокатор**: PMM использует AVL-дерево свободных блоков (best-fit), обеспечивая эффективную утилизацию памяти.
+- **Гранулярность**: 16-байтовые гранулы для CacheManagerConfig.
+- **Рост**: автоматическое расширение хранилища (25% для SingleThreadedHeap).
 - **Строки накапливаются**: словарь строк только растёт, строки не освобождаются.
 
 ### Правила владения узлами
@@ -710,7 +712,7 @@ REQUIRE( node_view{ id }.as_string() == "hello" );
 Перед массовой загрузкой данных используйте `ReserveSlots(n)`:
 
 ```cpp
-db.pam().ReserveSlots(100000); // зарезервировать для 100k узлов
+db.ReserveSlots(100000); // зарезервировать для 100k узлов
 db.parse_file("large_dataset.json");
 ```
 
@@ -719,7 +721,7 @@ db.parse_file("large_dataset.json");
 ### Сброс состояния
 
 ```cpp
-db.pam().Reset(); // очистить всё ПАП за O(1)
+pam_pmm_reset(); // очистить всё ПАП и пересоздать менеджер
 ```
 
 Быстрее, чем удаление 100k+ узлов по одному (O(n²)).
