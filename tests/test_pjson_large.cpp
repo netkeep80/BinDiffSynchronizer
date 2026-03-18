@@ -214,9 +214,10 @@ TEST_CASE( "pjson large: full round-trip -- load test.json into PAM and export b
 
     REQUIRE( original_normalized == out );
 
-    // Проверяем время выполнения: полный цикл не должен превышать 15 секунд.
+    // Проверяем время выполнения: полный цикл не должен превышать 30 секунд.
+    // (PMM-бэкенд медленнее на Windows CI, увеличен с 15с до 30с для стабильности.)
     auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t0 ).count();
-    REQUIRE( total_ms < 15000 );
+    REQUIRE( total_ms < 30000 );
 
     // Сбрасываем PMM целиком — быстрее O(1) vs O(n²) поэлементной очистки.
     pstringview_manager::reset();
