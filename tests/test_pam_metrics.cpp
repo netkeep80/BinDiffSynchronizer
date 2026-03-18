@@ -7,20 +7,22 @@
 #include <type_traits>
 #include <vector>
 
-#include "pam.h"
+#include "pam_pmm.h"
+#include "pmap_pmm.h"
+#include "fptr_pmm.h"
+
+using namespace pjson;
 
 // =============================================================================
-// Тесты метрик ПАМ и проверки корректности ПАП (задача #86)
+// Тесты метрик PMM и проверки корректности ПАП (задача #86)
+// Обновлено для PMM — Задача 14.11.
 //
 // Проверяют:
-//   — GetSlotCount: число аллоцированных слотов
-//   — GetSlotCapacity: ёмкость карты слотов
-//   — GetNamedCount: число именованных объектов
-//   — GetTypeCount: число уникальных типов
-//   — GetDataSize: размер области данных
-//   — GetFreeListSize: число свободных блоков в списке
-//   — GetBump: позиция bump-указателя
-//   — Validate: проверка корректности ПАП
+//   — pam_pmm_slot_count: число аллоцированных слотов
+//   — pam_pmm_named_count: число именованных объектов
+//   — pam_pmm_get_data_size: размер области данных
+//   — pam_pmm_get_bump: позиция bump-указателя
+//   — pam_pmm_validate: проверка корректности ПАП
 // =============================================================================
 
 namespace
@@ -33,167 +35,115 @@ void rm_file( const char* path )
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
-// GetSlotCount: начальное значение 0, растёт при Create, уменьшается при Delete
+// pam_pmm_slot_count: растёт при Create, уменьшается при Delete
 // ---------------------------------------------------------------------------
-TEST_CASE( "PAM metrics: GetSlotCount increases on Create and decreases on Delete", "[pam][metrics][slot_count]" )
+TEST_CASE( "PAM metrics: slot_count increases on Create and decreases on Delete", "[pam][metrics][slot_count]" )
 {
-    auto&     pam          = PersistentAddressSpace::Get();
-    uintptr_t slots_before = pam.GetSlotCount();
+    pam_pmm_init( nullptr );
 
-    uintptr_t off1 = pam.Create<int>();
-    uintptr_t off2 = pam.Create<double>();
+    uintptr_t slots_before = pam_pmm_slot_count();
+
+    uintptr_t off1 = pam_pmm_create<int>();
+    uintptr_t off2 = pam_pmm_create<double>();
     REQUIRE( off1 != 0u );
     REQUIRE( off2 != 0u );
 
-    REQUIRE( pam.GetSlotCount() == slots_before + 2 );
+    REQUIRE( pam_pmm_slot_count() == slots_before + 2 );
 
-    pam.Delete( off1 );
-    REQUIRE( pam.GetSlotCount() == slots_before + 1 );
+    pam_pmm_delete( off1 );
+    REQUIRE( pam_pmm_slot_count() == slots_before + 1 );
 
-    pam.Delete( off2 );
-    REQUIRE( pam.GetSlotCount() == slots_before );
+    pam_pmm_delete( off2 );
+    REQUIRE( pam_pmm_slot_count() == slots_before );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// GetSlotCapacity: ёмкость >= размер
+// pam_pmm_named_count: растёт при именованном Create, уменьшается при Delete
 // ---------------------------------------------------------------------------
-TEST_CASE( "PAM metrics: GetSlotCapacity is always >= GetSlotCount", "[pam][metrics][slot_capacity]" )
+TEST_CASE( "PAM metrics: named_count tracks named objects only", "[pam][metrics][named_count]" )
 {
-    auto& pam = PersistentAddressSpace::Get();
-    REQUIRE( pam.GetSlotCapacity() >= pam.GetSlotCount() );
+    pam_pmm_init( nullptr );
 
-    // Добавляем объекты — ёмкость остаётся >= размера.
-    std::vector<uintptr_t> offs;
-    for ( int i = 0; i < 32; i++ )
-    {
-        uintptr_t off = pam.Create<int>();
-        REQUIRE( off != 0u );
-        offs.push_back( off );
-        REQUIRE( pam.GetSlotCapacity() >= pam.GetSlotCount() );
-    }
+    uintptr_t named_before = pam_pmm_named_count();
 
-    for ( auto off : offs )
-        pam.Delete( off );
-}
-
-// ---------------------------------------------------------------------------
-// GetNamedCount: растёт при именованном Create, уменьшается при Delete
-// ---------------------------------------------------------------------------
-TEST_CASE( "PAM metrics: GetNamedCount tracks named objects only", "[pam][metrics][named_count]" )
-{
-    auto&     pam          = PersistentAddressSpace::Get();
-    uintptr_t named_before = pam.GetNamedCount();
-
-    // Безымянный объект — GetNamedCount не меняется.
-    uintptr_t anon = pam.Create<int>();
+    // Безымянный объект — named_count не меняется.
+    uintptr_t anon = pam_pmm_create<int>();
     REQUIRE( anon != 0u );
-    REQUIRE( pam.GetNamedCount() == named_before );
+    REQUIRE( pam_pmm_named_count() == named_before );
 
-    // Именованный объект — GetNamedCount растёт.
-    uintptr_t named = pam.Create<int>( "metrics_named_obj" );
+    // Именованный объект — named_count растёт.
+    uintptr_t named = pam_pmm_create<int>( "metrics_named_obj" );
     REQUIRE( named != 0u );
-    REQUIRE( pam.GetNamedCount() == named_before + 1 );
+    REQUIRE( pam_pmm_named_count() == named_before + 1 );
 
-    // Удаляем именованный — GetNamedCount уменьшается.
-    pam.Delete( named );
-    REQUIRE( pam.GetNamedCount() == named_before );
+    // Удаляем именованный — named_count уменьшается.
+    pam_pmm_delete( named );
+    REQUIRE( pam_pmm_named_count() == named_before );
 
-    pam.Delete( anon );
+    pam_pmm_delete( anon );
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// GetTypeCount: уникальные типы не дублируются
+// pam_pmm_get_data_size: размер области данных > 0
 // ---------------------------------------------------------------------------
-TEST_CASE( "PAM metrics: GetTypeCount tracks unique types", "[pam][metrics][type_count]" )
+TEST_CASE( "PAM metrics: get_data_size returns positive size", "[pam][metrics][data_size]" )
 {
-    auto&     pam          = PersistentAddressSpace::Get();
-    uintptr_t types_before = pam.GetTypeCount();
+    pam_pmm_init( nullptr );
 
-    // Создаём несколько int (один тип) — GetTypeCount должен вырасти не более чем на 1.
-    uintptr_t off1 = pam.Create<int>( "metrics_tc_a" );
-    uintptr_t off2 = pam.Create<int>( "metrics_tc_b" );
-    REQUIRE( off1 != 0u );
-    REQUIRE( off2 != 0u );
-    REQUIRE( pam.GetTypeCount() <= types_before + 1 );
-
-    // Добавляем double — GetTypeCount должен вырасти ещё не более чем на 1.
-    uintptr_t off3 = pam.Create<double>( "metrics_tc_c" );
-    REQUIRE( off3 != 0u );
-    REQUIRE( pam.GetTypeCount() <= types_before + 2 );
-
-    pam.Delete( off1 );
-    pam.Delete( off2 );
-    pam.Delete( off3 );
-}
-
-// ---------------------------------------------------------------------------
-// GetDataSize: размер области данных > 0 и не уменьшается при Create
-// ---------------------------------------------------------------------------
-TEST_CASE( "PAM metrics: GetDataSize returns positive size and does not decrease", "[pam][metrics][data_size]" )
-{
-    auto&     pam       = PersistentAddressSpace::Get();
-    uintptr_t size_init = pam.GetDataSize();
+    uintptr_t size_init = pam_pmm_get_data_size();
     REQUIRE( size_init > 0u );
 
-    // Создаём большой массив — DataSize может вырасти, но не уменьшиться.
-    uintptr_t off = pam.CreateArray<char>( 512 );
+    // Создаём массив — DataSize может вырасти, но не уменьшиться.
+    uintptr_t off = pam_pmm_create_array<char>( 512 );
     REQUIRE( off != 0u );
-    REQUIRE( pam.GetDataSize() >= size_init );
+    REQUIRE( pam_pmm_get_data_size() >= size_init );
 
-    pam.Delete( off );
+    pam_pmm_delete( off );
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// GetFreeListSize: растёт при Delete, используется при Create
+// pam_pmm_get_bump: bump растёт при выделении памяти
 // ---------------------------------------------------------------------------
-TEST_CASE( "PAM metrics: GetFreeListSize increases after Delete", "[pam][metrics][free_list]" )
+TEST_CASE( "PAM metrics: get_bump increases after Create", "[pam][metrics][bump]" )
 {
-    auto& pam = PersistentAddressSpace::Get();
+    pam_pmm_init( nullptr );
 
-    // Создаём и удаляем объект — список свободных может вырасти.
-    uintptr_t free_before = pam.GetFreeListSize();
-    uintptr_t off         = pam.Create<int>();
-    REQUIRE( off != 0u );
-    pam.Delete( off );
-
-    // Список свободных вырос (или остался прежним, если объект последний и bump отступил).
-    REQUIRE( pam.GetFreeListSize() >= free_before );
-}
-
-// ---------------------------------------------------------------------------
-// GetBump: bump растёт при выделении памяти
-// ---------------------------------------------------------------------------
-TEST_CASE( "PAM metrics: GetBump increases after Create", "[pam][metrics][bump]" )
-{
-    auto&     pam         = PersistentAddressSpace::Get();
-    uintptr_t bump_before = pam.GetBump();
+    uintptr_t bump_before = pam_pmm_get_bump();
     REQUIRE( bump_before > 0u );
 
-    // После выделения памяти bump должен вырасти (если нет повторного использования).
-    uintptr_t off = pam.Create<int>();
+    // После выделения памяти bump должен вырасти.
+    uintptr_t off = pam_pmm_create<int>();
     REQUIRE( off != 0u );
 
     // bump всегда >= предыдущего значения.
-    REQUIRE( pam.GetBump() >= bump_before );
+    REQUIRE( pam_pmm_get_bump() >= bump_before );
 
-    pam.Delete( off );
+    pam_pmm_delete( off );
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// Validate: новый ПАМ корректен
+// pam_pmm_validate: новый PMM корректен
 // ---------------------------------------------------------------------------
-TEST_CASE( "PAM Validate: fresh PAM passes validation", "[pam][validate]" )
+TEST_CASE( "PAM Validate: fresh PMM passes validation", "[pam][validate]" )
 {
-    auto& pam = PersistentAddressSpace::Get();
-    REQUIRE( pam.Validate() );
+    pam_pmm_init( nullptr );
+
+    REQUIRE( pam_pmm_validate() );
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// Validate: ПАМ корректен после создания и удаления объектов
+// pam_pmm_validate: ПАМ корректен после создания и удаления объектов
 // ---------------------------------------------------------------------------
 TEST_CASE( "PAM Validate: valid after multiple create and delete operations", "[pam][validate]" )
 {
-    auto& pam = PersistentAddressSpace::Get();
+    pam_pmm_init( nullptr );
 
     const unsigned         N = 32;
     std::vector<uintptr_t> offs;
@@ -202,29 +152,31 @@ TEST_CASE( "PAM Validate: valid after multiple create and delete operations", "[
     {
         char name[32];
         std::snprintf( name, sizeof( name ), "validate_obj_%04u", i );
-        uintptr_t off = ( i % 2 == 0 ) ? pam.Create<int>( name ) : pam.Create<double>();
+        uintptr_t off = ( i % 2 == 0 ) ? pam_pmm_create<int>( name ) : pam_pmm_create<double>();
         REQUIRE( off != 0u );
         offs.push_back( off );
-        REQUIRE( pam.Validate() );
+        REQUIRE( pam_pmm_validate() );
     }
 
     // Удаляем половину объектов.
     for ( unsigned i = 0; i < N / 2; i++ )
     {
-        pam.Delete( offs[i] );
-        REQUIRE( pam.Validate() );
+        pam_pmm_delete( offs[i] );
+        REQUIRE( pam_pmm_validate() );
     }
 
     // Удаляем оставшиеся.
     for ( unsigned i = N / 2; i < N; i++ )
     {
-        pam.Delete( offs[i] );
-        REQUIRE( pam.Validate() );
+        pam_pmm_delete( offs[i] );
+        REQUIRE( pam_pmm_validate() );
     }
+
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// Validate: ПАМ корректен после Save и Init (перезагрузки из файла)
+// pam_pmm_validate: ПАМ корректен после Save и Init
 // ---------------------------------------------------------------------------
 TEST_CASE( "PAM Validate: valid after Save and Init", "[pam][validate][save_reload]" )
 {
@@ -233,31 +185,31 @@ TEST_CASE( "PAM Validate: valid after Save and Init", "[pam][validate][save_relo
 
     uintptr_t saved_off = 0;
     {
-        PersistentAddressSpace::Init( fname );
-        auto& pam = PersistentAddressSpace::Get();
-        REQUIRE( pam.Validate() );
+        pam_pmm_init( fname );
+        REQUIRE( pam_pmm_validate() );
 
-        saved_off = pam.Create<int>( "validate_save_obj" );
+        saved_off = pam_pmm_create<int>( "validate_save_obj" );
         REQUIRE( saved_off != 0u );
-        *pam.Resolve<int>( saved_off ) = 12345;
+        *pam_pmm_resolve<int>( saved_off ) = 12345;
 
-        REQUIRE( pam.Validate() );
-        pam.Save();
+        REQUIRE( pam_pmm_validate() );
+        pam_pmm_save();
+        pam_pmm_destroy();
     }
 
-    PersistentAddressSpace::Init( fname );
+    pam_pmm_init( fname );
     {
-        auto& pam = PersistentAddressSpace::Get();
-        REQUIRE( pam.Validate() );
+        REQUIRE( pam_pmm_validate() );
 
-        uintptr_t off = pam.Find( "validate_save_obj" );
+        uintptr_t off = pam_pmm_find( "validate_save_obj" );
         REQUIRE( off == saved_off );
-        REQUIRE( *pam.Resolve<int>( off ) == 12345 );
+        REQUIRE( *pam_pmm_resolve<int>( off ) == 12345 );
 
-        pam.Delete( off );
-        REQUIRE( pam.Validate() );
+        pam_pmm_delete( off );
+        REQUIRE( pam_pmm_validate() );
     }
 
+    pam_pmm_destroy();
     rm_file( fname );
 }
 
@@ -266,39 +218,40 @@ TEST_CASE( "PAM Validate: valid after Save and Init", "[pam][validate][save_relo
 // ---------------------------------------------------------------------------
 TEST_CASE( "PAM metrics: named count <= slot count", "[pam][metrics][consistency]" )
 {
-    auto& pam = PersistentAddressSpace::Get();
+    pam_pmm_init( nullptr );
 
     // Создаём именованные и безымянные объекты.
-    uintptr_t off_named = pam.Create<int>( "metrics_consistency_named" );
-    uintptr_t off_anon  = pam.Create<double>();
+    uintptr_t off_named = pam_pmm_create<int>( "metrics_consistency_named" );
+    uintptr_t off_anon  = pam_pmm_create<double>();
     REQUIRE( off_named != 0u );
     REQUIRE( off_anon != 0u );
 
-    // GetNamedCount <= GetSlotCount всегда.
-    REQUIRE( pam.GetNamedCount() <= pam.GetSlotCount() );
-    // GetSlotCapacity >= GetSlotCount всегда.
-    REQUIRE( pam.GetSlotCapacity() >= pam.GetSlotCount() );
-    // GetBump <= GetDataSize всегда.
-    REQUIRE( pam.GetBump() <= pam.GetDataSize() );
+    // named_count <= slot_count всегда.
+    REQUIRE( pam_pmm_named_count() <= pam_pmm_slot_count() );
+    // bump <= data_size всегда.
+    REQUIRE( pam_pmm_get_bump() <= pam_pmm_get_data_size() );
     // Validate должен пройти.
-    REQUIRE( pam.Validate() );
+    REQUIRE( pam_pmm_validate() );
 
-    pam.Delete( off_named );
-    pam.Delete( off_anon );
+    pam_pmm_delete( off_named );
+    pam_pmm_delete( off_anon );
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// Производительность: pmap erase с memmove быстрее O(n^2) через fptr
+// Производительность: pmap_pmm erase 100k entries
 // ---------------------------------------------------------------------------
-TEST_CASE( "pmap perf: erase 100k entries completes within 2 seconds", "[pmap][perf][erase][opt]" )
+TEST_CASE( "pmap_pmm perf: erase 100k entries completes within 2 seconds", "[pmap][perf][erase][opt]" )
 {
     constexpr unsigned N = 100'000u;
 
-    fptr<pmap<int, int>> fm;
+    pam_pmm_init( nullptr );
+
+    fptr<pmap_pmm<int, int>> fm;
     fm.New();
 
     for ( unsigned i = 0; i < N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i ) );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i ), fm.addr() );
 
     REQUIRE( fm->size() == N );
 
@@ -314,26 +267,29 @@ TEST_CASE( "pmap perf: erase 100k entries completes within 2 seconds", "[pmap][p
 
     std::printf( "[perf][opt] erase %u entries: %lld ms\n", N, static_cast<long long>( ms ) );
 
-    // Оптимизированный erase должен уложиться в 2 секунды (было ~12 секунд).
+    // Оптимизированный erase должен уложиться в 2 секунды.
     REQUIRE( ms < 2000 );
 
     fm.Delete();
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// Производительность: pmap insert с memmove
+// Производительность: pmap_pmm insert 100k entries
 // ---------------------------------------------------------------------------
-TEST_CASE( "pmap perf: insert 100k entries completes within 2 seconds", "[pmap][perf][insert][opt]" )
+TEST_CASE( "pmap_pmm perf: insert 100k entries completes within 2 seconds", "[pmap][perf][insert][opt]" )
 {
     constexpr unsigned N = 100'000u;
 
-    fptr<pmap<int, int>> fm;
+    pam_pmm_init( nullptr );
+
+    fptr<pmap_pmm<int, int>> fm;
     fm.New();
 
     auto t0 = std::chrono::steady_clock::now();
 
     for ( unsigned i = 0; i < N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i * 2 ) );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i * 2 ), fm.addr() );
 
     auto t1 = std::chrono::steady_clock::now();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 ).count();
@@ -342,9 +298,9 @@ TEST_CASE( "pmap perf: insert 100k entries completes within 2 seconds", "[pmap][
 
     std::printf( "[perf][opt] insert %u entries: %lld ms\n", N, static_cast<long long>( ms ) );
 
-    // Вставка в отсортированном порядке — O(n^2) memmove, но намного быстрее fptr[].
     REQUIRE( ms < 2000 );
 
     fm->free();
     fm.Delete();
+    pam_pmm_destroy();
 }

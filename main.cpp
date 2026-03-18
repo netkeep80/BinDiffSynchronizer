@@ -1,8 +1,8 @@
 /*
- * main.cpp — Демонстрационный пример использования pjson_db.
+ * main.cpp — Демонстрационный пример использования pjson_db_pmm.
  *
- * Показывает возможности высокоуровневого API pjson_db (Фазы 6–8):
- *   - Открытие/создание базы данных через pjson_db::open()
+ * Показывает возможности высокоуровневого API pjson_db_pmm (PMM-бэкенд, Задача 14.11):
+ *   - Открытие/создание базы данных через pjson_db_pmm::open()
  *   - Запись данных: put() (bool, int64, double, string), put_ref(), parse_into()
  *   - Чтение данных: get(), exists()
  *   - Удаление данных: erase()
@@ -22,7 +22,9 @@
  */
 
 #include <cstdio>
-#include "pjson_db.h"
+#include "pjson_db_pmm.h"
+
+using namespace pjson;
 
 // ---------------------------------------------------------------------------
 // Вспомогательные функции для вывода
@@ -37,7 +39,7 @@ static void print_separator( const char* title )
 // Демо 1: открытие БД и базовые put/get операции
 // ---------------------------------------------------------------------------
 
-static void demo_open_and_put_get( pjson_db& db )
+static void demo_open_and_put_get( pjson_db_pmm& db )
 {
     print_separator( "Демо 1: открытие БД и put/get" );
 
@@ -67,14 +69,14 @@ static void demo_open_and_put_get( pjson_db& db )
 // Демо 2: вложенные объекты и массивы через parse_into()
 // ---------------------------------------------------------------------------
 
-static void demo_nested_objects( pjson_db& db )
+static void demo_nested_objects( pjson_db_pmm& db )
 {
     print_separator( "Демо 2: вложенные объекты и массивы (parse_into)" );
 
     // Создаём вложенную структуру через parse_into().
     db.parse_into( "/users/alice", R"({"age": 30, "active": true})" );
     db.parse_into( "/users/bob", R"({"age": 25, "active": false})" );
-    db.parse_into( "/tags", R"(["persistent", "header-only", "c++17"])" );
+    db.parse_into( "/tags", R"(["persistent", "header-only", "c++20"])" );
 
     // Чтение вложенных полей.
     int64_t alice_age  = db.get( "/users/alice/age" ).as_int();
@@ -96,7 +98,7 @@ static void demo_nested_objects( pjson_db& db )
 // Демо 3: $ref — настоящие указатели на узлы
 // ---------------------------------------------------------------------------
 
-static void demo_ref( pjson_db& db )
+static void demo_ref( pjson_db_pmm& db )
 {
     print_separator( "Демо 3: $ref — настоящие указатели" );
 
@@ -110,8 +112,7 @@ static void demo_ref( pjson_db& db )
     // Можно создать $ref и через parse_into.
     db.parse_into( "/config/retries", R"({"$ref": "/defaults/retries"})" );
 
-    // resolve_all_refs() разрешает все $ref-узлы в дереве, устанавливая node_id цели.
-    // Необходимо вызвать перед чтением через get() с разыменованием.
+    // resolve_all_refs() разрешает все $ref-узлы в дереве.
     db.resolve_all_refs();
 
     // При чтении get() автоматически разыменовывает ref.
@@ -135,7 +136,7 @@ static void demo_ref( pjson_db& db )
 // Демо 4: $base64 — бинарные данные
 // ---------------------------------------------------------------------------
 
-static void demo_base64( pjson_db& db )
+static void demo_base64( pjson_db_pmm& db )
 {
     print_separator( "Демо 4: $base64 — бинарные данные" );
 
@@ -155,7 +156,7 @@ static void demo_base64( pjson_db& db )
 // Демо 5: метрики (Фаза 7)
 // ---------------------------------------------------------------------------
 
-static void demo_metrics( pjson_db& db )
+static void demo_metrics( pjson_db_pmm& db )
 {
     print_separator( "Демо 5: персистные метрики (/$metrics)" );
 
@@ -190,7 +191,7 @@ static void demo_metrics( pjson_db& db )
 // Демо 6: иерархический интерфейс operator[], find(), insert() (Фаза 8)
 // ---------------------------------------------------------------------------
 
-static void demo_hierarchical( pjson_db& db )
+static void demo_hierarchical( pjson_db_pmm& db )
 {
     print_separator( "Демо 6: иерархический интерфейс (Фаза 8)" );
 
@@ -218,11 +219,11 @@ static void demo_hierarchical( pjson_db& db )
 // Демо 7: поиск по строкам (Фаза 8)
 // ---------------------------------------------------------------------------
 
-static void demo_search( pjson_db& db )
+static void demo_search( pjson_db_pmm& db )
 {
     print_separator( "Демо 7: поиск по строкам (Фаза 8)" );
 
-    // search_node_strings() — поиск по pstring-значениям (readwrite строки JSON-узлов).
+    // search_node_strings() — поиск по pstring-значениям.
     auto name_results = db.search_node_strings( "Петров" );
     std::printf( "search_node_strings(\"Петров\"): %zu узла(ов)\n", name_results.size() );
     for ( node_id id : name_results )
@@ -235,7 +236,7 @@ static void demo_search( pjson_db& db )
     auto all_vals = db.search_node_strings( "" );
     std::printf( "search_node_strings(\"\") — всего string-узлов: %zu\n", all_vals.size() );
 
-    // search_strings() — поиск по словарю интернированных ключей (pstringview).
+    // search_strings() — поиск по словарю интернированных ключей.
     auto key_results = db.search_strings( "name" );
     std::printf( "search_strings(\"name\") — ключей в словаре: %zu\n", key_results.size() );
 }
@@ -244,7 +245,7 @@ static void demo_search( pjson_db& db )
 // Демо 8: удаление и resolve_all_refs()
 // ---------------------------------------------------------------------------
 
-static void demo_erase_and_resolve( pjson_db& db )
+static void demo_erase_and_resolve( pjson_db_pmm& db )
 {
     print_separator( "Демо 8: удаление и resolve_all_refs()" );
 
@@ -255,7 +256,7 @@ static void demo_erase_and_resolve( pjson_db& db )
     db.erase( "/temp/value" );
     std::printf( "exists(\"/temp/value\") after erase  = %s\n", db.exists( "/temp/value" ) ? "true" : "false" );
 
-    // resolve_all_refs() — разрешает все $ref-узлы в дереве (полезно после загрузки образа).
+    // resolve_all_refs() — разрешает все $ref-узлы в дереве.
     db.resolve_all_refs();
     std::printf( "resolve_all_refs() — выполнено\n" );
 }
@@ -266,12 +267,10 @@ static void demo_erase_and_resolve( pjson_db& db )
 
 int main()
 {
-    std::printf( "=== BinDiffSynchronizer — pjson_db демонстрация ===\n" );
+    std::printf( "=== BinDiffSynchronizer — pjson_db_pmm демонстрация (PMM-бэкенд) ===\n" );
 
-    // Открываем (или создаём) базу данных через высокоуровневый API.
-    // При первом запуске создаётся новый файл demo.pam,
-    // при последующих — загружается существующий.
-    pjson_db db = pjson_db::open( "demo.pam" );
+    // Открываем (или создаём) базу данных через PMM-бэкенд.
+    pjson_db_pmm db = pjson_db_pmm::open( "demo.pam" );
 
     demo_open_and_put_get( db );
     demo_nested_objects( db );

@@ -3,13 +3,18 @@
 #include <chrono>
 #include <cstdio>
 
-#include "pmap.h"
+#include "pmap_pmm.h"
+#include "fptr_pmm.h"
+#include "pam_pmm.h"
+
+using namespace pjson;
 
 // =============================================================================
 // Тесты производительности управления ПАП (задача #65)
+// Обновлено для PMM — Задача 14.11.
 //
-// Оценивают эффективность управления персистной памятью:
-//   — создание pmap<int, int>
+// Оценивают эффективность управления персистной памятью через PMM:
+//   — создание pmap_pmm<int, int>
 //   — вставка 100 000 записей
 //   — поиск значений (100 000 запросов)
 //   — удаление значений (100 000 операций erase)
@@ -21,17 +26,19 @@ constexpr unsigned PERF_N = 100'000u;
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
-// Вставка 100 000 записей в pmap<int, int>
+// Вставка 100 000 записей в pmap_pmm<int, int>
 // ---------------------------------------------------------------------------
-TEST_CASE( "pmap<int,int>: insert 100 000 entries", "[pmap][perf][insert]" )
+TEST_CASE( "pmap_pmm<int,int>: insert 100 000 entries", "[pmap][perf][insert]" )
 {
-    fptr<pmap<int, int>> fm;
+    pam_pmm_init( nullptr );
+
+    fptr<pmap_pmm<int, int>> fm;
     fm.New();
 
     auto t0 = std::chrono::steady_clock::now();
 
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i * 2 ) );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i * 2 ), fm.addr() );
 
     auto t1 = std::chrono::steady_clock::now();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 ).count();
@@ -42,18 +49,21 @@ TEST_CASE( "pmap<int,int>: insert 100 000 entries", "[pmap][perf][insert]" )
 
     fm->free();
     fm.Delete();
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// Поиск 100 000 значений в pmap<int, int>
+// Поиск 100 000 значений в pmap_pmm<int, int>
 // ---------------------------------------------------------------------------
-TEST_CASE( "pmap<int,int>: find 100 000 entries", "[pmap][perf][find]" )
+TEST_CASE( "pmap_pmm<int,int>: find 100 000 entries", "[pmap][perf][find]" )
 {
-    fptr<pmap<int, int>> fm;
+    pam_pmm_init( nullptr );
+
+    fptr<pmap_pmm<int, int>> fm;
     fm.New();
 
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i * 3 ) );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i * 3 ), fm.addr() );
 
     REQUIRE( fm->size() == PERF_N );
 
@@ -76,18 +86,21 @@ TEST_CASE( "pmap<int,int>: find 100 000 entries", "[pmap][perf][find]" )
 
     fm->free();
     fm.Delete();
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
 // Проверка корректности значений после вставки 100 000 записей
 // ---------------------------------------------------------------------------
-TEST_CASE( "pmap<int,int>: verify 100 000 values after insert", "[pmap][perf][verify]" )
+TEST_CASE( "pmap_pmm<int,int>: verify 100 000 values after insert", "[pmap][perf][verify]" )
 {
-    fptr<pmap<int, int>> fm;
+    pam_pmm_init( nullptr );
+
+    fptr<pmap_pmm<int, int>> fm;
     fm.New();
 
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i * 5 ) );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i * 5 ), fm.addr() );
 
     REQUIRE( fm->size() == PERF_N );
 
@@ -106,18 +119,21 @@ TEST_CASE( "pmap<int,int>: verify 100 000 values after insert", "[pmap][perf][ve
 
     fm->free();
     fm.Delete();
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// Удаление 100 000 записей из pmap<int, int>
+// Удаление 100 000 записей из pmap_pmm<int, int>
 // ---------------------------------------------------------------------------
-TEST_CASE( "pmap<int,int>: erase 100 000 entries", "[pmap][perf][erase]" )
+TEST_CASE( "pmap_pmm<int,int>: erase 100 000 entries", "[pmap][perf][erase]" )
 {
-    fptr<pmap<int, int>> fm;
+    pam_pmm_init( nullptr );
+
+    fptr<pmap_pmm<int, int>> fm;
     fm.New();
 
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i ) );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i ), fm.addr() );
 
     REQUIRE( fm->size() == PERF_N );
 
@@ -134,17 +150,20 @@ TEST_CASE( "pmap<int,int>: erase 100 000 entries", "[pmap][perf][erase]" )
     std::printf( "[perf] erase %u entries: %lld ms\n", PERF_N, static_cast<long long>( ms ) );
 
     fm.Delete();
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
 // Полный цикл: создание, вставка 100k, поиск, удаление
 // ---------------------------------------------------------------------------
-TEST_CASE( "pmap<int,int>: full lifecycle with 100 000 entries", "[pmap][perf][lifecycle]" )
+TEST_CASE( "pmap_pmm<int,int>: full lifecycle with 100 000 entries", "[pmap][perf][lifecycle]" )
 {
+    pam_pmm_init( nullptr );
+
     auto t_total_start = std::chrono::steady_clock::now();
 
-    // 1. Создание pmap
-    fptr<pmap<int, int>> fm;
+    // 1. Создание pmap_pmm
+    fptr<pmap_pmm<int, int>> fm;
     fm.New();
     REQUIRE( fm->empty() );
 
@@ -152,7 +171,7 @@ TEST_CASE( "pmap<int,int>: full lifecycle with 100 000 entries", "[pmap][perf][l
     {
         auto t0 = std::chrono::steady_clock::now();
         for ( unsigned i = 0; i < PERF_N; ++i )
-            fm->insert( static_cast<int>( i ), static_cast<int>( i * 7 ) );
+            fm->insert( static_cast<int>( i ), static_cast<int>( i * 7 ), fm.addr() );
         auto t1 = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 ).count();
         std::printf( "[perf][lifecycle] insert: %lld ms\n", static_cast<long long>( ms ) );
@@ -207,19 +226,22 @@ TEST_CASE( "pmap<int,int>: full lifecycle with 100 000 entries", "[pmap][perf][l
     std::printf( "[perf][lifecycle] TOTAL:  %lld ms\n", static_cast<long long>( ms_total ) );
 
     fm.Delete();
+    pam_pmm_destroy();
 }
 
 // ---------------------------------------------------------------------------
-// pmap<int,int>: поиск несуществующих ключей (false negative — 0 найдено)
+// pmap_pmm<int,int>: поиск несуществующих ключей
 // ---------------------------------------------------------------------------
-TEST_CASE( "pmap<int,int>: find 100 000 non-existent keys returns nullptr", "[pmap][perf][find_miss]" )
+TEST_CASE( "pmap_pmm<int,int>: find 100 000 non-existent keys returns nullptr", "[pmap][perf][find_miss]" )
 {
-    fptr<pmap<int, int>> fm;
+    pam_pmm_init( nullptr );
+
+    fptr<pmap_pmm<int, int>> fm;
     fm.New();
 
     // Вставляем ключи 0..PERF_N-1
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i ) );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i ), fm.addr() );
 
     // Ищем ключи PERF_N..2*PERF_N-1 (их нет)
     auto t0 = std::chrono::steady_clock::now();
@@ -240,4 +262,5 @@ TEST_CASE( "pmap<int,int>: find 100 000 non-existent keys returns nullptr", "[pm
 
     fm->free();
     fm.Delete();
+    pam_pmm_destroy();
 }

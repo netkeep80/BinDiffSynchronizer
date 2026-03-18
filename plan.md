@@ -1201,14 +1201,24 @@ PMM не имеет аналога `pstring`. Создана новая реал
 
 ---
 
-### Задача 14.11. Обновить тесты и демонстрации
+### Задача 14.11. Обновить тесты и демонстрации ✅ ВЫПОЛНЕНО
 
-- [ ] `test_pam.cpp` — адаптировать под новый API.
-- [ ] `test_persist.cpp` — обновить или удалить (если `persist<T>` удалён).
-- [ ] `test_pallocator.cpp` — обновить под PMM-аллокатор.
-- [ ] `test_pam_dynamic.cpp`, `test_pam_metrics.cpp`, `test_pam_perf.cpp` — адаптировать.
-- [ ] `main.cpp` — обновить демонстрацию на новый бэкенд.
-- [ ] Все 521+ тестов проекта должны пройти.
+- [x] `test_pam.cpp` — адаптировать под новый API.
+- [x] `test_persist.cpp` — обновить под PMM (`fptr_pmm`, `persist_pmm`, `pam_pmm`).
+- [x] `test_pallocator.cpp` — обновить под PMM-аллокатор (`pallocator_pmm`).
+- [x] `test_pam_dynamic.cpp` — адаптировать (`pstring_pmm`, `self_off` для `assign`/`clear`).
+- [x] `test_pam_metrics.cpp` — адаптировать (метрики PMM, `pmap_pmm` perf-тесты).
+- [x] `test_pam_perf.cpp` — адаптировать (`pmap_pmm` с `fm.addr()` для `insert`).
+- [x] `main.cpp` — обновить демонстрацию на `pjson_db_pmm` бэкенд.
+- [x] Все 713 тестов проекта проходят (521 463 assertion).
+
+**Примечания к реализации:**
+- Исправлен баг use-after-free в `pmap_pmm::insert_direct()`: при расширении PMM-кучи
+  (`HeapStorage::expand`) указатель `this` становился невалидным. Решение — вычисление
+  байтового смещения `this` от базы PMM до аллокации и переразрешение после.
+- `pmap_pmm::insert()` требует `self_off` — в тестах используется `fm.addr()`.
+- `pstring_pmm::assign()`/`clear()` требуют `self_off` для realloc-безопасности.
+- Удалены тесты для метрик, недоступных в PMM (`GetSlotCapacity`, `GetTypeCount`, `GetFreeListSize`).
 
 ---
 
@@ -1237,7 +1247,7 @@ vector)
         ↓
   ┌─────┴─────┐
   ↓           ↓
-14.9        14.11
+14.9✅      14.11✅
 (миграция)  (тесты)
   └─────┬─────┘
         ↓
