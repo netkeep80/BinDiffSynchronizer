@@ -78,109 +78,20 @@ static_assert( std::is_trivially_copyable<db_metrics_pmm>::value, "db_metrics_pm
 // ===========================================================================
 
 /// Рекурсивный обход поддерева для подсчёта узлов по типам (PMM версия).
+/// Делегирует в pjson_count_nodes_in_subtree из pjson_db_helpers.h (Задача 16.2).
+/// Логика идентична — обе версии используют node_view и pmm_resolve, которые
+/// работают одинаково для PMM и не-PMM бэкендов.
 inline void pjson_pmm_count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64_t& ref_cnt, uint64_t& array_cnt,
                                               uint64_t& object_cnt, uint64_t& binary_bytes )
 {
-    if ( id == 0 )
-        return;
-    const node_view v{ id };
-    if ( !v.valid() )
-        return;
-
-    ++node_cnt;
-
-    switch ( v.tag() )
-    {
-    case node_tag::array:
-        ++array_cnt;
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view elem = v.at( i );
-                if ( elem.valid() )
-                    pjson_pmm_count_nodes_in_subtree( elem.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-            }
-        }
-        break;
-    case node_tag::object:
-        ++object_cnt;
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view val = v.value_at( i );
-                if ( val.valid() )
-                    pjson_pmm_count_nodes_in_subtree( val.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-            }
-        }
-        break;
-    case node_tag::ref:
-        ++ref_cnt;
-        break;
-    case node_tag::binary:
-    {
-        const node* n = pmm_resolve_const<node>( id );
-        if ( n != nullptr )
-            binary_bytes += static_cast<uint64_t>( n->binary_val.size );
-    }
-    break;
-    default:
-        break;
-    }
+    pjson_count_nodes_in_subtree( id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
 }
 
 /// Рекурсивный обход поддерева для поиска string-узлов (PMM версия).
+/// Делегирует в pjson_search_node_strings_in_subtree из pjson_db_helpers.h (Задача 16.2).
 inline void pjson_pmm_search_node_strings_in_subtree( node_id id, const char* pattern, std::vector<node_id>& results )
 {
-    if ( id == 0 )
-        return;
-    const node_view v{ id };
-    if ( !v.valid() )
-        return;
-
-    switch ( v.tag() )
-    {
-    case node_tag::string:
-    {
-        std::string_view sv = v.as_string();
-        if ( pattern[0] == '\0' )
-        {
-            results.push_back( id );
-        }
-        else if ( !sv.empty() )
-        {
-            const char* s = sv.data();
-            if ( s != nullptr && std::strstr( s, pattern ) != nullptr )
-                results.push_back( id );
-        }
-        break;
-    }
-    case node_tag::array:
-    {
-        uintptr_t sz = v.size();
-        for ( uintptr_t i = 0; i < sz; ++i )
-        {
-            node_view elem = v.at( i );
-            if ( elem.valid() )
-                pjson_pmm_search_node_strings_in_subtree( elem.id, pattern, results );
-        }
-        break;
-    }
-    case node_tag::object:
-    {
-        uintptr_t sz = v.size();
-        for ( uintptr_t i = 0; i < sz; ++i )
-        {
-            node_view val = v.value_at( i );
-            if ( val.valid() )
-                pjson_pmm_search_node_strings_in_subtree( val.id, pattern, results );
-        }
-        break;
-    }
-    default:
-        break;
-    }
+    pjson_search_node_strings_in_subtree( id, pattern, results );
 }
 
 // ===========================================================================
@@ -790,6 +701,27 @@ class pjson_db_pmm
         return std::strncmp( path, "/$metrics", 9 ) == 0;
     }
 
+    /// Кэш подсчёта узлов по типам для метрик (Задача 16.4).
+    /// Вычисляется однократно при обращении к любой метрике из группы subtree.
+    struct subtree_counts
+    {
+        uint64_t node_cnt     = 0;
+        uint64_t ref_cnt      = 0;
+        uint64_t array_cnt    = 0;
+        uint64_t object_cnt   = 0;
+        uint64_t binary_bytes = 0;
+        bool     computed     = false;
+
+        void ensure( node_id root )
+        {
+            if ( computed )
+                return;
+            if ( root != 0 )
+                pjson_count_nodes_in_subtree( root, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
+            computed = true;
+        }
+    };
+
     node_view _get_metrics( const char* path ) const
     {
         const char* key = path + 9;
@@ -803,93 +735,99 @@ class pjson_db_pmm
 
         uintptr_t pool_off = _find_pool_offset();
 
-        // Метрики пула узлов
-        if ( std::strcmp( key, "free_node_count" ) == 0 )
+        // Задача 16.4: реестр метрик вместо цепочки strcmp.
+        // Каждая запись: { имя, лямбда вычисления значения }.
+        // Лямбды принимают ссылку на subtree_counts для ленивого вычисления.
+        struct metric_entry
         {
-            uint64_t val = pjson_pool_pmm_free_in_pool( pool_off );
-            node_set_uint( tmp_off, val );
-            return node_view{ tmp_off };
-        }
-        if ( std::strcmp( key, "used_node_count" ) == 0 )
-        {
-            uint64_t val = pjson_pool_pmm_used_count( pool_off );
-            node_set_uint( tmp_off, val );
-            return node_view{ tmp_off };
-        }
+            const char* name;
+            uint64_t ( *getter )( uintptr_t pool_off, node_id root, subtree_counts& sc );
+        };
 
-        // Метрики строк (через словарь pstringview из старого API)
-        if ( std::strcmp( key, "string_count_total" ) == 0 || std::strcmp( key, "string_count" ) == 0 )
+        // Функции-геттеры определены как статические лямбды для компактности.
+        static constexpr auto get_free_node_count = []( uintptr_t p, node_id, subtree_counts& ) -> uint64_t
+        { return pjson_pool_pmm_free_in_pool( p ); };
+        static constexpr auto get_used_node_count = []( uintptr_t p, node_id, subtree_counts& ) -> uint64_t
+        { return pjson_pool_pmm_used_count( p ); };
+        static constexpr auto get_string_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_all_strings().size() ); };
+        static constexpr auto get_pam_bump = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_pmm_get_bump() ); };
+        static constexpr auto get_pam_free_list = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
         {
-            uint64_t val = static_cast<uint64_t>( pam_all_strings().size() );
-            node_set_uint( tmp_off, val );
-            return node_view{ tmp_off };
-        }
+            return 0u; // PMM не имеет прямого эквивалента free_list_size
+        };
+        static constexpr auto get_pam_total_size = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_pmm_get_data_size() ); };
+        static constexpr auto get_pam_slot_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_pmm_slot_count() ); };
+        static constexpr auto get_pam_named_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_pmm_named_count() ); };
+        static constexpr auto get_node_count_total = []( uintptr_t p, node_id r, subtree_counts& sc ) -> uint64_t
+        {
+            sc.ensure( r );
+            uint64_t pool_total = pjson_pool_pmm_total_count( p );
+            return pool_total > 0 ? pool_total : sc.node_cnt;
+        };
+        static constexpr auto get_ref_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t
+        {
+            sc.ensure( r );
+            return sc.ref_cnt;
+        };
+        static constexpr auto get_array_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t
+        {
+            sc.ensure( r );
+            return sc.array_cnt;
+        };
+        static constexpr auto get_object_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t
+        {
+            sc.ensure( r );
+            return sc.object_cnt;
+        };
+        static constexpr auto get_binary_bytes = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t
+        {
+            sc.ensure( r );
+            return sc.binary_bytes;
+        };
 
-        // Метрики PMM
-        if ( std::strcmp( key, "pam_bump_offset" ) == 0 )
-        {
-            node_set_uint( tmp_off, static_cast<uint64_t>( pam_pmm_get_bump() ) );
-            return node_view{ tmp_off };
-        }
-        if ( std::strcmp( key, "pam_free_list_size" ) == 0 )
-        {
-            // PMM не имеет прямого эквивалента free_list_size.
-            // Возвращаем 0 для совместимости.
-            node_set_uint( tmp_off, 0u );
-            return node_view{ tmp_off };
-        }
-        if ( std::strcmp( key, "pam_total_size" ) == 0 )
-        {
-            node_set_uint( tmp_off, static_cast<uint64_t>( pam_pmm_get_data_size() ) );
-            return node_view{ tmp_off };
-        }
-        if ( std::strcmp( key, "pam_slot_count" ) == 0 )
-        {
-            node_set_uint( tmp_off, static_cast<uint64_t>( pam_pmm_slot_count() ) );
-            return node_view{ tmp_off };
-        }
-        if ( std::strcmp( key, "pam_named_count" ) == 0 )
-        {
-            node_set_uint( tmp_off, static_cast<uint64_t>( pam_pmm_named_count() ) );
-            return node_view{ tmp_off };
-        }
+        // Реестр метрик.
+        static const metric_entry registry[] = {
+            { "free_node_count", get_free_node_count },
+            { "used_node_count", get_used_node_count },
+            { "string_count_total", get_string_count },
+            { "string_count", get_string_count },
+            { "pam_bump_offset", get_pam_bump },
+            { "pam_free_list_size", get_pam_free_list },
+            { "pam_total_size", get_pam_total_size },
+            { "pam_slot_count", get_pam_slot_count },
+            { "pam_named_count", get_pam_named_count },
+            { "node_count_total", get_node_count_total },
+            { "ref_count", get_ref_count },
+            { "array_count", get_array_count },
+            { "object_count", get_object_count },
+            { "binary_bytes_total", get_binary_bytes },
+        };
 
-        // Метрики типов узлов
-        if ( std::strcmp( key, "ref_count" ) == 0 || std::strcmp( key, "array_count" ) == 0 ||
-             std::strcmp( key, "object_count" ) == 0 || std::strcmp( key, "binary_bytes_total" ) == 0 ||
-             std::strcmp( key, "node_count_total" ) == 0 )
-        {
-            uint64_t node_cnt = 0, ref_cnt = 0, array_cnt = 0, object_cnt = 0, binary_bytes = 0;
-            node_id  root = _find_root();
-            if ( root != 0 )
-                pjson_pmm_count_nodes_in_subtree( root, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
+        node_id        root = _find_root();
+        subtree_counts sc;
 
-            if ( std::strcmp( key, "node_count_total" ) == 0 )
+        // Поиск метрики в реестре.
+        for ( const auto& entry : registry )
+        {
+            if ( std::strcmp( key, entry.name ) == 0 )
             {
-                uint64_t pool_total = pjson_pool_pmm_total_count( pool_off );
-                node_set_uint( tmp_off, pool_total > 0 ? pool_total : node_cnt );
-            }
-            else if ( std::strcmp( key, "ref_count" ) == 0 )
-                node_set_uint( tmp_off, ref_cnt );
-            else if ( std::strcmp( key, "array_count" ) == 0 )
-                node_set_uint( tmp_off, array_cnt );
-            else if ( std::strcmp( key, "object_count" ) == 0 )
-                node_set_uint( tmp_off, object_cnt );
-            else
-                node_set_uint( tmp_off, binary_bytes );
-
-            return node_view{ tmp_off };
-        }
-
-        // last_save_time из структуры метрик
-        const db_metrics_pmm* m = _get_metrics_struct_const();
-        if ( m != nullptr )
-        {
-            if ( std::strcmp( key, "last_save_time" ) == 0 )
-            {
-                node_set_uint( tmp_off, m->last_save_time );
+                uint64_t val = entry.getter( pool_off, root, sc );
+                node_set_uint( tmp_off, val );
                 return node_view{ tmp_off };
             }
+        }
+
+        // last_save_time из структуры метрик (не в реестре — зависит от персистной структуры).
+        const db_metrics_pmm* m = _get_metrics_struct_const();
+        if ( m != nullptr && std::strcmp( key, "last_save_time" ) == 0 )
+        {
+            node_set_uint( tmp_off, m->last_save_time );
+            return node_view{ tmp_off };
         }
 
         // Неизвестная метрика
@@ -1086,45 +1024,19 @@ class pjson_db_pmm
         if ( obj_id == 0 || key == nullptr )
             return false;
 
-        node* n = pmm_resolve<node>( obj_id );
-        if ( n == nullptr || n->tag != node_tag::object )
+        node* n = node_resolve_checked( obj_id, node_tag::object );
+        if ( n == nullptr )
             return false;
 
         uintptr_t sz = n->object_val.size;
         if ( sz == 0 || n->object_val.data_off == 0 )
             return false;
 
-        uintptr_t del_idx = sz;
-        {
-            object_entry* entries = pmm_resolve<object_entry>( n->object_val.data_off );
-            uintptr_t     lo = 0, hi = sz;
-            while ( lo < hi )
-            {
-                uintptr_t mid         = ( lo + hi ) / 2;
-                entries               = pmm_resolve<object_entry>( n->object_val.data_off );
-                const object_entry& e = entries[mid];
-                int                 cmp;
-                if ( e.key_chars_offset == 0 )
-                    cmp = ( key[0] == '\0' ) ? 0 : 1;
-                else
-                {
-                    const char* ks = pmm_resolve_const<char>( e.key_chars_offset );
-                    cmp            = ( ks != nullptr ) ? std::strcmp( ks, key ) : -1;
-                }
-                if ( cmp < 0 )
-                    lo = mid + 1;
-                else if ( cmp > 0 )
-                    hi = mid;
-                else
-                {
-                    del_idx = mid;
-                    break;
-                }
-            }
-        }
-
-        if ( del_idx == sz )
+        // Делегируем бинарный поиск в node_object_find_key (Задача 16.2).
+        auto find_result = node_object_find_key( n->object_val.data_off, sz, key );
+        if ( !find_result.found )
             return false;
+        uintptr_t del_idx = find_result.index;
 
         uintptr_t     data_off = n->object_val.data_off;
         object_entry* entries  = pmm_resolve<object_entry>( data_off );
@@ -1142,11 +1054,8 @@ class pjson_db_pmm
 
     bool _array_erase_at( node_id arr_id, uintptr_t idx )
     {
-        if ( arr_id == 0 )
-            return false;
-
-        node* n = pmm_resolve<node>( arr_id );
-        if ( n == nullptr || n->tag != node_tag::array )
+        node* n = node_resolve_checked( arr_id, node_tag::array );
+        if ( n == nullptr )
             return false;
 
         uintptr_t sz = n->array_val.size;
@@ -1176,8 +1085,9 @@ class pjson_db_pmm
 
         auto key_result = pam_intern_string( key );
 
-        node* n = pmm_resolve<node>( obj_id );
-        if ( n == nullptr || n->tag != node_tag::object )
+        // Задача 16.3: используем node_resolve_checked вместо дублирования guard-паттерна.
+        node* n = node_resolve_checked( obj_id, node_tag::object );
+        if ( n == nullptr )
             return false;
 
         object_entry new_entry;
@@ -1185,39 +1095,17 @@ class pjson_db_pmm
         new_entry.key_chars_offset = key_result.chars_offset;
         new_entry.value            = value_id;
 
-        struct ObjKeyOf
-        {
-            uintptr_t operator()( const object_entry& e ) const { return e.key_chars_offset; }
-        };
-        struct ObjLess
-        {
-            bool operator()( uintptr_t a_offset, uintptr_t b_offset ) const
-            {
-                if ( a_offset == 0 && b_offset == 0 )
-                    return false;
-                if ( a_offset == 0 )
-                    return true;
-                if ( b_offset == 0 )
-                    return false;
-                const char* a = pmm_resolve_const<char>( a_offset );
-                const char* b = pmm_resolve_const<char>( b_offset );
-                if ( a == nullptr || b == nullptr )
-                    return false;
-                return std::strcmp( a, b ) < 0;
-            }
-        };
-
+        // Задача 16.2: используем общие функторы object_entry_key_of / object_entry_less.
         n = pmm_resolve<node>( obj_id );
         if ( n == nullptr )
             return false;
 
-        // Используем pmem_array_hdr внутри object_val.
-        // Вычисляем смещение вручную через PMM.
         uintptr_t hdr_off = pam_pmm_ptr_to_offset( reinterpret_cast<pmem_array_hdr*>( &( n->object_val.size ) ) );
         if ( hdr_off == 0 )
             return false;
 
-        pmem_array_insert_sorted<object_entry, ObjKeyOf, ObjLess>( hdr_off, new_entry, ObjKeyOf{}, ObjLess{} );
+        pmem_array_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
+            hdr_off, new_entry, object_entry_key_of{}, object_entry_less{} );
 
         return true;
     }
@@ -1227,8 +1115,9 @@ class pjson_db_pmm
         if ( arr_id == 0 || value_id == 0 )
             return false;
 
-        node* n = pmm_resolve<node>( arr_id );
-        if ( n == nullptr || n->tag != node_tag::array )
+        // Задача 16.3: используем node_resolve_checked.
+        node* n = node_resolve_checked( arr_id, node_tag::array );
+        if ( n == nullptr )
             return false;
 
         uintptr_t current_size = n->array_val.size;
