@@ -21,7 +21,7 @@ static void ensure_pmm()
 // ---------------------------------------------------------------------------
 // pvector_pmm<T> — layout checks
 // ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: size and capacity are uintptr_t (Phase 3)", "[pvector_pmm][layout][phase3]" )
+TEST_CASE( "pvector_pmm<int>: size and capacity are uintptr_t", "[pvector_pmm][layout]" )
 {
     // sizeof(uintptr_t) == sizeof(void*) на любой платформе.
     // pvector_pmm<T> = size_ (uintptr_t) + capacity_ (uintptr_t) + data_ (fptr<T>) = 3 * sizeof(void*)

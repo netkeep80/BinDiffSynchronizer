@@ -1,6 +1,6 @@
 /**
  * @file test_pmap_pmm.cpp
- * @brief Тесты для pmap_pmm (Задача 14.3).
+ * @brief Тесты для pmap_pmm.
  *
  * Проверяют корректность работы персистной карты на базе PMM.
  */
@@ -17,7 +17,7 @@ using namespace pjson;
 // ТЕСТЫ pmap_entry_pmm — Layout
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_entry_pmm<int,int>: is trivially copyable", "[pmap_pmm][layout][task14.3]" )
+TEST_CASE( "pmap_entry_pmm<int,int>: is trivially copyable", "[pmap_pmm][layout]" )
 {
     REQUIRE( std::is_trivially_copyable<pmap_entry_pmm<int, int>>::value );
     REQUIRE( std::is_trivially_copyable<pmap_entry_pmm<int, double>>::value );
@@ -27,7 +27,7 @@ TEST_CASE( "pmap_entry_pmm<int,int>: is trivially copyable", "[pmap_pmm][layout]
 // ТЕСТЫ pmap_pmm — Layout
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: size is 3 * sizeof(void*)", "[pmap_pmm][layout][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: size is 3 * sizeof(void*)", "[pmap_pmm][layout]" )
 {
     REQUIRE( sizeof( pmap_pmm<int, int> ) == 3 * sizeof( void* ) );
     REQUIRE( sizeof( pmap_pmm<int, double> ) == 3 * sizeof( void* ) );
@@ -37,7 +37,7 @@ TEST_CASE( "pmap_pmm<int,int>: size is 3 * sizeof(void*)", "[pmap_pmm][layout][t
 // ТЕСТЫ pmap_pmm — Создание и базовые операции
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: zero-initialised gives empty map", "[pmap_pmm][construct][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: zero-initialised gives empty map", "[pmap_pmm][construct]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -53,7 +53,7 @@ TEST_CASE( "pmap_pmm<int,int>: zero-initialised gives empty map", "[pmap_pmm][co
     PamManager::destroy();
 }
 
-TEST_CASE( "pmap_pmm<int,int>: insert single entry and find it", "[pmap_pmm][insert][find][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: insert single entry and find it", "[pmap_pmm][insert][find]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -73,7 +73,7 @@ TEST_CASE( "pmap_pmm<int,int>: insert single entry and find it", "[pmap_pmm][ins
     PamManager::destroy();
 }
 
-TEST_CASE( "pmap_pmm<int,int>: find missing key returns nullptr", "[pmap_pmm][find][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: find missing key returns nullptr", "[pmap_pmm][find]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -92,7 +92,7 @@ TEST_CASE( "pmap_pmm<int,int>: find missing key returns nullptr", "[pmap_pmm][fi
 // ТЕСТЫ pmap_pmm — Сортировка
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: insert multiple entries in sorted order", "[pmap_pmm][insert][sorted][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: insert multiple entries in sorted order", "[pmap_pmm][insert][sorted]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -127,7 +127,7 @@ TEST_CASE( "pmap_pmm<int,int>: insert multiple entries in sorted order", "[pmap_
 // ТЕСТЫ pmap_pmm — Обновление существующего ключа
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: inserting existing key updates value", "[pmap_pmm][insert][update][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: inserting existing key updates value", "[pmap_pmm][insert][update]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -153,7 +153,7 @@ TEST_CASE( "pmap_pmm<int,int>: inserting existing key updates value", "[pmap_pmm
 // ТЕСТЫ pmap_pmm — Удаление
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: erase removes the correct entry", "[pmap_pmm][erase][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: erase removes the correct entry", "[pmap_pmm][erase]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -177,7 +177,7 @@ TEST_CASE( "pmap_pmm<int,int>: erase removes the correct entry", "[pmap_pmm][era
     PamManager::destroy();
 }
 
-TEST_CASE( "pmap_pmm<int,int>: erase missing key returns false", "[pmap_pmm][erase][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: erase missing key returns false", "[pmap_pmm][erase]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -199,7 +199,7 @@ TEST_CASE( "pmap_pmm<int,int>: erase missing key returns false", "[pmap_pmm][era
 // ═══════════════════════════════════════════════════════════════════════════
 
 TEST_CASE( "pmap_pmm<int,int>: operator[] inserts default value for missing key",
-           "[pmap_pmm][operator_index][task14.3]" )
+           "[pmap_pmm][operator_index]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -221,7 +221,7 @@ TEST_CASE( "pmap_pmm<int,int>: operator[] inserts default value for missing key"
 // ТЕСТЫ pmap_pmm — clear и free
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: clear resets size to 0", "[pmap_pmm][clear][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: clear resets size to 0", "[pmap_pmm][clear]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -241,7 +241,7 @@ TEST_CASE( "pmap_pmm<int,int>: clear resets size to 0", "[pmap_pmm][clear][task1
     PamManager::destroy();
 }
 
-TEST_CASE( "pmap_pmm<int,int>: free releases underlying allocation", "[pmap_pmm][free][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: free releases underlying allocation", "[pmap_pmm][free]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -262,7 +262,7 @@ TEST_CASE( "pmap_pmm<int,int>: free releases underlying allocation", "[pmap_pmm]
 // ТЕСТЫ pmap_pmm — Работа с double
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,double>: insert and find double values", "[pmap_pmm][double][task14.3]" )
+TEST_CASE( "pmap_pmm<int,double>: insert and find double values", "[pmap_pmm][double]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -287,7 +287,7 @@ TEST_CASE( "pmap_pmm<int,double>: insert and find double values", "[pmap_pmm][do
 // ТЕСТЫ pmap_pmm — Итераторы
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: range-based iteration visits all entries", "[pmap_pmm][iterator][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: range-based iteration visits all entries", "[pmap_pmm][iterator]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -313,7 +313,7 @@ TEST_CASE( "pmap_pmm<int,int>: range-based iteration visits all entries", "[pmap
     PamManager::destroy();
 }
 
-TEST_CASE( "pmap_pmm<int,int>: const iterators work correctly", "[pmap_pmm][iterator][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: const iterators work correctly", "[pmap_pmm][iterator]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -341,7 +341,7 @@ TEST_CASE( "pmap_pmm<int,int>: const iterators work correctly", "[pmap_pmm][iter
 // ТЕСТЫ ИНТЕГРАЦИИ: Большая карта
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: handles large maps (100 elements)", "[pmap_pmm][large][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: handles large maps (100 elements)", "[pmap_pmm][large]" )
 {
     PamManager::create( 256 * 1024 );
 
@@ -379,7 +379,7 @@ TEST_CASE( "pmap_pmm<int,int>: handles large maps (100 elements)", "[pmap_pmm][l
 // ТЕСТ: Пустая карта
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: operations on empty map", "[pmap_pmm][empty][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: operations on empty map", "[pmap_pmm][empty]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -398,7 +398,7 @@ TEST_CASE( "pmap_pmm<int,int>: operations on empty map", "[pmap_pmm][empty][task
 // ТЕСТ: Вставка с использованием insert() (с self_off)
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: insert with self_off", "[pmap_pmm][insert][task14.3]" )
+TEST_CASE( "pmap_pmm<int,int>: insert with self_off", "[pmap_pmm][insert]" )
 {
     PamManager::create( 64 * 1024 );
 

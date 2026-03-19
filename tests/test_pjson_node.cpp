@@ -21,7 +21,7 @@ void reset_pam()
 } // anonymous namespace
 
 // =============================================================================
-// Tests for Phase 3 — pjson_node: расширенная модель узлов JSON
+// pjson_node: расширенная модель узлов JSON
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -972,14 +972,14 @@ TEST_CASE( "node: nested object with array and ref - complex scenario", "[pjson_
 }
 
 // =============================================================================
-// Тесты Фазы 10 — Итераторы для обхода дерева JSON (Задача 10.1–10.2)
+// Итераторы для обхода дерева JSON
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// node_view_iterator — итератор элементов массива (Задача 10.1)
+// node_view_iterator — итератор элементов массива
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "node_view_iterator: range-based for over empty array", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "node_view_iterator: range-based for over empty array", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -998,7 +998,7 @@ TEST_CASE( "node_view_iterator: range-based for over empty array", "[pjson_node]
     fn.Delete();
 }
 
-TEST_CASE( "node_view_iterator: range-based for over single-element array", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "node_view_iterator: range-based for over single-element array", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -1022,7 +1022,7 @@ TEST_CASE( "node_view_iterator: range-based for over single-element array", "[pj
     fn.Delete();
 }
 
-TEST_CASE( "node_view_iterator: range-based for collects all elements in order", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "node_view_iterator: range-based for collects all elements in order", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -1050,7 +1050,7 @@ TEST_CASE( "node_view_iterator: range-based for collects all elements in order",
     fn.Delete();
 }
 
-TEST_CASE( "node_view_iterator: begin == end for non-array node", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "node_view_iterator: begin == end for non-array node", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -1064,7 +1064,7 @@ TEST_CASE( "node_view_iterator: begin == end for non-array node", "[pjson_node][
     fn.Delete();
 }
 
-TEST_CASE( "node_view_iterator: postfix increment", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "node_view_iterator: postfix increment", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -1087,10 +1087,10 @@ TEST_CASE( "node_view_iterator: postfix increment", "[pjson_node][phase10][itera
 }
 
 // ---------------------------------------------------------------------------
-// object_iterator — итератор пар ключ-значение объекта (Задача 10.2)
+// object_iterator — итератор пар ключ-значение объекта
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "object_iterator: items() over empty object", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "object_iterator: items() over empty object", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -1109,7 +1109,7 @@ TEST_CASE( "object_iterator: items() over empty object", "[pjson_node][phase10][
     fn.Delete();
 }
 
-TEST_CASE( "object_iterator: items() returns correct key-value pairs", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "object_iterator: items() returns correct key-value pairs", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -1148,7 +1148,7 @@ TEST_CASE( "object_iterator: items() returns correct key-value pairs", "[pjson_n
     fn.Delete();
 }
 
-TEST_CASE( "object_iterator: items() returns empty range for non-object", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "object_iterator: items() returns empty range for non-object", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -1167,7 +1167,7 @@ TEST_CASE( "object_iterator: items() returns empty range for non-object", "[pjso
     fn.Delete();
 }
 
-TEST_CASE( "object_iterator: structured binding key and value", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "object_iterator: structured binding key and value", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -1188,7 +1188,7 @@ TEST_CASE( "object_iterator: structured binding key and value", "[pjson_node][ph
     fn.Delete();
 }
 
-TEST_CASE( "object_iterator: postfix increment", "[pjson_node][phase10][iterator]" )
+TEST_CASE( "object_iterator: postfix increment", "[pjson_node][iterator]" )
 {
     reset_pam();
     fptr<node> fn;

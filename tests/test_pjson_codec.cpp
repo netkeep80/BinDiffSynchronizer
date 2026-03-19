@@ -1,4 +1,4 @@
-// test_pjson_codec.cpp — Тесты сериализации/десериализации pjson_codec (Фаза 5).
+// test_pjson_codec.cpp — Тесты сериализации/десериализации pjson_codec.
 //
 // Тестирует функции:
 //   node_to_string()   — сериализация node в строку JSON

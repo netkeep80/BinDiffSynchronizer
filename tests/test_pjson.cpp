@@ -1,10 +1,8 @@
-// test_pjson.cpp — Тесты персистных JSON-узлов через новый API node/node_view (Фаза 3).
+// test_pjson.cpp — Тесты персистных JSON-узлов через новый API node/node_view.
 //
-// Мигрировано с pjson.h на pjson_node.h в рамках Задачи 9.5.
 // Тестирует все типы узлов: null, boolean, integer, uinteger, real, string,
 // array, object через node_set_* / node_view / node_object_insert.
 //
-// Все комментарии — на русском языке (Тр.6).
 
 #include <catch2/catch_test_macros.hpp>
 

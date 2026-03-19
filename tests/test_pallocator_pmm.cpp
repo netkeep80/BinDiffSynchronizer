@@ -8,7 +8,7 @@
 #include "pallocator_pmm.h"
 
 // =============================================================================
-// Тесты для pallocator_pmm<T> (Задача 14.7)
+// Тесты для pallocator_pmm<T>
 //
 // Эти тесты проверяют PMM-версию STL-совместимого аллокатора.
 // Тесты аналогичны test_pallocator.cpp, но используют pjson::pallocator_pmm<T>.
@@ -19,7 +19,7 @@ using namespace pjson;
 // ---------------------------------------------------------------------------
 // pallocator_pmm — типы соответствуют требованиям STL
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: satisfies STL allocator type requirements", "[task14.7][pallocator_pmm][layout]" )
+TEST_CASE( "pallocator_pmm<int>: satisfies STL allocator type requirements", "[pallocator_pmm][layout]" )
 {
     using A = pallocator_pmm<int>;
 
@@ -35,7 +35,7 @@ TEST_CASE( "pallocator_pmm<int>: satisfies STL allocator type requirements", "[t
 // ---------------------------------------------------------------------------
 // pallocator_pmm — rebind производит корректный тип
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: rebind<double> gives pallocator_pmm<double>", "[task14.7][pallocator_pmm][rebind]" )
+TEST_CASE( "pallocator_pmm<int>: rebind<double> gives pallocator_pmm<double>", "[pallocator_pmm][rebind]" )
 {
     using Rebind = pallocator_pmm<int>::rebind<double>::other;
     REQUIRE( ( std::is_same<Rebind, pallocator_pmm<double>>::value ) );
@@ -44,7 +44,7 @@ TEST_CASE( "pallocator_pmm<int>: rebind<double> gives pallocator_pmm<double>", "
 // ---------------------------------------------------------------------------
 // pallocator_pmm — конструкторы по умолчанию и копирования
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: default and copy constructor work", "[task14.7][pallocator_pmm][construct]" )
+TEST_CASE( "pallocator_pmm<int>: default and copy constructor work", "[pallocator_pmm][construct]" )
 {
     pallocator_pmm<int> a1;
     pallocator_pmm<int> a2( a1 );
@@ -55,7 +55,7 @@ TEST_CASE( "pallocator_pmm<int>: default and copy constructor work", "[task14.7]
 // ---------------------------------------------------------------------------
 // pallocator_pmm — конструктор копирования между разными типами
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm: cross-type copy constructor compiles", "[task14.7][pallocator_pmm][construct]" )
+TEST_CASE( "pallocator_pmm: cross-type copy constructor compiles", "[pallocator_pmm][construct]" )
 {
     pallocator_pmm<int>    ai;
     pallocator_pmm<double> ad( ai );
@@ -67,7 +67,7 @@ TEST_CASE( "pallocator_pmm: cross-type copy constructor compiles", "[task14.7][p
 // pallocator_pmm — allocate возвращает ненулевой указатель
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator_pmm<int>: allocate(n) returns non-null pointer for n > 0",
-           "[task14.7][pallocator_pmm][allocate]" )
+           "[pallocator_pmm][allocate]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -83,7 +83,7 @@ TEST_CASE( "pallocator_pmm<int>: allocate(n) returns non-null pointer for n > 0"
 // ---------------------------------------------------------------------------
 // pallocator_pmm — allocate(0) возвращает nullptr
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: allocate(0) returns nullptr", "[task14.7][pallocator_pmm][allocate]" )
+TEST_CASE( "pallocator_pmm<int>: allocate(0) returns nullptr", "[pallocator_pmm][allocate]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -97,7 +97,7 @@ TEST_CASE( "pallocator_pmm<int>: allocate(0) returns nullptr", "[task14.7][pallo
 // pallocator_pmm — выделенная память доступна для чтения и записи
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator_pmm<int>: allocated memory is readable and writable",
-           "[task14.7][pallocator_pmm][allocate][readwrite]" )
+           "[pallocator_pmm][allocate][readwrite]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -120,7 +120,7 @@ TEST_CASE( "pallocator_pmm<int>: allocated memory is readable and writable",
 // pallocator_pmm — construct и destroy
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator_pmm<int>: construct places value and destroy cleans up",
-           "[task14.7][pallocator_pmm][construct_destroy]" )
+           "[pallocator_pmm][construct_destroy]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -139,7 +139,7 @@ TEST_CASE( "pallocator_pmm<int>: construct places value and destroy cleans up",
 // ---------------------------------------------------------------------------
 // pallocator_pmm — max_size возвращает положительное значение
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: max_size() returns a positive value", "[task14.7][pallocator_pmm][max_size]" )
+TEST_CASE( "pallocator_pmm<int>: max_size() returns a positive value", "[pallocator_pmm][max_size]" )
 {
     pallocator_pmm<int> a;
     REQUIRE( a.max_size() > 0u );
@@ -148,7 +148,7 @@ TEST_CASE( "pallocator_pmm<int>: max_size() returns a positive value", "[task14.
 // ---------------------------------------------------------------------------
 // pallocator_pmm — operator== и operator!=
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm: any two pallocator_pmm instances compare equal", "[task14.7][pallocator_pmm][equality]" )
+TEST_CASE( "pallocator_pmm: any two pallocator_pmm instances compare equal", "[pallocator_pmm][equality]" )
 {
     pallocator_pmm<int> a1;
     pallocator_pmm<int> a2;
@@ -160,7 +160,7 @@ TEST_CASE( "pallocator_pmm: any two pallocator_pmm instances compare equal", "[t
 // pallocator_pmm — использование с std::vector
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator_pmm<int>: std::vector<int, pallocator_pmm<int>> push_back and read back",
-           "[task14.7][pallocator_pmm][std_vector]" )
+           "[pallocator_pmm][std_vector]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -180,7 +180,7 @@ TEST_CASE( "pallocator_pmm<int>: std::vector<int, pallocator_pmm<int>> push_back
 // pallocator_pmm — std::vector рост ёмкости
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator_pmm<int>: std::vector grows capacity using pallocator_pmm",
-           "[task14.7][pallocator_pmm][std_vector][capacity]" )
+           "[pallocator_pmm][std_vector][capacity]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -198,7 +198,7 @@ TEST_CASE( "pallocator_pmm<int>: std::vector grows capacity using pallocator_pmm
 // pallocator_pmm — несколько независимых аллокаций не перекрываются
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator_pmm<double>: multiple independent allocations do not alias",
-           "[task14.7][pallocator_pmm][allocate][no_alias]" )
+           "[pallocator_pmm][allocate][no_alias]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -228,7 +228,7 @@ TEST_CASE( "pallocator_pmm<double>: multiple independent allocations do not alia
 // ---------------------------------------------------------------------------
 // pallocator_pmm — deallocate(nullptr) безопасен
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: deallocate(nullptr) is safe", "[task14.7][pallocator_pmm][deallocate]" )
+TEST_CASE( "pallocator_pmm<int>: deallocate(nullptr) is safe", "[pallocator_pmm][deallocate]" )
 {
     pallocator_pmm<int> a;
     // Не должен крашиться.
@@ -238,7 +238,7 @@ TEST_CASE( "pallocator_pmm<int>: deallocate(nullptr) is safe", "[task14.7][pallo
 // ---------------------------------------------------------------------------
 // pjson::pallocator алиас = pallocator_pmm
 // ---------------------------------------------------------------------------
-TEST_CASE( "pjson::pallocator<T> alias works as pallocator_pmm<T>", "[task14.7][pallocator_pmm][alias]" )
+TEST_CASE( "pjson::pallocator<T> alias works as pallocator_pmm<T>", "[pallocator_pmm][alias]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );

@@ -1,8 +1,6 @@
-// test_pjson_db_pmm_errors.cpp — Тесты для кодов ошибок node_view (Фазы 11–12).
+// test_pjson_db_pmm_errors.cpp — Тесты для кодов ошибок node_view.
 //
 // Покрытие:
-//
-// Фаза 11:
 //   - node_error enum: все коды ошибок
 //   - node_view::is_error() / node_view::error()
 //   - node_view_error(): фабричная функция
@@ -12,12 +10,9 @@
 //     - wrong_type при навигации через скалярный узел
 //     - index_out_of_range при выходе индекса массива за границы
 //     - ref_cycle при обнаружении цикла в $ref
-//
-// Фаза 12:
 //   - node_error_message(): человекочитаемые сообщения об ошибках
 //   - node_view::error_message(): метод получения сообщения об ошибке
 //
-// Все комментарии — на русском языке (Тр.6).
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -37,10 +32,10 @@ static void reset_pam()
 }
 
 // ===========================================================================
-// Задача 11.2: node_view_error() и is_error() / error()
+// node_view_error() и is_error() / error()
 // ===========================================================================
 
-TEST_CASE( "node_error: node_view{} is not an error", "[phase11][error]" )
+TEST_CASE( "node_error: node_view{} is not an error", "[error]" )
 {
     node_view v{};
     REQUIRE( v.is_error() == false );
@@ -49,7 +44,7 @@ TEST_CASE( "node_error: node_view{} is not an error", "[phase11][error]" )
     REQUIRE( v.valid() == false );
 }
 
-TEST_CASE( "node_error: node_view_error(not_found) is_error true", "[phase11][error]" )
+TEST_CASE( "node_error: node_view_error(not_found) is_error true", "[error]" )
 {
     node_view v = node_view_error( node_error::not_found );
     REQUIRE( v.is_error() == true );
@@ -58,7 +53,7 @@ TEST_CASE( "node_error: node_view_error(not_found) is_error true", "[phase11][er
     REQUIRE( v.is_null() == false );
 }
 
-TEST_CASE( "node_error: node_view_error returns correct code for each error", "[phase11][error]" )
+TEST_CASE( "node_error: node_view_error returns correct code for each error", "[error]" )
 {
     REQUIRE( node_view_error( node_error::none ).error() == node_error::none );
     REQUIRE( node_view_error( node_error::not_found ).error() == node_error::not_found );
@@ -69,7 +64,7 @@ TEST_CASE( "node_error: node_view_error returns correct code for each error", "[
     REQUIRE( node_view_error( node_error::parse_error ).error() == node_error::parse_error );
 }
 
-TEST_CASE( "node_error: all error views have is_error true", "[phase11][error]" )
+TEST_CASE( "node_error: all error views have is_error true", "[error]" )
 {
     // node_error::none кодируется как NODE_ERROR_BASE + 0, что >= NODE_ERROR_BASE — ошибка.
     // Все значения node_error должны давать is_error() == true через node_view_error().
@@ -81,7 +76,7 @@ TEST_CASE( "node_error: all error views have is_error true", "[phase11][error]" 
     REQUIRE( node_view_error( node_error::parse_error ).is_error() );
 }
 
-TEST_CASE( "node_error: valid node_view is not an error", "[phase11][error]" )
+TEST_CASE( "node_error: valid node_view is not an error", "[error]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -93,10 +88,10 @@ TEST_CASE( "node_error: valid node_view is not an error", "[phase11][error]" )
 }
 
 // ===========================================================================
-// Задача 11.3: pjson_db_pmm::get() с типизированными ошибками
+// pjson_db_pmm::get() с типизированными ошибками
 // ===========================================================================
 
-TEST_CASE( "node_error: get nonexistent path returns not_found", "[phase11][error]" )
+TEST_CASE( "node_error: get nonexistent path returns not_found", "[error]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -105,7 +100,7 @@ TEST_CASE( "node_error: get nonexistent path returns not_found", "[phase11][erro
     REQUIRE( v.error() == node_error::not_found );
 }
 
-TEST_CASE( "node_error: get through scalar returns wrong_type", "[phase11][error]" )
+TEST_CASE( "node_error: get through scalar returns wrong_type", "[error]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -117,7 +112,7 @@ TEST_CASE( "node_error: get through scalar returns wrong_type", "[phase11][error
     REQUIRE( v.error() == node_error::wrong_type );
 }
 
-TEST_CASE( "node_error: get array index out of range returns index_out_of_range", "[phase11][error]" )
+TEST_CASE( "node_error: get array index out of range returns index_out_of_range", "[error]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -129,7 +124,7 @@ TEST_CASE( "node_error: get array index out of range returns index_out_of_range"
     REQUIRE( v.error() == node_error::index_out_of_range );
 }
 
-TEST_CASE( "node_error: get ref cycle returns ref_cycle", "[phase11][error]" )
+TEST_CASE( "node_error: get ref cycle returns ref_cycle", "[error]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -143,7 +138,7 @@ TEST_CASE( "node_error: get ref cycle returns ref_cycle", "[phase11][error]" )
     REQUIRE( v.error() == node_error::ref_cycle );
 }
 
-TEST_CASE( "node_error: get existing path returns valid node without error", "[phase11][error]" )
+TEST_CASE( "node_error: get existing path returns valid node without error", "[error]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -156,10 +151,10 @@ TEST_CASE( "node_error: get existing path returns valid node without error", "[p
 }
 
 // ===========================================================================
-// Задача 12.1: node_error_message() — сообщения об ошибках
+// node_error_message() — сообщения об ошибках
 // ===========================================================================
 
-TEST_CASE( "node_error_message: returns correct message for each error code", "[phase12][error]" )
+TEST_CASE( "node_error_message: returns correct message for each error code", "[error]" )
 {
     // Проверяем, что каждый код ошибки возвращает непустую строку.
     REQUIRE( std::string( node_error_message( node_error::none ) ) == "no error" );
@@ -172,7 +167,7 @@ TEST_CASE( "node_error_message: returns correct message for each error code", "[
     REQUIRE( std::string( node_error_message( node_error::parse_error ) ) == "JSON parse error" );
 }
 
-TEST_CASE( "node_error_message: unknown error code returns default message", "[phase12][error]" )
+TEST_CASE( "node_error_message: unknown error code returns default message", "[error]" )
 {
     // Неизвестный код ошибки (например, 99) должен вернуть "unknown error".
     node_error unknown = static_cast<node_error>( 99 );
@@ -180,10 +175,10 @@ TEST_CASE( "node_error_message: unknown error code returns default message", "[p
 }
 
 // ===========================================================================
-// Задача 12.2: node_view::error_message() — метод node_view
+// node_view::error_message() — метод node_view
 // ===========================================================================
 
-TEST_CASE( "node_view::error_message: returns correct message for error views", "[phase12][error]" )
+TEST_CASE( "node_view::error_message: returns correct message for error views", "[error]" )
 {
     // Проверяем, что метод error_message() возвращает правильное сообщение.
     REQUIRE( std::string( node_view_error( node_error::not_found ).error_message() ) == "node not found" );
@@ -195,13 +190,13 @@ TEST_CASE( "node_view::error_message: returns correct message for error views", 
              "cyclic $ref detected or max depth exceeded" );
 }
 
-TEST_CASE( "node_view::error_message: null node_view returns no error", "[phase12][error]" )
+TEST_CASE( "node_view::error_message: null node_view returns no error", "[error]" )
 {
     node_view v{};
     REQUIRE( std::string( v.error_message() ) == "no error" );
 }
 
-TEST_CASE( "node_view::error_message: valid node_view returns no error", "[phase12][error]" )
+TEST_CASE( "node_view::error_message: valid node_view returns no error", "[error]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -211,7 +206,7 @@ TEST_CASE( "node_view::error_message: valid node_view returns no error", "[phase
     REQUIRE( std::string( v.error_message() ) == "no error" );
 }
 
-TEST_CASE( "node_view::error_message: db.get error has correct message", "[phase12][error]" )
+TEST_CASE( "node_view::error_message: db.get error has correct message", "[error]" )
 {
     reset_pam();
     pjson_db_pmm db;

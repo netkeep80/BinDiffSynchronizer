@@ -1,6 +1,6 @@
 /**
  * @file test_pstring_pmm.cpp
- * @brief Тесты для pstring_pmm (Задача 14.4.2).
+ * @brief Тесты для pstring_pmm.
  *
  * Тесты проверяют корректность реализации персистной изменяемой строки
  * на базе PersistMemoryManager.
@@ -13,17 +13,17 @@
 #include "pstring_pmm.h"
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ LAYOUT (Задача 14.4.2)
+// ТЕСТЫ LAYOUT
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: struct size is 2 * sizeof(void*)", "[pstring_pmm][layout][task14.4]" )
+TEST_CASE( "pstring_pmm: struct size is 2 * sizeof(void*)", "[pstring_pmm][layout]" )
 {
     REQUIRE( sizeof( pjson::pstring_pmm ) == 2 * sizeof( void* ) );
     REQUIRE( sizeof( pjson::pstring_pmm::length ) == sizeof( void* ) );
     REQUIRE( sizeof( pjson::pstring_pmm::chars_off ) == sizeof( void* ) );
 }
 
-TEST_CASE( "pstring_pmm: is trivially copyable", "[pstring_pmm][layout][task14.4]" )
+TEST_CASE( "pstring_pmm: is trivially copyable", "[pstring_pmm][layout]" )
 {
     REQUIRE( std::is_trivially_copyable<pjson::pstring_pmm>::value );
 }
@@ -32,7 +32,7 @@ TEST_CASE( "pstring_pmm: is trivially copyable", "[pstring_pmm][layout][task14.4
 // ТЕСТЫ БАЗОВЫХ ОПЕРАЦИЙ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: zero-initialized gives empty string", "[pstring_pmm][construct][task14.4]" )
+TEST_CASE( "pstring_pmm: zero-initialized gives empty string", "[pstring_pmm][construct]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -47,7 +47,7 @@ TEST_CASE( "pstring_pmm: zero-initialized gives empty string", "[pstring_pmm][co
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: assign short string stores correct content", "[pstring_pmm][assign][task14.4]" )
+TEST_CASE( "pstring_pmm: assign short string stores correct content", "[pstring_pmm][assign]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -71,7 +71,7 @@ TEST_CASE( "pstring_pmm: assign short string stores correct content", "[pstring_
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: assign longer string stores correct content", "[pstring_pmm][assign][task14.4]" )
+TEST_CASE( "pstring_pmm: assign longer string stores correct content", "[pstring_pmm][assign]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -91,7 +91,7 @@ TEST_CASE( "pstring_pmm: assign longer string stores correct content", "[pstring
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: reassigning frees old allocation and stores new content", "[pstring_pmm][reassign][task14.4]" )
+TEST_CASE( "pstring_pmm: reassigning frees old allocation and stores new content", "[pstring_pmm][reassign]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -111,7 +111,7 @@ TEST_CASE( "pstring_pmm: reassigning frees old allocation and stores new content
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: assign empty string clears content", "[pstring_pmm][assign][task14.4]" )
+TEST_CASE( "pstring_pmm: assign empty string clears content", "[pstring_pmm][assign]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -131,7 +131,7 @@ TEST_CASE( "pstring_pmm: assign empty string clears content", "[pstring_pmm][ass
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: assign nullptr gives empty string", "[pstring_pmm][assign][task14.4]" )
+TEST_CASE( "pstring_pmm: assign nullptr gives empty string", "[pstring_pmm][assign]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -150,7 +150,7 @@ TEST_CASE( "pstring_pmm: assign nullptr gives empty string", "[pstring_pmm][assi
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: clear resets to empty", "[pstring_pmm][clear][task14.4]" )
+TEST_CASE( "pstring_pmm: clear resets to empty", "[pstring_pmm][clear]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -175,7 +175,7 @@ TEST_CASE( "pstring_pmm: clear resets to empty", "[pstring_pmm][clear][task14.4]
 // ТЕСТЫ СРАВНЕНИЯ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: operator== compares correctly", "[pstring_pmm][compare][task14.4]" )
+TEST_CASE( "pstring_pmm: operator== compares correctly", "[pstring_pmm][compare]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -198,7 +198,7 @@ TEST_CASE( "pstring_pmm: operator== compares correctly", "[pstring_pmm][compare]
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: operator< gives lexicographic order", "[pstring_pmm][compare][task14.4]" )
+TEST_CASE( "pstring_pmm: operator< gives lexicographic order", "[pstring_pmm][compare]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -220,7 +220,7 @@ TEST_CASE( "pstring_pmm: operator< gives lexicographic order", "[pstring_pmm][co
 // ТЕСТЫ ДОСТУПА К СИМВОЛАМ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: operator[] accesses individual characters", "[pstring_pmm][index][task14.4]" )
+TEST_CASE( "pstring_pmm: operator[] accesses individual characters", "[pstring_pmm][index]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -241,7 +241,7 @@ TEST_CASE( "pstring_pmm: operator[] accesses individual characters", "[pstring_p
 // ТЕСТЫ СОСТОЯНИЯ ДАННЫХ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: chars_off is non-zero after assign, zero after clear", "[pstring_pmm][data][task14.4]" )
+TEST_CASE( "pstring_pmm: chars_off is non-zero after assign, zero after clear", "[pstring_pmm][data]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -269,7 +269,7 @@ TEST_CASE( "pstring_pmm: chars_off is non-zero after assign, zero after clear", 
 // ТЕСТЫ ХЕЛПЕР-ФУНКЦИЙ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm_create: creates string in PAP", "[pstring_pmm][helper][task14.4]" )
+TEST_CASE( "pstring_pmm_create: creates string in PAP", "[pstring_pmm][helper]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -286,7 +286,7 @@ TEST_CASE( "pstring_pmm_create: creates string in PAP", "[pstring_pmm][helper][t
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm_create: nullptr creates empty string", "[pstring_pmm][helper][task14.4]" )
+TEST_CASE( "pstring_pmm_create: nullptr creates empty string", "[pstring_pmm][helper]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -302,7 +302,7 @@ TEST_CASE( "pstring_pmm_create: nullptr creates empty string", "[pstring_pmm][he
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm_destroy: safely destroys string", "[pstring_pmm][helper][task14.4]" )
+TEST_CASE( "pstring_pmm_destroy: safely destroys string", "[pstring_pmm][helper]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -322,7 +322,7 @@ TEST_CASE( "pstring_pmm_destroy: safely destroys string", "[pstring_pmm][helper]
 // ТЕСТЫ МНОЖЕСТВЕННЫХ СТРОК
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: multiple strings are independent", "[pstring_pmm][multiple][task14.4]" )
+TEST_CASE( "pstring_pmm: multiple strings are independent", "[pstring_pmm][multiple]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 

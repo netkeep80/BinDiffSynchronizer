@@ -6,7 +6,7 @@
 #include "fptr_pmm.h"
 
 // =============================================================================
-// Тесты для fptr_pmm<T> (Задача 14.7)
+// Тесты для fptr_pmm<T>
 //
 // Эти тесты проверяют PMM-версию персистного указателя.
 // =============================================================================
@@ -14,9 +14,9 @@
 using namespace pjson;
 
 // ---------------------------------------------------------------------------
-// fptr_pmm<T> — статические проверки размера (Тр.5)
+// fptr_pmm<T> — статические проверки размера
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<T>: sizeof(fptr_pmm<T>) == sizeof(void*) (Tr.5)", "[task14.7][fptr_pmm][layout]" )
+TEST_CASE( "fptr_pmm<T>: sizeof(fptr_pmm<T>) == sizeof(void*)", "[fptr_pmm][layout]" )
 {
     REQUIRE( sizeof( fptr_pmm<int> ) == sizeof( void* ) );
     REQUIRE( sizeof( fptr_pmm<double> ) == sizeof( void* ) );
@@ -26,7 +26,7 @@ TEST_CASE( "fptr_pmm<T>: sizeof(fptr_pmm<T>) == sizeof(void*) (Tr.5)", "[task14.
 // ---------------------------------------------------------------------------
 // fptr_pmm<T> — тривиально копируем
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<T>: is trivially copyable", "[task14.7][fptr_pmm][layout]" )
+TEST_CASE( "fptr_pmm<T>: is trivially copyable", "[fptr_pmm][layout]" )
 {
     REQUIRE( std::is_trivially_copyable<fptr_pmm<int>>::value );
     REQUIRE( std::is_trivially_copyable<fptr_pmm<double>>::value );
@@ -36,7 +36,7 @@ TEST_CASE( "fptr_pmm<T>: is trivially copyable", "[task14.7][fptr_pmm][layout]" 
 // ---------------------------------------------------------------------------
 // fptr_pmm<T> — инициализация по умолчанию
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<int>: default constructor creates null pointer", "[task14.7][fptr_pmm]" )
+TEST_CASE( "fptr_pmm<int>: default constructor creates null pointer", "[fptr_pmm]" )
 {
     fptr_pmm<int> p;
     REQUIRE( p.addr() == 0u );
@@ -47,7 +47,7 @@ TEST_CASE( "fptr_pmm<int>: default constructor creates null pointer", "[task14.7
 // ---------------------------------------------------------------------------
 // fptr_pmm<T> — set_addr и addr
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<int>: set_addr and addr -- get and set offset", "[task14.7][fptr_pmm]" )
+TEST_CASE( "fptr_pmm<int>: set_addr and addr -- get and set offset", "[fptr_pmm]" )
 {
     fptr_pmm<int> p;
     REQUIRE( p.addr() == 0u );
@@ -63,7 +63,7 @@ TEST_CASE( "fptr_pmm<int>: set_addr and addr -- get and set offset", "[task14.7]
 // ---------------------------------------------------------------------------
 // fptr_pmm<double> — New / разыменование / Delete
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<double>: New / dereference / Delete", "[task14.7][fptr_pmm]" )
+TEST_CASE( "fptr_pmm<double>: New / dereference / Delete", "[fptr_pmm]" )
 {
     // Инициализируем PMM перед тестом.
     if ( !pam_pmm_is_initialized() )
@@ -85,7 +85,7 @@ TEST_CASE( "fptr_pmm<double>: New / dereference / Delete", "[task14.7][fptr_pmm]
 // ---------------------------------------------------------------------------
 // fptr_pmm<int> — NewArray / operator[] / count / DeleteArray
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<int>: NewArray / operator[] / count / DeleteArray", "[task14.7][fptr_pmm]" )
+TEST_CASE( "fptr_pmm<int>: NewArray / operator[] / count / DeleteArray", "[fptr_pmm]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -109,7 +109,7 @@ TEST_CASE( "fptr_pmm<int>: NewArray / operator[] / count / DeleteArray", "[task1
 // ---------------------------------------------------------------------------
 // fptr_pmm — создание именованного объекта и поиск
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<double>: New with name / pam_pmm_find", "[task14.7][fptr_pmm][named]" )
+TEST_CASE( "fptr_pmm<double>: New with name / pam_pmm_find", "[fptr_pmm][named]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -141,7 +141,7 @@ TEST_CASE( "fptr_pmm<double>: New with name / pam_pmm_find", "[task14.7][fptr_pm
 // ---------------------------------------------------------------------------
 // fptr_pmm — создание именованного массива
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<int>: NewArray with name / pam_pmm_get_count", "[task14.7][fptr_pmm][named]" )
+TEST_CASE( "fptr_pmm<int>: NewArray with name / pam_pmm_get_count", "[fptr_pmm][named]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -166,9 +166,9 @@ TEST_CASE( "fptr_pmm<int>: NewArray with name / pam_pmm_get_count", "[task14.7][
 }
 
 // ---------------------------------------------------------------------------
-// fptr_pmm::find — инициализация по имени объекта (Тр.15)
+// fptr_pmm::find — инициализация по имени объекта
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<int>: find() initializes by object name (Tr.15)", "[task14.7][fptr_pmm][find]" )
+TEST_CASE( "fptr_pmm<int>: find() initializes by object name", "[fptr_pmm][find]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -193,7 +193,7 @@ TEST_CASE( "fptr_pmm<int>: find() initializes by object name (Tr.15)", "[task14.
 // ---------------------------------------------------------------------------
 // fptr_pmm — конструктор с именем объекта
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<int>: constructor with name finds object", "[task14.7][fptr_pmm][find]" )
+TEST_CASE( "fptr_pmm<int>: constructor with name finds object", "[fptr_pmm][find]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -216,7 +216,7 @@ TEST_CASE( "fptr_pmm<int>: constructor with name finds object", "[task14.7][fptr
 // ---------------------------------------------------------------------------
 // fptr_pmm — сравнение с nullptr
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<int>: nullptr comparison", "[task14.7][fptr_pmm]" )
+TEST_CASE( "fptr_pmm<int>: nullptr comparison", "[fptr_pmm]" )
 {
     fptr_pmm<int> p;
     REQUIRE( p == nullptr );
@@ -236,7 +236,7 @@ TEST_CASE( "fptr_pmm<int>: nullptr comparison", "[task14.7][fptr_pmm]" )
 // ---------------------------------------------------------------------------
 // fptr_pmm — сравнение двух указателей
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<int>: comparison between pointers", "[task14.7][fptr_pmm]" )
+TEST_CASE( "fptr_pmm<int>: comparison between pointers", "[fptr_pmm]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -254,9 +254,9 @@ TEST_CASE( "fptr_pmm<int>: comparison between pointers", "[task14.7][fptr_pmm]" 
 }
 
 // ---------------------------------------------------------------------------
-// fptr_pmm — объекты разных типов в едином ПАП (Тр.4)
+// fptr_pmm — объекты разных типов в едином ПАП
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm: int and double objects in unified PAP (Tr.4)", "[task14.7][fptr_pmm][unified_space]" )
+TEST_CASE( "fptr_pmm: int and double objects in unified PAP", "[fptr_pmm][unified_space]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -284,7 +284,7 @@ TEST_CASE( "fptr_pmm: int and double objects in unified PAP (Tr.4)", "[task14.7]
 // ---------------------------------------------------------------------------
 // pjson::fptr алиас = fptr_pmm
 // ---------------------------------------------------------------------------
-TEST_CASE( "pjson::fptr<T> alias works as fptr_pmm<T>", "[task14.7][fptr_pmm][alias]" )
+TEST_CASE( "pjson::fptr<T> alias works as fptr_pmm<T>", "[fptr_pmm][alias]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );

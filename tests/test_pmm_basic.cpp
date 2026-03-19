@@ -1,13 +1,13 @@
 /**
  * @file test_pmm_basic.cpp
- * @brief Базовые тесты интеграции PersistMemoryManager (Задача 14.0, 14.1).
+ * @brief Базовые тесты интеграции PersistMemoryManager.
  *
  * Тесты проверяют корректность подключения PMM и базовые операции:
  *   - Создание и уничтожение менеджера
  *   - Аллокация и деаллокация памяти
  *   - Типизированная аллокация (allocate_typed<T>)
  *   - Проверка конфигурации PamManager
- *   - Конверсия pptr<T> <-> uintptr_t (Задача 14.1)
+ *   - Конверсия pptr<T> <-> uintptr_t
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -16,14 +16,14 @@
 // Включаем конфигурацию pjson_db для PMM
 #include "pam_pmm_config.h"
 
-// Включаем адаптер pptr <-> uintptr_t (Задача 14.1)
+// Включаем адаптер pptr <-> uintptr_t
 #include "pam_adapter.h"
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ ИНТЕГРАЦИИ PMM (Задача 14.0)
+// ТЕСТЫ ИНТЕГРАЦИИ PMM
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "PMM: create and destroy manager", "[pmm][task14.0]" )
+TEST_CASE( "PMM: create and destroy manager", "[pmm]" )
 {
     // Создание менеджера с начальным размером 64 КБ
     pjson::PamManager::create( 64 * 1024 );
@@ -35,7 +35,7 @@ TEST_CASE( "PMM: create and destroy manager", "[pmm][task14.0]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "PMM: allocate and deallocate raw memory", "[pmm][task14.0]" )
+TEST_CASE( "PMM: allocate and deallocate raw memory", "[pmm]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -52,7 +52,7 @@ TEST_CASE( "PMM: allocate and deallocate raw memory", "[pmm][task14.0]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "PMM: allocate_typed for POD types", "[pmm][task14.0]" )
+TEST_CASE( "PMM: allocate_typed for POD types", "[pmm]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -77,7 +77,7 @@ TEST_CASE( "PMM: allocate_typed for POD types", "[pmm][task14.0]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "PMM: allocate_typed for array", "[pmm][task14.0]" )
+TEST_CASE( "PMM: allocate_typed for array", "[pmm]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -105,7 +105,7 @@ TEST_CASE( "PMM: allocate_typed for array", "[pmm][task14.0]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "PMM: pptr resolve and dereference", "[pmm][task14.0]" )
+TEST_CASE( "PMM: pptr resolve and dereference", "[pmm]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -136,7 +136,7 @@ TEST_CASE( "PMM: pptr resolve and dereference", "[pmm][task14.0]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "PMM: manager statistics", "[pmm][task14.0]" )
+TEST_CASE( "PMM: manager statistics", "[pmm]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -162,7 +162,7 @@ TEST_CASE( "PMM: manager statistics", "[pmm][task14.0]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "PMM: PamManager uses NoLock thread policy", "[pmm][task14.0]" )
+TEST_CASE( "PMM: PamManager uses NoLock thread policy", "[pmm]" )
 {
     // Проверяем, что PamManager использует thread_policy (exposed lock_policy)
     // CacheManagerConfig = однопоточный, NoLock
@@ -178,7 +178,7 @@ TEST_CASE( "PMM: PamManager uses NoLock thread policy", "[pmm][task14.0]" )
 // Определяем тип pptr на уровне файла, чтобы избежать проблем с template в using
 template <typename T> using pjson_pptr = typename pjson::PamManager::template pptr<T>;
 
-TEST_CASE( "PMM: pptr<T> type alias works", "[pmm][task14.0]" )
+TEST_CASE( "PMM: pptr<T> type alias works", "[pmm]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -201,10 +201,10 @@ TEST_CASE( "PMM: pptr<T> type alias works", "[pmm][task14.0]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ АДАПТЕРА pptr <-> uintptr_t (Задача 14.1)
+// ТЕСТЫ АДАПТЕРА pptr <-> uintptr_t
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_adapter: pptr_to_offset for null pptr returns 0", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: pptr_to_offset for null pptr returns 0", "[pmm][adapter]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -218,7 +218,7 @@ TEST_CASE( "pam_adapter: pptr_to_offset for null pptr returns 0", "[pmm][task14.
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: offset_to_pptr for 0 returns null pptr", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: offset_to_pptr for 0 returns null pptr", "[pmm][adapter]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -229,7 +229,7 @@ TEST_CASE( "pam_adapter: offset_to_pptr for 0 returns null pptr", "[pmm][task14.
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: roundtrip pptr -> offset -> pptr", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: roundtrip pptr -> offset -> pptr", "[pmm][adapter]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -255,7 +255,7 @@ TEST_CASE( "pam_adapter: roundtrip pptr -> offset -> pptr", "[pmm][task14.1][ada
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: multiple allocations have different offsets", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: multiple allocations have different offsets", "[pmm][adapter]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -294,7 +294,7 @@ TEST_CASE( "pam_adapter: multiple allocations have different offsets", "[pmm][ta
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: offset is granule_index * granule_size", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: offset is granule_index * granule_size", "[pmm][adapter]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -315,7 +315,7 @@ TEST_CASE( "pam_adapter: offset is granule_index * granule_size", "[pmm][task14.
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: granule_size constant", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: granule_size constant", "[pmm][adapter]" )
 {
     // Проверяем что размер гранулы соответствует конфигурации
     // CacheManagerConfig использует DefaultAddressTraits с 16-байтовой гранулой
@@ -323,7 +323,7 @@ TEST_CASE( "pam_adapter: granule_size constant", "[pmm][task14.1][adapter]" )
     REQUIRE( pjson::get_granule_size() == 16 );
 }
 
-TEST_CASE( "pam_adapter: is_aligned_offset", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: is_aligned_offset", "[pmm][adapter]" )
 {
     // 0 всегда выровнен
     REQUIRE( pjson::is_aligned_offset( 0 ) );
@@ -341,7 +341,7 @@ TEST_CASE( "pam_adapter: is_aligned_offset", "[pmm][task14.1][adapter]" )
     REQUIRE_FALSE( pjson::is_aligned_offset( 100 ) );
 }
 
-TEST_CASE( "pam_adapter: align_offset_up", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: align_offset_up", "[pmm][adapter]" )
 {
     // 0 остаётся 0
     REQUIRE( pjson::align_offset_up( 0 ) == 0 );
@@ -359,7 +359,7 @@ TEST_CASE( "pam_adapter: align_offset_up", "[pmm][task14.1][adapter]" )
     REQUIRE( pjson::align_offset_up( 33 ) == 48 );
 }
 
-TEST_CASE( "pam_adapter: works with struct types", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: works with struct types", "[pmm][adapter]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -395,7 +395,7 @@ TEST_CASE( "pam_adapter: works with struct types", "[pmm][task14.1][adapter]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: pmm_index_type alias", "[pmm][task14.1][adapter]" )
+TEST_CASE( "pam_adapter: pmm_index_type alias", "[pmm][adapter]" )
 {
     // Проверяем что pmm_index_type соответствует типу индекса из pptr
     static_assert( std::is_same_v<pjson::pmm_index_type, uint32_t>,
