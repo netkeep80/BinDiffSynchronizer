@@ -75,13 +75,15 @@ JSON-базу данных поверх PMM. Текущая архитектур
 - Упростить `pam_pmm_init()` — загрузка корня через `Mgr::get_root<pam_pmm_root>()`
 - Удалить magic-number поиск по ПАП
 
-### 1.3 Удаление pallocator_pmm.h
+### 1.3 Удаление pallocator_pmm.h ✅
 
-**После pmm 3.5:** pmm будет предоставлять `pmm::pallocator<T, ManagerT>`.
+**Выполнено (Issue #143):** `pallocator_pmm.h` удалён.
 
-**Действия:**
-- Заменить `pjson::pallocator_pmm<T>` на `pmm::pallocator<T, PamManager>`
-- Удалить `pallocator_pmm.h`
+**Что сделано:**
+- `pallocator_pmm<T>` уже являлся алиасом для `PamManager::pallocator<T>` (с Issue #163)
+- Все тесты обновлены: используют `PamManager::pallocator<T>` напрямую
+- Удалён `pallocator_pmm.h` — обёртка больше не нужна
+- Удалён алиас `pjson::pallocator<T>` (использовался только в тестах)
 
 ### 1.4 Упрощение fptr_pmm.h ✅
 
