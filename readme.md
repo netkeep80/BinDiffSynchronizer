@@ -97,7 +97,6 @@ C++20 header-only библиотека для работы с JSON в перси
 │   pam_adapter.h: pptr<T> ↔ uintptr_t        │
 │   pam_pmm.h: фасад ПАМ на PMM              │
 │   fptr_pmm.h: персистный указатель          │
-│   pallocator_pmm.h: STL аллокатор           │
 └─────────────────────────────────────────────┘
 ```
 
@@ -114,8 +113,8 @@ C++20 header-only библиотека для работы с JSON в перси
 | `pstringview_pmm.h` | A | Интернированная строка: `pstringview_pmm` — адаптер для `pmm::pstringview`, O(1) сравнение |
 | `pjson_pool_pmm.h` | C | Пул узлов: `pjson_pool_pmm` — аллокация O(1) через PMM + free-list |
 | `pam_pmm.h` | A | Фасад ПАМ на PMM: `pam_pmm_init()`, `pam_pmm_create<T>()`, `pam_pmm_find()`, `pam_pmm_save()`, реестр именованных объектов |
-| `fptr_pmm.h` | A | Персистный указатель: `fptr_pmm<T>` — `New()`, `NewArray()`, `Delete()`, `find()` |
-| `pallocator_pmm.h` | A | STL-аллокатор: `pallocator_pmm<T>` — совместим с `std::vector<T, pallocator_pmm<T>>` |
+| `fptr_pmm.h` | A | Персистный указатель: `fptr_pmm<T>` — тонкая обёртка над `pptr<T>` с `New()`, `Delete()`, `find()` |
+| ~~`pallocator_pmm.h`~~ | A | Удалён (Issue #143, План 1.3): используйте `PamManager::pallocator<T>` напрямую |
 | `deps/pmm/pmm.h` | A | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — бэкенд ПАП |
 | `pjson_node.h` | C | Модель узлов JSON: `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; функции init/set/assign/push_back/insert; итераторы; коды ошибок; глубокое копирование (`node_clone()`) |
 | `pjson_codec.h` | C | Сериализация/десериализация: парсер/сериализатор для `node_id`-модели; `$ref`, `$base64`, Base64 кодек |

@@ -15,12 +15,13 @@ using namespace pjson;
 
 // ---------------------------------------------------------------------------
 // fptr_pmm<T> — статические проверки размера
+// (Issue #143, План 1.4: fptr_pmm хранит pptr<T>, размер == sizeof(pptr<T>))
 // ---------------------------------------------------------------------------
-TEST_CASE( "fptr_pmm<T>: sizeof(fptr_pmm<T>) == sizeof(void*)", "[fptr_pmm][layout]" )
+TEST_CASE( "fptr_pmm<T>: sizeof(fptr_pmm<T>) == sizeof(pptr<T>)", "[fptr_pmm][layout]" )
 {
-    REQUIRE( sizeof( fptr_pmm<int> ) == sizeof( void* ) );
-    REQUIRE( sizeof( fptr_pmm<double> ) == sizeof( void* ) );
-    REQUIRE( sizeof( fptr_pmm<char> ) == sizeof( void* ) );
+    REQUIRE( sizeof( fptr_pmm<int> ) == sizeof( PamManager::pptr<int> ) );
+    REQUIRE( sizeof( fptr_pmm<double> ) == sizeof( PamManager::pptr<double> ) );
+    REQUIRE( sizeof( fptr_pmm<char> ) == sizeof( PamManager::pptr<char> ) );
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +280,35 @@ TEST_CASE( "fptr_pmm: int and double objects in unified PAP", "[fptr_pmm][unifie
 
     pi.Delete();
     pd.Delete();
+}
+
+// ---------------------------------------------------------------------------
+// fptr_pmm — доступ к внутреннему pptr<T>
+// (Issue #143, План 1.4)
+// ---------------------------------------------------------------------------
+TEST_CASE( "fptr_pmm<int>: pptr() and set_pptr() access internal pptr", "[fptr_pmm][pptr]" )
+{
+    if ( !pam_pmm_is_initialized() )
+        pam_pmm_init( nullptr );
+
+    fptr_pmm<int> p;
+    REQUIRE( p.pptr().is_null() );
+
+    p.New();
+    REQUIRE( !p.pptr().is_null() );
+
+    // pptr() возвращает гранульный индекс; addr() — байтовое смещение
+    auto pp = p.pptr();
+    REQUIRE( pp.offset() != 0 );
+    REQUIRE( p.addr() == pptr_to_offset( pp ) );
+
+    // set_pptr() устанавливает внутренний pptr
+    fptr_pmm<int> p2;
+    p2.set_pptr( pp );
+    REQUIRE( p2.addr() == p.addr() );
+    REQUIRE( *p2 == *p );
+
+    p.Delete();
 }
 
 // ---------------------------------------------------------------------------

@@ -75,22 +75,28 @@ JSON-базу данных поверх PMM. Текущая архитектур
 - Упростить `pam_pmm_init()` — загрузка корня через `Mgr::get_root<pam_pmm_root>()`
 - Удалить magic-number поиск по ПАП
 
-### 1.3 Удаление pallocator_pmm.h
+### 1.3 Удаление pallocator_pmm.h ✅
 
-**После pmm 3.5:** pmm будет предоставлять `pmm::pallocator<T, ManagerT>`.
+**Выполнено (Issue #143):** `pallocator_pmm.h` удалён.
 
-**Действия:**
-- Заменить `pjson::pallocator_pmm<T>` на `pmm::pallocator<T, PamManager>`
-- Удалить `pallocator_pmm.h`
+**Что сделано:**
+- `pallocator_pmm<T>` уже являлся алиасом для `PamManager::pallocator<T>` (с Issue #163)
+- Все тесты обновлены: используют `PamManager::pallocator<T>` напрямую
+- Удалён `pallocator_pmm.h` — обёртка больше не нужна
+- Удалён алиас `pjson::pallocator<T>` (использовался только в тестах)
 
-### 1.4 Упрощение fptr_pmm.h
+### 1.4 Упрощение fptr_pmm.h ✅
 
-**Текущая ситуация:** `fptr_pmm<T>` хранит байтовое смещение и предоставляет
-`operator*`, `operator->`, `operator[]`, `New()`, `Delete()`.
+**Выполнено (Issue #143):** `fptr_pmm<T>` переделан в тонкую обёртку над `pptr<T>`.
 
-**Действия:**
-- Рассмотреть замену `fptr_pmm<T>` на `pptr<T>` с именованным реестром
-- Если API `fptr` критичен для совместимости — оставить как тонкую обёртку над `pptr<T>`
+**Что сделано:**
+- Внутреннее хранение заменено с `uintptr_t __addr` на `PamManager::pptr<T> _p`
+- Разыменование делегировано операторам `pptr<T>` (operator*, operator->)
+- Удалена прямая зависимость от `pmm_resolve`/`pmm_resolve_const`
+- sizeof(fptr_pmm<T>) == sizeof(pptr<T>) вместо sizeof(void*)
+- Обратная совместимость через `addr()`/`set_addr()` (байтовые смещения)
+- Добавлены методы `pptr()`/`set_pptr()` для доступа к внутреннему pptr<T>
+- Удобные методы `New()`/`Delete()`/`find()` сохранены
 
 ---
 

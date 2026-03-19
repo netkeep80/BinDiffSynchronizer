@@ -1,25 +1,31 @@
 #pragma once
 /**
  * @file fptr_pmm.h
- * @brief Персистный указатель на базе PMM.
+ * @brief Персистный указатель на базе PMM — тонкая обёртка над pptr<T>.
  *
  * Этот файл реализует fptr_pmm<T> — персистный указатель, использующий PMM
- * в качестве бэкенда.
+ * в качестве бэкенда. Внутренне хранит pptr<T> (гранульный индекс) и делегирует
+ * разыменование встроенным операторам pptr<T>.
  *
  * Возможности:
- *   - Использует pam_pmm_* функции для управления персистной памятью
- *   - Поддерживает работу с pptr<T> через pjson::pptr_to_offset() / offset_to_pptr()
- *   - sizeof(fptr_pmm<T>) == sizeof(void*)
+ *   - Тонкая обёртка над PamManager::pptr<T>
+ *   - Удобные методы New/Delete/find для управления объектами в ПАП
+ *   - Обратная совместимость через addr()/set_addr() (байтовые смещения)
+ *   - sizeof(fptr_pmm<T>) == sizeof(pptr<T>) (гранульный индекс)
  *
  * Требования:
- *   Тр.5  — sizeof(fptr<T>) == sizeof(void*)
  *   Тр.9  — не содержит логики с именами файлов
  *   Тр.12 — доступ к персистным объектам только через fptr<T>
- *   Тр.13 — может находиться как в обычной, так и в персистной памяти
  *   Тр.15 — метод find(name) для инициализации по имени объекта через ПАМ
  *
+ * Изменения (Issue #143, План 1.4):
+ *   - Внутреннее хранение заменено с uintptr_t на pptr<T>
+ *   - Разыменование делегировано операторам pptr<T> (operator*, operator->)
+ *   - Удалена зависимость от pmm_resolve/pmm_resolve_const (pam_adapter.h)
+ *   - sizeof(fptr_pmm<T>) == sizeof(pptr<T>) вместо sizeof(void*)
+ *
  * @see pam_pmm.h — фасад PMM для управления ПАП
- * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t
+ * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t (для addr()/set_addr())
  */
 
 #include "pam_pmm.h"
@@ -30,14 +36,15 @@ namespace pjson
 {
 
 // ═══════════════════════════════════════════════════════════════════════════
-// fptr_pmm<T> — персистный указатель на базе PMM
+// fptr_pmm<T> — тонкая обёртка над pptr<T>
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Персистный указатель (хранит смещение в образе ПАП).
+ * @brief Персистный указатель (обёртка над pptr<T> с удобными методами).
  *
- * Реализует Тр.5, Тр.9, Тр.12, Тр.13, Тр.15, используя PMM (pam_pmm.h)
- * в качестве бэкенда.
+ * Внутренне хранит PamManager::pptr<T> (гранульный индекс PMM).
+ * Предоставляет удобные методы New/Delete/find для управления объектами в ПАП.
+ * Обратная совместимость: addr()/set_addr() работают с байтовыми смещениями.
  *
  * @tparam T Тип данных, на который указывает указатель.
  *           Должен быть тривиально копируемым для персистности.
@@ -46,16 +53,12 @@ template <typename T> class fptr_pmm
 {
     static_assert( std::is_trivially_copyable<T>::value, "fptr_pmm<T> требует, чтобы T был тривиально копируемым" );
 
-    typedef T& Tref;
-    typedef T* Tptr;
-
-    /// Смещение объекта в области данных ПАП (или 0 = null).
-    /// Размер == sizeof(void*) на целевой платформе (Тр.5).
-    uintptr_t __addr;
+    /// pptr<T> — гранульный индекс в PMM (0 = null).
+    typename PamManager::template pptr<T> _p;
 
   public:
     /// Конструктор по умолчанию — нулевой указатель.
-    inline fptr_pmm() : __addr( 0 ) {}
+    constexpr fptr_pmm() noexcept : _p{} {}
 
     /**
      * @brief Конструктор с инициализацией по строковому имени объекта в ПАМ (Тр.15).
@@ -64,20 +67,33 @@ template <typename T> class fptr_pmm
      *
      * @param name Строковое имя объекта (не имя файла).
      */
-    inline explicit fptr_pmm( const char* name ) : __addr( 0 )
+    explicit fptr_pmm( const char* name ) noexcept : _p{}
     {
         if ( name != nullptr && name[0] != '\0' )
-            __addr = pam_pmm_find_typed<T>( name );
+        {
+            uintptr_t off = pam_pmm_find_typed<T>( name );
+            _p            = offset_to_pptr<T>( off );
+        }
     }
 
     /// Конструктор копирования.
-    inline fptr_pmm( const fptr_pmm<T>& ) = default;
+    constexpr fptr_pmm( const fptr_pmm<T>& ) noexcept = default;
 
     /// Оператор присваивания.
-    inline fptr_pmm<T>& operator=( const fptr_pmm<T>& ) = default;
+    constexpr fptr_pmm<T>& operator=( const fptr_pmm<T>& ) noexcept = default;
 
     /// Деструктор — ничего не делает (не освобождает ресурсы).
-    inline ~fptr_pmm() = default;
+    ~fptr_pmm() noexcept = default;
+
+    // -------------------------------------------------------------------------
+    // Доступ к внутреннему pptr<T>
+    // -------------------------------------------------------------------------
+
+    /// Получить внутренний pptr<T>.
+    constexpr typename PamManager::template pptr<T> pptr() const noexcept { return _p; }
+
+    /// Установить внутренний pptr<T>.
+    constexpr void set_pptr( typename PamManager::template pptr<T> p ) noexcept { _p = p; }
 
     // -------------------------------------------------------------------------
     // Инициализация по имени объекта в ПАМ (Тр.15)
@@ -88,28 +104,32 @@ template <typename T> class fptr_pmm
      *
      * @param name Строковое имя объекта (не имя файла).
      */
-    void find( const char* name ) { __addr = pam_pmm_find_typed<T>( name ); }
+    void find( const char* name )
+    {
+        uintptr_t off = pam_pmm_find_typed<T>( name );
+        _p            = offset_to_pptr<T>( off );
+    }
 
     // -------------------------------------------------------------------------
-    // Операции разыменования
+    // Операции разыменования (делегируются pptr<T>)
     // -------------------------------------------------------------------------
 
-    /// Разыменование — возвращает указатель на объект в ПАП.
-    inline operator Tptr() { return pmm_resolve<T>( __addr ); }
-    inline operator Tptr() const { return pmm_resolve<T>( __addr ); }
+    /// Неявное преобразование в T* — для совместимости с существующим кодом.
+    operator T*() { return _p.resolve(); }
+    operator T*() const { return _p.resolve(); }
 
-    inline T&       operator*() { return *pmm_resolve<T>( __addr ); }
-    inline const T& operator*() const { return *pmm_resolve_const<T>( __addr ); }
+    T&       operator*() { return *_p; }
+    const T& operator*() const { return *_p; }
 
-    inline T*       operator->() { return pmm_resolve<T>( __addr ); }
-    inline const T* operator->() const { return pmm_resolve_const<T>( __addr ); }
+    T*       operator->() { return _p.resolve(); }
+    const T* operator->() const { return _p.resolve(); }
 
     /// Доступ к элементу массива по индексу.
-    inline T&       operator[]( unsigned idx ) { return pmm_resolve<T>( __addr )[idx]; }
-    inline const T& operator[]( unsigned idx ) const { return pmm_resolve_const<T>( __addr )[idx]; }
+    T&       operator[]( unsigned idx ) { return _p.resolve()[idx]; }
+    const T& operator[]( unsigned idx ) const { return _p.resolve()[idx]; }
 
     // -------------------------------------------------------------------------
-    // Управление объектами через PMM (Тр.2)
+    // Управление объектами через PMM
     // -------------------------------------------------------------------------
 
     /**
@@ -117,7 +137,11 @@ template <typename T> class fptr_pmm
      *
      * @param name Необязательное имя объекта.
      */
-    void New( const char* name = nullptr ) { __addr = pam_pmm_create<T>( name ); }
+    void New( const char* name = nullptr )
+    {
+        uintptr_t off = pam_pmm_create<T>( name );
+        _p            = offset_to_pptr<T>( off );
+    }
 
     /**
      * @brief Создать массив из count объектов типа T в ПАП.
@@ -125,30 +149,36 @@ template <typename T> class fptr_pmm
      * @param count Число элементов.
      * @param name  Необязательное имя массива.
      */
-    void NewArray( unsigned count, const char* name = nullptr ) { __addr = pam_pmm_create_array<T>( count, name ); }
+    void NewArray( unsigned count, const char* name = nullptr )
+    {
+        uintptr_t off = pam_pmm_create_array<T>( count, name );
+        _p            = offset_to_pptr<T>( off );
+    }
 
     /**
-     * @brief Удалить объект из ПАП. Сбрасывает указатель в 0.
+     * @brief Удалить объект из ПАП. Сбрасывает указатель в null.
      *
-     * Конструкторы/деструкторы не вызываются (Тр.10).
+     * Конструкторы/деструкторы не вызываются.
      */
     void Delete()
     {
-        if ( __addr != 0 )
+        if ( !_p.is_null() )
         {
+            uintptr_t obj_off = pptr_to_offset( _p );
+
             // Получаем своё смещение внутри ПАП для безопасного обновления.
             uintptr_t self_off = pam_pmm_ptr_to_offset( this );
 
-            pam_pmm_delete( __addr );
+            pam_pmm_delete( obj_off );
 
-            // Если fptr_pmm находится внутри ПАП, перечитываем this.
+            // Если fptr_pmm находится внутри ПАП, перечитываем this после возможной реаллокации.
             fptr_pmm<T>* self = ( self_off != 0 ) ? pmm_resolve<fptr_pmm<T>>( self_off ) : this;
-            self->__addr      = 0;
+            self->_p          = typename PamManager::template pptr<T>{};
         }
     }
 
     /**
-     * @brief Удалить массив из ПАП. Сбрасывает указатель в 0.
+     * @brief Удалить массив из ПАП. Сбрасывает указатель в null.
      */
     void DeleteArray()
     {
@@ -156,43 +186,43 @@ template <typename T> class fptr_pmm
     }
 
     // -------------------------------------------------------------------------
-    // Вспомогательные методы
+    // Обратная совместимость: байтовые смещения
     // -------------------------------------------------------------------------
 
-    /// Получить смещение объекта в ПАП.
-    inline uintptr_t addr() const { return __addr; }
+    /// Получить байтовое смещение объекта в ПАП (через pptr_to_offset).
+    uintptr_t addr() const noexcept { return pptr_to_offset( _p ); }
 
-    /// Установить смещение объекта в ПАП вручную.
-    inline void set_addr( uintptr_t a ) { __addr = a; }
+    /// Установить указатель по байтовому смещению (через offset_to_pptr).
+    void set_addr( uintptr_t a ) noexcept { _p = offset_to_pptr<T>( a ); }
 
     /// Получить число элементов массива (через реестр PMM).
-    inline uintptr_t count() const
+    uintptr_t count() const
     {
-        if ( __addr == 0 )
+        if ( _p.is_null() )
             return 0;
-        return pam_pmm_get_count( __addr );
+        return pam_pmm_get_count( pptr_to_offset( _p ) );
     }
 
     /// Проверка на null.
-    inline bool is_null() const { return __addr == 0; }
+    constexpr bool is_null() const noexcept { return _p.is_null(); }
 
     /// Сравнение с nullptr.
-    inline bool operator==( std::nullptr_t ) const { return __addr == 0; }
-    inline bool operator!=( std::nullptr_t ) const { return __addr != 0; }
+    constexpr bool operator==( std::nullptr_t ) const noexcept { return _p.is_null(); }
+    constexpr bool operator!=( std::nullptr_t ) const noexcept { return !_p.is_null(); }
 
     // -------------------------------------------------------------------------
     // Сравнение с другими fptr_pmm
     // -------------------------------------------------------------------------
 
-    inline bool operator==( const fptr_pmm<T>& other ) const { return __addr == other.__addr; }
-    inline bool operator!=( const fptr_pmm<T>& other ) const { return __addr != other.__addr; }
+    constexpr bool operator==( const fptr_pmm<T>& other ) const noexcept { return _p == other._p; }
+    constexpr bool operator!=( const fptr_pmm<T>& other ) const noexcept { return _p != other._p; }
 };
 
-// Проверяем требование Тр.5.
-static_assert( sizeof( fptr_pmm<int> ) == sizeof( void* ),
-               "sizeof(fptr_pmm<T>) должен быть равен sizeof(void*) (Тр.5)" );
-static_assert( sizeof( fptr_pmm<double> ) == sizeof( void* ),
-               "sizeof(fptr_pmm<T>) должен быть равен sizeof(void*) (Тр.5)" );
+// Проверяем, что fptr_pmm<T> имеет размер pptr<T> (гранульный индекс).
+static_assert( sizeof( fptr_pmm<int> ) == sizeof( PamManager::pptr<int> ),
+               "sizeof(fptr_pmm<T>) должен быть равен sizeof(pptr<T>)" );
+static_assert( sizeof( fptr_pmm<double> ) == sizeof( PamManager::pptr<double> ),
+               "sizeof(fptr_pmm<T>) должен быть равен sizeof(pptr<T>)" );
 
 // Проверяем тривиальную копируемость.
 static_assert( std::is_trivially_copyable<fptr_pmm<int>>::value, "fptr_pmm<T> должен быть тривиально копируемым" );
