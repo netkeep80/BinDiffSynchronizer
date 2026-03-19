@@ -253,7 +253,7 @@ template <typename T> class pvector_pmm
 
   private:
     // Создание pvector_pmm<T> на стеке запрещено.
-    // Используйте fptr<pvector_pmm<T>>::New() для создания в ПАП (Тр.11).
+    // Используйте fptr<pvector_pmm<T>>::New() для создания в ПАП.
     pvector_pmm()  = default;
     ~pvector_pmm() = default;
 

@@ -11,7 +11,7 @@
 //   - Строковые значения JSON создаются как pstring-узлы (readwrite)
 //   - Сегменты путей $ref интернируются как pstringview (readonly)
 //
-// Все комментарии — на русском языке (Тр.6).
+// Все комментарии — на русском языке.
 
 #include "pjson_node.h"
 #include "pjson_pool_pmm.h"
