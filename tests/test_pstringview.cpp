@@ -25,9 +25,10 @@ const char* resolve_interned_string( uintptr_t chars_offset )
 {
     if ( chars_offset == 0 )
         return "";
-    auto                   p  = offset_to_pptr<pmm_pstringview>( chars_offset );
-    const pmm_pstringview* sv = p.resolve();
-    return ( sv != nullptr ) ? sv->c_str() : "";
+    // chars_offset указывает на str[] внутри блока pmm_pstringview (байтовое смещение),
+    // поэтому используем pmm_resolve<char>() напрямую, а не offset_to_pptr.
+    const char* s = pmm_resolve<char>( chars_offset );
+    return ( s != nullptr ) ? s : "";
 }
 } // anonymous namespace
 
