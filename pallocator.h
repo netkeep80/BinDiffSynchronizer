@@ -1,91 +1,15 @@
 #pragma once
-#include "fptr_pmm.h"
-#include <cstddef>
-#include <limits>
+// pallocator.h — Алиас для совместимости: делегирует в pallocator_pmm.h (Задача 15.6).
+//
+// После консолидации (Фаза 15) каноническая реализация STL-совместимого
+// аллокатора на базе PMM находится в pallocator_pmm.h (namespace pjson).
+// Этот файл предоставляет имя без суффикса _pmm для обратной совместимости.
+//
+// @see pallocator_pmm.h — каноническая реализация
+// @see plan.md Задача 15.6 — Консолидация pallocator.h и pallocator_pmm.h
+//
+// Все комментарии — на русском языке (Тр.6).
+
+#include "pallocator_pmm.h"
 
 using namespace pjson;
-
-// pallocator<T> — персистный STL-совместимый аллокатор.
-//
-// Реализован непосредственно на основе PMM (pam_pmm).
-// Выделяет/освобождает непрерывные массивы T в персистном адресном
-// пространстве через pam_pmm_create_array/pam_pmm_delete.
-//
-// Ограничения:
-//   - Возвращает raw-указатели C++ (через разрешение смещения ПАП → указатель).
-//     Указатель действителен, пока PMM жив.
-//   - Стандартные STL-контейнеры, использующие этот аллокатор
-//     (например, std::vector<T, pallocator<T>>), живут только пока ПАП жив.
-//   - Аллокатор сам по себе НЕ обеспечивает межпроцессную персистность —
-//     для этого вызывающий код должен отдельно сохранять смещения (fptr<T>).
-//
-// Типичное использование:
-//   std::vector<int, pallocator<int>> v;
-//   v.push_back(42);
-
-template <typename T> class pallocator
-{
-  public:
-    using value_type      = T;
-    using pointer         = T*;
-    using const_pointer   = const T*;
-    using reference       = T&;
-    using const_reference = const T&;
-    using size_type       = std::size_t;
-    using difference_type = std::ptrdiff_t;
-
-    template <typename U> struct rebind
-    {
-        using other = pallocator<U>;
-    };
-
-    pallocator() noexcept                    = default;
-    pallocator( const pallocator& ) noexcept = default;
-
-    template <typename U> explicit pallocator( const pallocator<U>& ) noexcept {}
-
-    ~pallocator() noexcept = default;
-
-    // allocate: создать n объектов в персистном адресном пространстве.
-    // Возвращает raw-указатель, действительный на время жизни ПАП.
-    pointer allocate( size_type n )
-    {
-        if ( n == 0 )
-            return nullptr;
-        uintptr_t offset = pam_pmm_create_array<T>( static_cast<unsigned>( n ), nullptr );
-        if ( offset == 0 )
-            throw std::bad_alloc{};
-        return pmm_resolve<T>( offset );
-    }
-
-    // deallocate: освободить массив по указателю.
-    // Использует pam_pmm_ptr_to_offset() для обратного поиска смещения.
-    void deallocate( pointer p, size_type /*n*/ ) noexcept
-    {
-        if ( p == nullptr )
-            return;
-        uintptr_t offset = pam_pmm_ptr_to_offset( static_cast<const void*>( p ) );
-        if ( offset != 0 )
-        {
-            pam_pmm_delete( offset );
-        }
-        else
-        {
-            // Если указатель не найден в ПАП — удаляем через raw delete[].
-            // Это обрабатывает случай, когда указатель не из персистного источника.
-            delete[] reinterpret_cast<char*>( p );
-        }
-    }
-
-    size_type max_size() const noexcept { return std::numeric_limits<size_type>::max() / sizeof( T ); }
-
-    template <typename U, typename... Args> void construct( U* p, Args&&... args )
-    {
-        ::new ( static_cast<void*>( p ) ) U( std::forward<Args>( args )... );
-    }
-
-    template <typename U> void destroy( U* p ) { p->~U(); }
-
-    bool operator==( const pallocator& ) const noexcept { return true; }
-    bool operator!=( const pallocator& ) const noexcept { return false; }
-};

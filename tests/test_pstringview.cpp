@@ -17,6 +17,19 @@ void rm_pstringview_file( const char* path )
     std::error_code ec;
     std::filesystem::remove( path, ec );
 }
+
+/// Вспомогательная функция: получить C-строку из chars_offset (формат PMM).
+/// После консолидации (Задача 15.5) chars_offset указывает на блок pmm::pstringview,
+/// а не на raw char[]. Для получения строки нужно разрешить pstringview и вызвать c_str().
+const char* resolve_interned_string( uintptr_t chars_offset )
+{
+    if ( chars_offset == 0 )
+        return "";
+    // chars_offset указывает на str[] внутри блока pmm_pstringview (байтовое смещение),
+    // поэтому используем pmm_resolve<char>() напрямую, а не offset_to_pptr.
+    const char* s = pmm_resolve<char>( chars_offset );
+    return ( s != nullptr ) ? s : "";
+}
 } // anonymous namespace
 
 // =============================================================================
@@ -34,11 +47,11 @@ TEST_CASE( "pstringview: struct size is 2 * sizeof(void*)", "[pstringview][layou
 }
 
 // ---------------------------------------------------------------------------
-// pstringview_table — layout checks
+// pstringview_pmm — тривиально копируемый (Задача 15.5)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview_table: struct size is 3 * sizeof(void*)", "[pstringview][layout]" )
+TEST_CASE( "pstringview_pmm: is trivially copyable", "[pstringview][layout]" )
 {
-    REQUIRE( sizeof( pstringview_table ) == 3 * sizeof( void* ) );
+    REQUIRE( std::is_trivially_copyable<pstringview_pmm>::value );
 }
 
 // ---------------------------------------------------------------------------
@@ -269,24 +282,15 @@ TEST_CASE( "pstringview: many distinct strings are all interned correctly", "[ps
         fps[i].Delete();
 }
 
-// ---------------------------------------------------------------------------
-// pstringview — pstringview_table trivially copyable
-// ---------------------------------------------------------------------------
-TEST_CASE( "pstringview_entry: is trivially copyable", "[pstringview][layout]" )
-{
-    REQUIRE( std::is_trivially_copyable<pstringview_entry>::value );
-}
-
 // =============================================================================
 // Тесты Phase 2: словарь строк в ПАП — персистность, InternString, поиск
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// Задача 2.1: pstringview_table хранится в ПАП и восстанавливается при Load
-// Критерий приёмки фазы 2: «pstringview_table хранится в ПАП и восстанавливается
-//   при загрузке образа»
+// Задача 2.1: словарь строк сохраняется и восстанавливается при Load
+// (Обновлено Задача 15.5: PMM хранит AVL-дерево строк внутри)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview_table: survives PAM Save and Load (persistence)", "[pstringview][phase2][persist]" )
+TEST_CASE( "pstringview: survives PAM Save and Load (persistence)", "[pstringview][phase2][persist]" )
 {
     const char* fname = "./test_pstringview_persist.pam";
     rm_pstringview_file( fname );
@@ -305,9 +309,6 @@ TEST_CASE( "pstringview_table: survives PAM Save and Load (persistence)", "[pstr
         saved_offset = fps->chars_offset;
         REQUIRE( saved_offset != 0u );
 
-        // Смещение таблицы должно быть сохранено в заголовке ПАМ.
-        REQUIRE( pam_pmm_find( "pstringview_table" ) != 0u );
-
         fps.Delete();
         pam_pmm_save();
     }
@@ -317,9 +318,6 @@ TEST_CASE( "pstringview_table: survives PAM Save and Load (persistence)", "[pstr
     pam_pmm_init( fname );
 
     {
-        // Таблица должна восстановиться из заголовка ПАМ.
-        REQUIRE( pam_pmm_find( "pstringview_table" ) != 0u );
-
         // Повторное интернирование той же строки должно вернуть тот же chars_offset.
         fptr<pstringview> fps;
         fps.New();
@@ -336,9 +334,8 @@ TEST_CASE( "pstringview_table: survives PAM Save and Load (persistence)", "[pstr
 
 // ---------------------------------------------------------------------------
 // Задача 2.1: два одинаковых intern("hello") дают одинаковый chars_offset
-// Критерий приёмки фазы 2: «Два одинаковых intern("hello") дают одинаковый chars_offset»
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview_table: two intern(same) calls give identical chars_offset", "[pstringview][phase2]" )
+TEST_CASE( "pstringview: two intern(same) calls give identical chars_offset", "[pstringview][phase2]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -361,9 +358,9 @@ TEST_CASE( "pstringview_table: two intern(same) calls give identical chars_offse
 
 // ---------------------------------------------------------------------------
 // Задача 2.2: pam_intern_string — интернирование строки через уровень ПАМ
+// (Обновлено Задача 15.5: chars_offset указывает на блок pmm::pstringview)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_intern_string: returns InternResult with correct chars_offset and length",
-           "[pstringview][phase2][intern]" )
+TEST_CASE( "pam_intern_string: returns result with correct chars_offset and length", "[pstringview][phase2][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -371,9 +368,10 @@ TEST_CASE( "pam_intern_string: returns InternResult with correct chars_offset an
     auto r1 = pam_intern_string( "world" );
     REQUIRE( r1.length == 5u );
     REQUIRE( r1.chars_offset != 0u );
-    auto* chars1 = pmm_resolve<char>( r1.chars_offset );
-    REQUIRE( chars1 != nullptr );
-    REQUIRE( std::strcmp( chars1, "world" ) == 0 );
+    // Получаем строку через resolve_interned_string (формат PMM).
+    const char* str1 = resolve_interned_string( r1.chars_offset );
+    REQUIRE( str1 != nullptr );
+    REQUIRE( std::strcmp( str1, "world" ) == 0 );
 
     // Повторный вызов — тот же chars_offset.
     auto r2 = pam_intern_string( "world" );
@@ -405,11 +403,10 @@ TEST_CASE( "pam_intern_string: empty string gives length zero and valid chars_of
 
     auto r = pam_intern_string( "" );
     REQUIRE( r.length == 0u );
-    // Пустая строка: chars_offset может быть ненулевым (хранится нулевой терминатор).
-    // Важно, что строка доступна и соответствует "".
+    // Пустая строка: chars_offset может быть ненулевым (хранится в PMM-блоке).
     if ( r.chars_offset != 0u )
     {
-        const char* s = pmm_resolve<char>( r.chars_offset );
+        const char* s = resolve_interned_string( r.chars_offset );
         REQUIRE( s != nullptr );
         REQUIRE( s[0] == '\0' );
     }
@@ -532,21 +529,4 @@ TEST_CASE( "pam_search_strings: results contain correct chars_offset and length"
     REQUIRE( results[0].chars_offset == r.chars_offset );
     REQUIRE( results[0].length == r.length );
     REQUIRE( results[0].value == "check_me" );
-}
-
-// ---------------------------------------------------------------------------
-// Критерий приёмки фазы 2: GetStringTableOffset() обновляется после первого интернирования
-// ---------------------------------------------------------------------------
-TEST_CASE( "pstringview_table: GetStringTableOffset non-zero after intern", "[pstringview][phase2]" )
-{
-    pstringview_manager::reset();
-    pam_pmm_reset();
-
-    // До первого интернирования таблица может ещё не быть создана.
-    // (После Reset() _string_table_offset = 0 в ПАМ.)
-
-    pam_intern_string( "trigger_creation" );
-
-    // После первого интернирования таблица должна быть зарегистрирована в ПАМ.
-    REQUIRE( pam_pmm_find( "pstringview_table" ) != 0u );
 }
