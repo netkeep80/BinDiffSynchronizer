@@ -979,10 +979,17 @@ inline void pstringview_pmm_restore_root()
     }
 }
 
-/// Сбросить флаг восстановления при reset().
+/// Сбросить флаг восстановления и состояние pam_pmm при reset().
+///
+/// Сбрасывает флаг восстановления корня AVL-дерева,
+/// а также инвалидирует глобальное состояние pam_pmm (initialized flag, root offset).
+/// Это предотвращает SIGSEGV при повторном использовании PamManager::create()
+/// без вызова pam_pmm_init() (Issue #161).
 inline void pstringview_pmm_reset_restored_flag()
 {
     pstringview_pmm_root_restored_flag() = false;
+    detail::pam_pmm_initialized()        = false;
+    detail::pam_pmm_root_offset()        = 0;
 }
 
 /// Регистрация callbacks для персистентности корня AVL-дерева pstringview.
