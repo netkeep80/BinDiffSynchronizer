@@ -471,3 +471,73 @@ TEST_CASE( "pam_pmm: trivial copyable check", "[pam_pmm]" )
     REQUIRE( std::is_trivially_copyable<pam_pmm_slot_info>::value );
     REQUIRE( std::is_trivially_copyable<pam_pmm_registry>::value );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ТЕСТ КОРНЕВОГО ОБЪЕКТА PMM (Issue #163, Plan Stage 1.2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE( "pam_pmm: root object stored in PMM header", "[pam_pmm]" )
+{
+    const char* filename = "test_pam_pmm_root_api.dat";
+
+    // Phase 1: create, verify root is set in PMM header, save.
+    {
+        pam_pmm_init( filename );
+
+        // Root should be stored in PMM header via set_root().
+        auto root_pptr = PamManager::template get_root<pam_pmm_root>();
+        REQUIRE( !root_pptr.is_null() );
+
+        pam_pmm_root* root = root_pptr.resolve();
+        REQUIRE( root != nullptr );
+        REQUIRE( root->magic == PAM_PMM_MAGIC );
+        REQUIRE( root->version == PAM_PMM_VERSION );
+
+        // Create some data to verify full cycle.
+        uintptr_t off = pam_pmm_create<int>( "root_test_val" );
+        REQUIRE( off != 0 );
+        int* p = pam_pmm_resolve<int>( off );
+        *p     = 999;
+
+        pam_pmm_save();
+        pam_pmm_destroy();
+    }
+
+    // Phase 2: load from file — root found via get_root (no magic scan).
+    {
+        pam_pmm_init( filename );
+
+        auto root_pptr = PamManager::template get_root<pam_pmm_root>();
+        REQUIRE( !root_pptr.is_null() );
+
+        uintptr_t off = pam_pmm_find( "root_test_val" );
+        REQUIRE( off != 0 );
+        int* p = pam_pmm_resolve<int>( off );
+        REQUIRE( p != nullptr );
+        REQUIRE( *p == 999 );
+
+        pam_pmm_destroy();
+    }
+
+    std::remove( filename );
+}
+
+TEST_CASE( "pam_pmm: root object survives reset", "[pam_pmm]" )
+{
+    pam_pmm_init( nullptr );
+
+    auto root1 = PamManager::template get_root<pam_pmm_root>();
+    REQUIRE( !root1.is_null() );
+
+    // Reset should create a new root and set it in PMM header.
+    pam_pmm_reset();
+
+    auto root2 = PamManager::template get_root<pam_pmm_root>();
+    REQUIRE( !root2.is_null() );
+
+    pam_pmm_root* root = root2.resolve();
+    REQUIRE( root != nullptr );
+    REQUIRE( root->magic == PAM_PMM_MAGIC );
+
+    pam_pmm_destroy();
+}
