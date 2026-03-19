@@ -83,14 +83,18 @@ JSON-базу данных поверх PMM. Текущая архитектур
 - Заменить `pjson::pallocator_pmm<T>` на `pmm::pallocator<T, PamManager>`
 - Удалить `pallocator_pmm.h`
 
-### 1.4 Упрощение fptr_pmm.h
+### 1.4 Упрощение fptr_pmm.h ✅
 
-**Текущая ситуация:** `fptr_pmm<T>` хранит байтовое смещение и предоставляет
-`operator*`, `operator->`, `operator[]`, `New()`, `Delete()`.
+**Выполнено (Issue #143):** `fptr_pmm<T>` переделан в тонкую обёртку над `pptr<T>`.
 
-**Действия:**
-- Рассмотреть замену `fptr_pmm<T>` на `pptr<T>` с именованным реестром
-- Если API `fptr` критичен для совместимости — оставить как тонкую обёртку над `pptr<T>`
+**Что сделано:**
+- Внутреннее хранение заменено с `uintptr_t __addr` на `PamManager::pptr<T> _p`
+- Разыменование делегировано операторам `pptr<T>` (operator*, operator->)
+- Удалена прямая зависимость от `pmm_resolve`/`pmm_resolve_const`
+- sizeof(fptr_pmm<T>) == sizeof(pptr<T>) вместо sizeof(void*)
+- Обратная совместимость через `addr()`/`set_addr()` (байтовые смещения)
+- Добавлены методы `pptr()`/`set_pptr()` для доступа к внутреннему pptr<T>
+- Удобные методы `New()`/`Delete()`/`find()` сохранены
 
 ---
 
