@@ -28,10 +28,11 @@ void reset_pam()
 // Layout: node payload
 // =============================================================================
 
-TEST_CASE( "pjson: string_val layout is 2 * sizeof(void*)", "[pjson][layout]" )
+TEST_CASE( "pjson: string_val is PamManager::pstring (12 bytes)", "[pjson][layout]" )
 {
-    // string_val — совместим с pstring (length + chars_offset), оба поля sizeof(void*).
-    REQUIRE( sizeof( node::string_val ) == 2 * sizeof( void* ) );
+    // string_val — PMM pstring: { uint32_t _length; uint32_t _capacity; uint32_t _data_idx; } = 12 bytes.
+    REQUIRE( sizeof( node::string_val ) == sizeof( PamManager::pstring ) );
+    REQUIRE( sizeof( PamManager::pstring ) == 12 );
 }
 
 TEST_CASE( "pjson: array_val layout is 3 * sizeof(void*)", "[pjson][layout]" )

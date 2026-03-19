@@ -1,362 +1,273 @@
 /**
  * @file test_pstring_pmm.cpp
- * @brief Тесты для pstring_pmm.
+ * @brief Тесты для PamManager::pstring (pmm::pstring<PamManager>).
  *
- * Тесты проверяют корректность реализации персистной изменяемой строки
- * на базе PersistMemoryManager.
+ * Тесты проверяют корректность работы PMM pstring
+ * в качестве строки для JSON string-value узлов.
  */
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <type_traits>
 
-#include "pstring_pmm.h"
+#include "pam_pmm_config.h"
+
+using namespace pjson;
+
+/// Тип PMM pstring для удобства.
+using pmm_pstring = PamManager::pstring;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ТЕСТЫ LAYOUT
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: struct size is 2 * sizeof(void*)", "[pstring_pmm][layout]" )
+TEST_CASE( "pmm_pstring: struct size is 12 bytes", "[pmm_pstring][layout]" )
 {
-    REQUIRE( sizeof( pjson::pstring_pmm ) == 2 * sizeof( void* ) );
-    REQUIRE( sizeof( pjson::pstring_pmm::length ) == sizeof( void* ) );
-    REQUIRE( sizeof( pjson::pstring_pmm::chars_off ) == sizeof( void* ) );
+    // PMM pstring: { uint32_t _length; uint32_t _capacity; uint32_t _data_idx; } = 12 bytes.
+    REQUIRE( sizeof( pmm_pstring ) == 12 );
 }
 
-TEST_CASE( "pstring_pmm: is trivially copyable", "[pstring_pmm][layout]" )
+TEST_CASE( "pmm_pstring: is trivially copyable", "[pmm_pstring][layout]" )
 {
-    REQUIRE( std::is_trivially_copyable<pjson::pstring_pmm>::value );
+    REQUIRE( std::is_trivially_copyable<pmm_pstring>::value );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ТЕСТЫ БАЗОВЫХ ОПЕРАЦИЙ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: zero-initialized gives empty string", "[pstring_pmm][construct]" )
+TEST_CASE( "pmm_pstring: default-constructed gives empty string", "[pmm_pstring][construct]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    pjson::pstring_pmm ps{};
-    ps.length    = 0;
-    ps.chars_off = 0;
+    pmm_pstring ps{};
 
     REQUIRE( ps.empty() );
     REQUIRE( ps.size() == 0u );
     REQUIRE( std::strcmp( ps.c_str(), "" ) == 0 );
 
-    pjson::PamManager::destroy();
+    PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: assign short string stores correct content", "[pstring_pmm][assign]" )
+TEST_CASE( "pmm_pstring: assign short string stores correct content", "[pmm_pstring][assign]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    // Создаём pstring_pmm в ПАП
-    uintptr_t off = pjson::pstring_pmm_create( nullptr );
-    REQUIRE( off != 0 );
+    pmm_pstring ps{};
+    REQUIRE( ps.assign( "hello" ) );
 
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps != nullptr );
+    REQUIRE( !ps.empty() );
+    REQUIRE( ps.size() == 5u );
+    REQUIRE( std::strcmp( ps.c_str(), "hello" ) == 0 );
 
-    // Присваиваем строку
-    ps->assign( "hello", off );
-
-    // Переразрешаем после assign
-    ps = pjson::pstring_pmm_get( off );
-    REQUIRE( !ps->empty() );
-    REQUIRE( ps->size() == 5u );
-    REQUIRE( std::strcmp( ps->c_str(), "hello" ) == 0 );
-
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
+    ps.free_data();
+    PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: assign longer string stores correct content", "[pstring_pmm][assign]" )
+TEST_CASE( "pmm_pstring: assign longer string stores correct content", "[pmm_pstring][assign]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
-
-    uintptr_t off = pjson::pstring_pmm_create( nullptr );
-    REQUIRE( off != 0 );
+    PamManager::create( 64 * 1024 );
 
     const char* long_str = "The quick brown fox jumps over the lazy dog";
 
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    ps->assign( long_str, off );
+    pmm_pstring ps{};
+    REQUIRE( ps.assign( long_str ) );
 
-    ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->size() == std::strlen( long_str ) );
-    REQUIRE( std::strcmp( ps->c_str(), long_str ) == 0 );
+    REQUIRE( ps.size() == std::strlen( long_str ) );
+    REQUIRE( std::strcmp( ps.c_str(), long_str ) == 0 );
 
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
+    ps.free_data();
+    PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: reassigning frees old allocation and stores new content", "[pstring_pmm][reassign]" )
+TEST_CASE( "pmm_pstring: reassigning stores new content", "[pmm_pstring][reassign]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    uintptr_t off = pjson::pstring_pmm_create( "first" );
-    REQUIRE( off != 0 );
+    pmm_pstring ps{};
+    REQUIRE( ps.assign( "first" ) );
+    REQUIRE( ps.size() == 5u );
 
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->size() == 5u );
+    REQUIRE( ps.assign( "second value" ) );
+    REQUIRE( ps.size() == 12u );
+    REQUIRE( std::strcmp( ps.c_str(), "second value" ) == 0 );
 
-    ps->assign( "second value", off );
-
-    ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->size() == 12u );
-    REQUIRE( std::strcmp( ps->c_str(), "second value" ) == 0 );
-
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
+    ps.free_data();
+    PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: assign empty string clears content", "[pstring_pmm][assign]" )
+TEST_CASE( "pmm_pstring: assign empty string sets length to zero", "[pmm_pstring][assign]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    uintptr_t off = pjson::pstring_pmm_create( "nonempty" );
-    REQUIRE( off != 0 );
+    pmm_pstring ps{};
+    REQUIRE( ps.assign( "nonempty" ) );
+    REQUIRE( !ps.empty() );
 
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    REQUIRE( !ps->empty() );
+    REQUIRE( ps.assign( "" ) );
+    REQUIRE( ps.size() == 0u );
 
-    ps->assign( "", off );
-
-    ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->empty() );
-    REQUIRE( ps->size() == 0u );
-
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
+    ps.free_data();
+    PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: assign nullptr gives empty string", "[pstring_pmm][assign]" )
+TEST_CASE( "pmm_pstring: assign nullptr gives empty string", "[pmm_pstring][assign]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    uintptr_t off = pjson::pstring_pmm_create( "test" );
-    REQUIRE( off != 0 );
+    pmm_pstring ps{};
+    REQUIRE( ps.assign( "test" ) );
 
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    ps->assign( nullptr, off );
+    REQUIRE( ps.assign( nullptr ) );
+    REQUIRE( ps.size() == 0u );
+    REQUIRE( std::strcmp( ps.c_str(), "" ) == 0 );
 
-    ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->empty() );
-    REQUIRE( ps->size() == 0u );
-    REQUIRE( std::strcmp( ps->c_str(), "" ) == 0 );
-
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
+    ps.free_data();
+    PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: clear resets to empty", "[pstring_pmm][clear]" )
+TEST_CASE( "pmm_pstring: clear resets length to zero", "[pmm_pstring][clear]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    uintptr_t off = pjson::pstring_pmm_create( "hello world" );
-    REQUIRE( off != 0 );
+    pmm_pstring ps{};
+    REQUIRE( ps.assign( "hello world" ) );
+    REQUIRE( !ps.empty() );
 
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    REQUIRE( !ps->empty() );
+    ps.clear();
 
-    ps->clear( off );
+    REQUIRE( ps.empty() );
+    REQUIRE( ps.size() == 0u );
 
-    ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->empty() );
-    REQUIRE( ps->size() == 0u );
-    REQUIRE( ps->chars_off == 0u );
+    ps.free_data();
+    PamManager::destroy();
+}
 
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
+TEST_CASE( "pmm_pstring: free_data releases all resources", "[pmm_pstring][free_data]" )
+{
+    PamManager::create( 64 * 1024 );
+
+    pmm_pstring ps{};
+    REQUIRE( ps.assign( "hello world" ) );
+    REQUIRE( !ps.empty() );
+
+    ps.free_data();
+
+    REQUIRE( ps.empty() );
+    REQUIRE( ps.size() == 0u );
+
+    PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ТЕСТЫ СРАВНЕНИЯ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: operator== compares correctly", "[pstring_pmm][compare]" )
+TEST_CASE( "pmm_pstring: operator== compares correctly", "[pmm_pstring][compare]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    uintptr_t off1 = pjson::pstring_pmm_create( "hello" );
-    uintptr_t off2 = pjson::pstring_pmm_create( "hello" );
-    uintptr_t off3 = pjson::pstring_pmm_create( "world" );
+    pmm_pstring ps1{};
+    ps1.assign( "hello" );
+    pmm_pstring ps2{};
+    ps2.assign( "hello" );
+    pmm_pstring ps3{};
+    ps3.assign( "world" );
 
-    pjson::pstring_pmm* ps1 = pjson::pstring_pmm_get( off1 );
-    pjson::pstring_pmm* ps2 = pjson::pstring_pmm_get( off2 );
-    pjson::pstring_pmm* ps3 = pjson::pstring_pmm_get( off3 );
+    REQUIRE( ps1 == ps2 );
+    REQUIRE( !( ps1 == ps3 ) );
+    REQUIRE( ps1 == "hello" );
+    REQUIRE( !( ps1 == "world" ) );
 
-    REQUIRE( *ps1 == *ps2 );
-    REQUIRE( !( *ps1 == *ps3 ) );
-    REQUIRE( *ps1 == "hello" );
-    REQUIRE( !( *ps1 == "world" ) );
-
-    pjson::pstring_pmm_destroy( off1 );
-    pjson::pstring_pmm_destroy( off2 );
-    pjson::pstring_pmm_destroy( off3 );
-    pjson::PamManager::destroy();
+    ps1.free_data();
+    ps2.free_data();
+    ps3.free_data();
+    PamManager::destroy();
 }
 
-TEST_CASE( "pstring_pmm: operator< gives lexicographic order", "[pstring_pmm][compare]" )
+TEST_CASE( "pmm_pstring: operator< gives lexicographic order", "[pmm_pstring][compare]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    uintptr_t off_a = pjson::pstring_pmm_create( "apple" );
-    uintptr_t off_b = pjson::pstring_pmm_create( "banana" );
+    pmm_pstring ps_a{};
+    ps_a.assign( "apple" );
+    pmm_pstring ps_b{};
+    ps_b.assign( "banana" );
 
-    pjson::pstring_pmm* ps_a = pjson::pstring_pmm_get( off_a );
-    pjson::pstring_pmm* ps_b = pjson::pstring_pmm_get( off_b );
+    REQUIRE( ps_a < ps_b );
+    REQUIRE( !( ps_b < ps_a ) );
 
-    REQUIRE( *ps_a < *ps_b );
-    REQUIRE( !( *ps_b < *ps_a ) );
-
-    pjson::pstring_pmm_destroy( off_a );
-    pjson::pstring_pmm_destroy( off_b );
-    pjson::PamManager::destroy();
+    ps_a.free_data();
+    ps_b.free_data();
+    PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ТЕСТЫ ДОСТУПА К СИМВОЛАМ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: operator[] accesses individual characters", "[pstring_pmm][index]" )
+TEST_CASE( "pmm_pstring: operator[] accesses individual characters", "[pmm_pstring][index]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    uintptr_t off = pjson::pstring_pmm_create( "abc" );
-    REQUIRE( off != 0 );
+    pmm_pstring ps{};
+    ps.assign( "abc" );
 
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
+    REQUIRE( ps[0] == 'a' );
+    REQUIRE( ps[1] == 'b' );
+    REQUIRE( ps[2] == 'c' );
 
-    REQUIRE( ( *ps )[0] == 'a' );
-    REQUIRE( ( *ps )[1] == 'b' );
-    REQUIRE( ( *ps )[2] == 'c' );
-
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ СОСТОЯНИЯ ДАННЫХ
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE( "pstring_pmm: chars_off is non-zero after assign, zero after clear", "[pstring_pmm][data]" )
-{
-    pjson::PamManager::create( 64 * 1024 );
-
-    uintptr_t off = pjson::pstring_pmm_create( nullptr );
-    REQUIRE( off != 0 );
-
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->chars_off == 0u );
-
-    ps->assign( "test", off );
-    ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->chars_off != 0u );
-    REQUIRE( ps->length == 4u );
-
-    ps->clear( off );
-    ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps->chars_off == 0u );
-    REQUIRE( ps->length == 0u );
-
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ ХЕЛПЕР-ФУНКЦИЙ
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE( "pstring_pmm_create: creates string in PAP", "[pstring_pmm][helper]" )
-{
-    pjson::PamManager::create( 64 * 1024 );
-
-    uintptr_t off = pjson::pstring_pmm_create( "test string" );
-    REQUIRE( off != 0 );
-    REQUIRE( pjson::is_aligned_offset( off ) );
-
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps != nullptr );
-    REQUIRE( ps->size() == 11u );
-    REQUIRE( std::strcmp( ps->c_str(), "test string" ) == 0 );
-
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
-}
-
-TEST_CASE( "pstring_pmm_create: nullptr creates empty string", "[pstring_pmm][helper]" )
-{
-    pjson::PamManager::create( 64 * 1024 );
-
-    uintptr_t off = pjson::pstring_pmm_create( nullptr );
-    REQUIRE( off != 0 );
-
-    pjson::pstring_pmm* ps = pjson::pstring_pmm_get( off );
-    REQUIRE( ps != nullptr );
-    REQUIRE( ps->empty() );
-    REQUIRE( ps->size() == 0u );
-
-    pjson::pstring_pmm_destroy( off );
-    pjson::PamManager::destroy();
-}
-
-TEST_CASE( "pstring_pmm_destroy: safely destroys string", "[pstring_pmm][helper]" )
-{
-    pjson::PamManager::create( 64 * 1024 );
-
-    uintptr_t off = pjson::pstring_pmm_create( "to be destroyed" );
-    REQUIRE( off != 0 );
-
-    // Уничтожаем строку
-    pjson::pstring_pmm_destroy( off );
-
-    // Повторное уничтожение с 0 не должно вызвать проблем
-    pjson::pstring_pmm_destroy( 0 );
-
-    pjson::PamManager::destroy();
+    ps.free_data();
+    PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ТЕСТЫ МНОЖЕСТВЕННЫХ СТРОК
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstring_pmm: multiple strings are independent", "[pstring_pmm][multiple]" )
+TEST_CASE( "pmm_pstring: multiple strings are independent", "[pmm_pstring][multiple]" )
 {
-    pjson::PamManager::create( 64 * 1024 );
+    PamManager::create( 64 * 1024 );
 
-    uintptr_t off1 = pjson::pstring_pmm_create( "first" );
-    uintptr_t off2 = pjson::pstring_pmm_create( "second" );
-    uintptr_t off3 = pjson::pstring_pmm_create( "third" );
+    pmm_pstring ps1{};
+    ps1.assign( "first" );
+    pmm_pstring ps2{};
+    ps2.assign( "second" );
+    pmm_pstring ps3{};
+    ps3.assign( "third" );
 
-    // Все смещения разные
-    REQUIRE( off1 != off2 );
-    REQUIRE( off2 != off3 );
-    REQUIRE( off1 != off3 );
-
-    // Данные независимы
-    pjson::pstring_pmm* ps1 = pjson::pstring_pmm_get( off1 );
-    pjson::pstring_pmm* ps2 = pjson::pstring_pmm_get( off2 );
-    pjson::pstring_pmm* ps3 = pjson::pstring_pmm_get( off3 );
-
-    REQUIRE( std::strcmp( ps1->c_str(), "first" ) == 0 );
-    REQUIRE( std::strcmp( ps2->c_str(), "second" ) == 0 );
-    REQUIRE( std::strcmp( ps3->c_str(), "third" ) == 0 );
+    REQUIRE( std::strcmp( ps1.c_str(), "first" ) == 0 );
+    REQUIRE( std::strcmp( ps2.c_str(), "second" ) == 0 );
+    REQUIRE( std::strcmp( ps3.c_str(), "third" ) == 0 );
 
     // Изменение одной не влияет на другие
-    ps2->assign( "modified", off2 );
+    ps2.assign( "modified" );
 
-    ps1 = pjson::pstring_pmm_get( off1 );
-    ps2 = pjson::pstring_pmm_get( off2 );
-    ps3 = pjson::pstring_pmm_get( off3 );
+    REQUIRE( std::strcmp( ps1.c_str(), "first" ) == 0 );
+    REQUIRE( std::strcmp( ps2.c_str(), "modified" ) == 0 );
+    REQUIRE( std::strcmp( ps3.c_str(), "third" ) == 0 );
 
-    REQUIRE( std::strcmp( ps1->c_str(), "first" ) == 0 );
-    REQUIRE( std::strcmp( ps2->c_str(), "modified" ) == 0 );
-    REQUIRE( std::strcmp( ps3->c_str(), "third" ) == 0 );
+    ps1.free_data();
+    ps2.free_data();
+    ps3.free_data();
+    PamManager::destroy();
+}
 
-    pjson::pstring_pmm_destroy( off1 );
-    pjson::pstring_pmm_destroy( off2 );
-    pjson::pstring_pmm_destroy( off3 );
-    pjson::PamManager::destroy();
+// ═══════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ APPEND
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE( "pmm_pstring: append extends string content", "[pmm_pstring][append]" )
+{
+    PamManager::create( 64 * 1024 );
+
+    pmm_pstring ps{};
+    REQUIRE( ps.assign( "hello" ) );
+    REQUIRE( ps.append( " world" ) );
+
+    REQUIRE( ps.size() == 11u );
+    REQUIRE( std::strcmp( ps.c_str(), "hello world" ) == 0 );
+
+    ps.free_data();
+    PamManager::destroy();
 }

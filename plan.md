@@ -102,16 +102,18 @@ JSON-базу данных поверх PMM. Текущая архитектур
 
 ## Этап 2: Миграция уровня B (персистентные примитивы)
 
-### 2.1 Замена pstring_pmm на pmm::pstring
+### 2.1 Замена pstring_pmm на pmm::pstring ✅
 
-**Текущая ситуация:** `pstring_pmm` — мутабельная строка с `assign()`, `c_str()`, `clear()`.
+**Выполнено (Issue #144):** `pstring_pmm` заменён на `PamManager::pstring` (pmm::pstring<PamManager>).
 
-**После pmm 3.1:** pmm будет предоставлять `pstring<ManagerT>` с аналогичным API.
-
-**Действия:**
-- Заменить `pstring_pmm` на `Mgr::pstring` (вложенный alias в PersistMemoryManager)
-- Обновить `pjson_node` — тип `node_tag::string` использует `pstring` вместо `pstring_pmm`
-- Удалить `pstring_pmm.h`
+**Что сделано:**
+- `node::string_val` теперь имеет тип `PamManager::pstring` (12 байт: uint32_t _length + _capacity + _data_idx) вместо `pstring_pmm` (16 байт: uintptr_t length + chars_off)
+- `node_view::as_string()` использует `pstring::c_str()` и `pstring::size()` вместо прямого доступа к полям
+- `node_set_string()` использует `pstring::assign()` через стековую копию (realloc-безопасность)
+- Деаллокация строковых данных в `pjson_db_pmm.h` через `pstring::free_data()`
+- Удалён `pstring_pmm.h` — обёртка больше не нужна
+- Устранены предупреждения memset для non-trivial node в `pjson_pool_pmm.h`
+- Все 596 тестов проходят
 
 ### 2.2 Замена pmem_array_pmm на pmm::parray
 

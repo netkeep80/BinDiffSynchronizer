@@ -121,7 +121,14 @@ inline node_id pjson_pool_pmm_push_node( uintptr_t pool_off )
         // Инициализируем новые слоты нулём.
         node* new_raw = new_data_pptr.resolve();
         if ( new_raw != nullptr )
-            std::memset( new_raw, 0, new_cap * sizeof( node ) );
+        {
+            for ( uintptr_t i = 0; i < new_cap; ++i )
+            {
+                new_raw[i].tag  = node_tag::null;
+                new_raw[i]._pad = 0;
+                std::memset( &new_raw[i].ref_val, 0, sizeof( new_raw[i].ref_val ) );
+            }
+        }
 
         // Переразрешаем pool после аллокации.
         pool = pmm_resolve<pjson_pool_pmm>( pool_off );
@@ -164,7 +171,9 @@ inline node_id pjson_pool_pmm_push_node( uintptr_t pool_off )
     if ( raw != nullptr )
     {
         node* slot = &raw[idx];
-        std::memset( slot, 0, sizeof( node ) );
+        slot->tag  = node_tag::null;
+        slot->_pad = 0;
+        std::memset( &slot->ref_val, 0, sizeof( slot->ref_val ) );
         slot->tag = node_tag::null;
 
         // Вычисляем байтовое смещение: data_off + idx * sizeof(node)
@@ -214,8 +223,9 @@ inline node_id pjson_pool_pmm_alloc( uintptr_t pool_off )
         node* n = pmm_resolve<node>( slot_id );
         if ( n != nullptr )
         {
-            std::memset( n, 0, sizeof( node ) );
-            n->tag = node_tag::null;
+            n->tag  = node_tag::null;
+            n->_pad = 0;
+            std::memset( &n->ref_val, 0, sizeof( n->ref_val ) );
         }
 
         return slot_id;

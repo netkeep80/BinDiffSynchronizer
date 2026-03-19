@@ -1037,10 +1037,9 @@ class pjson_db_pmm
         case node_tag::string:
         {
             node* n = pmm_resolve<node>( id );
-            if ( n != nullptr && n->string_val.chars_off != 0 )
+            if ( n != nullptr )
             {
-                auto str_pptr = offset_to_pptr<char>( n->string_val.chars_off );
-                PamManager::template deallocate_typed<char>( str_pptr );
+                n->string_val.free_data();
             }
             break;
         }

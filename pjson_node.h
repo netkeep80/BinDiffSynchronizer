@@ -1,6 +1,6 @@
 #pragma once
 #include "pstringview_pmm.h"
-#include "pstring_pmm.h"
+#include "pam_pmm_config.h"
 #include "pvector_pmm.h"
 #include "pmap_pmm.h"
 #include "pmem_array_pmm.h"
@@ -135,10 +135,9 @@ struct node
 
         double real_val; ///< real: double
 
-        /// string: pstring (readwrite).
-        /// Используем pstring_pmm напрямую: { uintptr_t length; uintptr_t chars_off; }.
+        /// string: PamManager::pstring (readwrite, из PMM).
         /// Строковые значения JSON — изменяемые на лету (необходимо для jsonRVM).
-        pstring_pmm string_val;
+        PamManager::pstring string_val;
 
         /// binary: массив uint8_t в ПАП ($base64 при сериализации).
         /// Используем pmem_array_hdr_pmm: { uintptr_t size; uintptr_t capacity; uintptr_t data_off; }.
@@ -170,8 +169,8 @@ struct node
 
 // Проверяем размеры раскладки.
 static_assert( std::is_trivially_copyable<node>::value, "node должен быть тривиально копируемым" );
-static_assert( sizeof( pstring_pmm ) == 2 * sizeof( void* ),
-               "pstring_pmm (node::string_val) должен занимать 2 * sizeof(void*) байт" );
+static_assert( std::is_trivially_copyable<PamManager::pstring>::value,
+               "PamManager::pstring (node::string_val) должен быть тривиально копируемым" );
 static_assert( sizeof( pmem_array_hdr_pmm ) == 3 * sizeof( void* ),
                "pmem_array_hdr_pmm (node::array_val и др.) должен занимать 3 * sizeof(void*) байт" );
 static_assert( sizeof( node::ref_val ) == 3 * sizeof( void* ), "node::ref_val должен занимать 3 * sizeof(void*) байт" );
@@ -374,12 +373,12 @@ struct node_view
         const node* n = _resolve();
         if ( n == nullptr || n->tag != node_tag::string )
             return std::string_view{};
-        if ( n->string_val.chars_off == 0 )
+        if ( n->string_val.empty() )
             return std::string_view{};
-        const char* s = pmm_resolve<char>( n->string_val.chars_off );
-        if ( s == nullptr )
+        const char* s = n->string_val.c_str();
+        if ( s == nullptr || s[0] == '\0' )
             return std::string_view{};
-        return std::string_view{ s, static_cast<std::size_t>( n->string_val.length ) };
+        return std::string_view{ s, n->string_val.size() };
     }
 
     /// Получить путь ref-узла (pstringview-совместимые поля — readonly, интернированные).
@@ -422,7 +421,7 @@ struct node_view
         if ( n->tag == node_tag::binary )
             return n->binary_val.size;
         if ( n->tag == node_tag::string )
-            return n->string_val.length;
+            return static_cast<uintptr_t>( n->string_val.size() );
         return 0;
     }
 
@@ -746,9 +745,9 @@ inline void node_set_real( uintptr_t node_off, double v )
         n->real_val = v;
 }
 
-/// Установить строковое значение узла (pstring, readwrite).
-/// Аллоцирует массив char в ПАП и сохраняет смещение.
-/// Безопасна при realloc: сохраняет node_off до вызова NewArray.
+/// Установить строковое значение узла (PamManager::pstring, readwrite).
+/// Использует PMM pstring::assign() для управления памятью.
+/// Безопасна при realloc: переразрешает node после операций с памятью.
 inline void node_set_string( uintptr_t node_off, const char* s )
 {
     if ( node_off == 0 )
@@ -759,42 +758,30 @@ inline void node_set_string( uintptr_t node_off, const char* s )
         node* n = pmm_resolve<node>( node_off );
         if ( n == nullptr )
             return;
-        if ( n->tag == node_tag::string && n->string_val.chars_off != 0 )
+        if ( n->tag == node_tag::string )
         {
-            uintptr_t old_chars = n->string_val.chars_off;
-            pam_pmm_delete( old_chars );
-            // После Delete — re-resolve.
-            n = pmm_resolve<node>( node_off );
-            if ( n == nullptr )
-                return;
+            n->string_val.free_data();
+            // free_data() может вызвать deallocate, но не allocate — re-resolve не нужен.
         }
-        n->tag                  = node_tag::string;
-        n->_pad                 = 0;
-        n->string_val.length    = 0;
-        n->string_val.chars_off = 0;
+        n->tag        = node_tag::string;
+        n->_pad       = 0;
+        n->string_val = PamManager::pstring{};
     }
 
     if ( s == nullptr || s[0] == '\0' )
         return;
 
-    uintptr_t len = static_cast<uintptr_t>( std::strlen( s ) );
-
-    // Выделяем массив символов.
-    fptr<char> arr;
-    arr.NewArray( static_cast<unsigned>( len + 1 ) ); // Может вызвать realloc!
-    uintptr_t chars_off = arr.addr();
+    // Выполняем assign на стековой копии, чтобы обойти проблему с realloc.
+    // pstring::assign() может вызвать allocate(), который может вызвать realloc хранилища,
+    // инвалидируя указатель на node. Поэтому работаем со стековой копией.
+    PamManager::pstring tmp{};
+    tmp.assign( s );
 
     // Переразрешаем node после возможного realloc.
     node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
-    n->string_val.length    = len;
-    n->string_val.chars_off = chars_off;
-
-    // Копируем строку.
-    char* dst = pmm_resolve<char>( chars_off );
-    if ( dst != nullptr )
-        std::memcpy( dst, s, static_cast<std::size_t>( len + 1 ) );
+    n->string_val = tmp;
 }
 
 /// Переназначить строковое значение узла (pstring assign — readwrite).

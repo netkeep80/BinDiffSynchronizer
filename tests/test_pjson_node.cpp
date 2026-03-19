@@ -49,9 +49,11 @@ TEST_CASE( "node: trivially copyable POD struct", "[pjson_node][layout][node]" )
     REQUIRE( std::is_trivially_copyable<node>::value );
 }
 
-TEST_CASE( "node: string_val layout is 2 * sizeof(void*)", "[pjson_node][layout][node]" )
+TEST_CASE( "node: string_val is PamManager::pstring (12 bytes)", "[pjson_node][layout][node]" )
 {
-    REQUIRE( sizeof( node::string_val ) == 2 * sizeof( void* ) );
+    // string_val — PMM pstring: { uint32_t _length; uint32_t _capacity; uint32_t _data_idx; } = 12 bytes.
+    REQUIRE( sizeof( node::string_val ) == sizeof( PamManager::pstring ) );
+    REQUIRE( sizeof( PamManager::pstring ) == 12 );
 }
 
 TEST_CASE( "node: array_val layout is 3 * sizeof(void*)", "[pjson_node][layout][node]" )
