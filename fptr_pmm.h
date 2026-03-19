@@ -72,7 +72,7 @@ template <typename T> class fptr_pmm
         if ( name != nullptr && name[0] != '\0' )
         {
             uintptr_t off = pam_pmm_find_typed<T>( name );
-            _p             = offset_to_pptr<T>( off );
+            _p            = offset_to_pptr<T>( off );
         }
     }
 
@@ -107,7 +107,7 @@ template <typename T> class fptr_pmm
     void find( const char* name )
     {
         uintptr_t off = pam_pmm_find_typed<T>( name );
-        _p             = offset_to_pptr<T>( off );
+        _p            = offset_to_pptr<T>( off );
     }
 
     // -------------------------------------------------------------------------
@@ -140,7 +140,7 @@ template <typename T> class fptr_pmm
     void New( const char* name = nullptr )
     {
         uintptr_t off = pam_pmm_create<T>( name );
-        _p             = offset_to_pptr<T>( off );
+        _p            = offset_to_pptr<T>( off );
     }
 
     /**
@@ -152,7 +152,7 @@ template <typename T> class fptr_pmm
     void NewArray( unsigned count, const char* name = nullptr )
     {
         uintptr_t off = pam_pmm_create_array<T>( count, name );
-        _p             = offset_to_pptr<T>( off );
+        _p            = offset_to_pptr<T>( off );
     }
 
     /**
@@ -173,7 +173,7 @@ template <typename T> class fptr_pmm
 
             // Если fptr_pmm находится внутри ПАП, перечитываем this после возможной реаллокации.
             fptr_pmm<T>* self = ( self_off != 0 ) ? pmm_resolve<fptr_pmm<T>>( self_off ) : this;
-            self->_p           = typename PamManager::template pptr<T>{};
+            self->_p          = typename PamManager::template pptr<T>{};
         }
     }
 
@@ -226,8 +226,7 @@ static_assert( sizeof( fptr_pmm<double> ) == sizeof( PamManager::pptr<double> ),
 
 // Проверяем тривиальную копируемость.
 static_assert( std::is_trivially_copyable<fptr_pmm<int>>::value, "fptr_pmm<T> должен быть тривиально копируемым" );
-static_assert( std::is_trivially_copyable<fptr_pmm<double>>::value,
-               "fptr_pmm<T> должен быть тривиально копируемым" );
+static_assert( std::is_trivially_copyable<fptr_pmm<double>>::value, "fptr_pmm<T> должен быть тривиально копируемым" );
 
 // ═══════════════════════════════════════════════════════════════════════════
 // АЛИАС fptr ДЛЯ СОВМЕСТИМОСТИ (в пространстве имён pjson)
