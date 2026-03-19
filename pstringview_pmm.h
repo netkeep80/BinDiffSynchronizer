@@ -51,7 +51,7 @@ using pmm_pstringview_pptr = typename PamManager::template pptr<pmm_pstringview>
 
 /// Опциональный callback для ленивого восстановления корня AVL-дерева из ПАП.
 /// Устанавливается в pam_pmm.h после определения pstringview_pmm_restore_root().
-inline void ( *& pstringview_pmm_pre_intern_hook() )()
+inline void ( *&pstringview_pmm_pre_intern_hook() )()
 {
     static void ( *hook )() = nullptr;
     return hook;
@@ -59,7 +59,7 @@ inline void ( *& pstringview_pmm_pre_intern_hook() )()
 
 /// Опциональный callback для сохранения корня AVL-дерева в ПАП после интернирования.
 /// Устанавливается в pam_pmm.h после определения pstringview_pmm_save_root().
-inline void ( *& pstringview_pmm_post_intern_hook() )()
+inline void ( *&pstringview_pmm_post_intern_hook() )()
 {
     static void ( *hook )() = nullptr;
     return hook;
@@ -67,7 +67,7 @@ inline void ( *& pstringview_pmm_post_intern_hook() )()
 
 /// Опциональный callback для сброса флагов персистентности при reset().
 /// Устанавливается в pam_pmm.h.
-inline void ( *& pstringview_pmm_reset_hook() )()
+inline void ( *&pstringview_pmm_reset_hook() )()
 {
     static void ( *hook )() = nullptr;
     return hook;
@@ -99,7 +99,7 @@ inline void pstringview_pmm_reset()
  */
 struct pstringview_pmm
 {
-    uintptr_t length; ///< Длина строки (без нулевого терминатора)
+    uintptr_t length;       ///< Длина строки (без нулевого терминатора)
     uintptr_t chars_offset; ///< Байтовое смещение строковых данных в ПАП
 
     /**
@@ -141,8 +141,7 @@ struct pstringview_pmm
         // chars_offset указывает на str[] внутри блока pmm_pstringview,
         // обеспечивая совместимость с pmm_resolve<char>(chars_offset).
         const std::uint8_t* base = PamManager::backend().base_ptr();
-        chars_offset = static_cast<uintptr_t>(
-            reinterpret_cast<const std::uint8_t*>( sv->c_str() ) - base );
+        chars_offset = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( sv->c_str() ) - base );
 
         // Кэшируем длину
         length = static_cast<uintptr_t>( sv->size() );
@@ -266,15 +265,14 @@ namespace detail
 /// Рекурсивный in-order обход AVL-дерева pmm::pstringview.
 /// Использует PamManager::get_tree_left_offset() / get_tree_right_offset()
 /// для навигации по AVL-дереву.
-inline void pstringview_pmm_inorder( pmm_pstringview_pptr                        node,
-                                      const char*                                  pattern,
-                                      std::vector<pstringview_pmm_search_result>& results )
+inline void pstringview_pmm_inorder( pmm_pstringview_pptr node, const char* pattern,
+                                     std::vector<pstringview_pmm_search_result>& results )
 {
     if ( node.is_null() )
         return;
 
     // Тип гранульного индекса PMM.
-    using index_type = typename PamManager::index_type;
+    using index_type        = typename PamManager::index_type;
     constexpr auto no_block = std::numeric_limits<index_type>::max();
 
     // Обход левого поддерева.

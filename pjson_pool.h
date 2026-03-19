@@ -20,17 +20,12 @@ using namespace pjson;
 // ===========================================================================
 
 /// Персистный пул для узлов node.
-/// Обёртка совместимости: те же поля, что и pjson_pool_pmm,
+/// Обёртка совместимости: наследуется от pjson_pool_pmm,
 /// member-функции делегируют в pjson_pool_pmm_* free-функции.
-struct pjson_pool
+/// Наследование гарантирует идентичный layout и отсутствие
+/// strict-aliasing нарушений при обращении через pmm_resolve.
+struct pjson_pool : pjson_pool_pmm
 {
-    uintptr_t nodes_size_;     ///< Число узлов в массиве
-    uintptr_t nodes_cap_;      ///< Ёмкость массива
-    uintptr_t nodes_data_off_; ///< Смещение массива node[] в ПАП
-
-    node_id   free_head_;  ///< node_id головы free-list; 0 = пусто
-    uintptr_t free_count_; ///< Число узлов в free-list
-
     // -----------------------------------------------------------------------
     // Публичный API пула (совместимость с Фазой 4)
     // -----------------------------------------------------------------------
@@ -82,4 +77,7 @@ struct pjson_pool
 };
 
 static_assert( std::is_trivially_copyable<pjson_pool>::value, "pjson_pool должен быть тривиально копируемым" );
-static_assert( sizeof( pjson_pool ) == 5 * sizeof( uintptr_t ), "pjson_pool должен занимать 5 * sizeof(uintptr_t) байт" );
+static_assert( sizeof( pjson_pool ) == sizeof( pjson_pool_pmm ),
+               "pjson_pool должен совпадать по размеру с pjson_pool_pmm" );
+static_assert( sizeof( pjson_pool ) == 5 * sizeof( uintptr_t ),
+               "pjson_pool должен занимать 5 * sizeof(uintptr_t) байт" );

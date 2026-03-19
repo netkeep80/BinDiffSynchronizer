@@ -1012,7 +1012,7 @@ inline void pstringview_pmm_restore_root()
         const pstringview_root_slot* slot = pmm_resolve_const<pstringview_root_slot>( slot_off );
         if ( slot != nullptr && slot->root_idx != 0 )
         {
-            using index_type            = typename PamManager::index_type;
+            using index_type           = typename PamManager::index_type;
             pmm_pstringview::_root_idx = static_cast<index_type>( slot->root_idx );
         }
     }
@@ -1084,9 +1084,8 @@ inline pam_intern_result pam_intern_string( const char* s )
     // а не на начало блока. Это обеспечивает совместимость с pmm_resolve<char>().
     const char*         str_ptr = sv->c_str();
     const std::uint8_t* base    = PamManager::backend().base_ptr();
-    result.chars_offset         = static_cast<uintptr_t>(
-        reinterpret_cast<const std::uint8_t*>( str_ptr ) - base );
-    result.length = static_cast<uintptr_t>( sv->size() );
+    result.chars_offset         = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( str_ptr ) - base );
+    result.length               = static_cast<uintptr_t>( sv->size() );
 
     // Сохраняем корень AVL-дерева в ПАП (персистентность).
     pstringview_pmm_save_root();
@@ -1122,8 +1121,7 @@ inline std::vector<pstringview_search_result> pam_search_strings( const char* pa
             const pmm_pstringview* sv = p.resolve();
             if ( sv != nullptr )
             {
-                sr.chars_offset = static_cast<uintptr_t>(
-                    reinterpret_cast<const std::uint8_t*>( sv->c_str() ) - base );
+                sr.chars_offset = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( sv->c_str() ) - base );
             }
             else
             {
