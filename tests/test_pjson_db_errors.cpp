@@ -99,8 +99,8 @@ TEST_CASE( "node_error: valid node_view is not an error", "[phase11][error]" )
 TEST_CASE( "node_error: get nonexistent path returns not_found", "[phase11][error]" )
 {
     reset_pam();
-    pjson_db_pmm  db;
-    node_view v = db.get( "/nonexistent/path" );
+    pjson_db_pmm db;
+    node_view    v = db.get( "/nonexistent/path" );
     REQUIRE( v.is_error() );
     REQUIRE( v.error() == node_error::not_found );
 }
@@ -214,8 +214,8 @@ TEST_CASE( "node_view::error_message: valid node_view returns no error", "[phase
 TEST_CASE( "node_view::error_message: db.get error has correct message", "[phase12][error]" )
 {
     reset_pam();
-    pjson_db_pmm  db;
-    node_view v = db.get( "/nonexistent" );
+    pjson_db_pmm db;
+    node_view    v = db.get( "/nonexistent" );
     REQUIRE( v.is_error() );
     REQUIRE( std::string( v.error_message() ) == "node not found" );
 }

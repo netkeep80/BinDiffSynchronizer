@@ -41,8 +41,8 @@ static void reset_pam()
 TEST_CASE( "pjson_db_pmm: default constructor creates root object", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db_pmm  db;
-    node_view root = db.root();
+    pjson_db_pmm db;
+    node_view    root = db.root();
     REQUIRE( root.valid() );
     REQUIRE( root.is_object() );
 }
@@ -58,10 +58,10 @@ TEST_CASE( "pjson_db_pmm: second pjson_db_pmm reuses existing root", "[pjson_db_
 {
     reset_pam();
     pjson_db_pmm db1;
-    node_id  root1 = db1.root_id();
+    node_id      root1 = db1.root_id();
 
     pjson_db_pmm db2;
-    node_id  root2 = db2.root_id();
+    node_id      root2 = db2.root_id();
 
     // Оба должны указывать на один корневой узел.
     REQUIRE( root1 == root2 );
@@ -180,8 +180,8 @@ TEST_CASE( "pjson_db_pmm: put multiple nested keys", "[pjson_db_pmm]" )
 TEST_CASE( "pjson_db_pmm: get returns invalid view for missing path", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db_pmm  db;
-    node_view v = db.get( "/nonexistent/path" );
+    pjson_db_pmm db;
+    node_view    v = db.get( "/nonexistent/path" );
     REQUIRE( !v.valid() );
 }
 
@@ -743,8 +743,8 @@ TEST_CASE( "pjson_db_pmm: save and reload preserves data", "[pjson_db_pmm]" )
         pstringview_manager::reset();
         pam_pmm_reset();
         pam_pmm_init( pam_file );
-        pjson_db_pmm  db;
-        node_view greeting = db.get( "/greeting" );
+        pjson_db_pmm db;
+        node_view    greeting = db.get( "/greeting" );
         REQUIRE( greeting.is_string() );
         REQUIRE( greeting.as_string() == "hello" );
 
@@ -1114,7 +1114,8 @@ TEST_CASE( "pjson_db_pmm: phase8 integration - search_node_strings finds values 
     REQUIRE( results.size() == 2u );
 }
 
-TEST_CASE( "pjson_db_pmm: phase8 integration - operator[] creates path then insert populates it", "[pjson_db_pmm][phase8]" )
+TEST_CASE( "pjson_db_pmm: phase8 integration - operator[] creates path then insert populates it",
+           "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
     pjson_db_pmm db;

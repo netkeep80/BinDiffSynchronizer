@@ -302,7 +302,7 @@ TEST_CASE( "pjson_db_pmm perf: ReserveSlots before bulk insert", "[pjson_db_pmm]
     {
         reset_pam_perf();
         pjson_db_pmm db;
-        char     path[64];
+        char         path[64];
 
         auto t0 = perf_clk::now();
         for ( unsigned i = 0; i < PERF_N; ++i )

@@ -299,4 +299,3 @@ TEST_CASE( "pjson::fptr<T> alias works as fptr_pmm<T>", "[task14.7][fptr_pmm][al
 
     p.Delete();
 }
-

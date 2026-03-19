@@ -361,7 +361,8 @@ TEST_CASE( "pstringview_pmm: two intern(same) calls give identical chars_offset"
 // Задача 2.2: pam_intern_string — интернирование строки через уровень ПАМ
 // (Обновлено Задача 15.5: chars_offset указывает на блок pmm::pstringview)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_intern_string: returns result with correct chars_offset and length", "[pstringview_pmm][phase2][intern]" )
+TEST_CASE( "pam_intern_string: returns result with correct chars_offset and length",
+           "[pstringview_pmm][phase2][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -397,7 +398,8 @@ TEST_CASE( "pam_intern_string: different strings have different chars_offset", "
 // ---------------------------------------------------------------------------
 // Задача 2.2: pam_intern_string — пустая строка
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_intern_string: empty string gives length zero and valid chars_offset", "[pstringview_pmm][phase2][intern]" )
+TEST_CASE( "pam_intern_string: empty string gives length zero and valid chars_offset",
+           "[pstringview_pmm][phase2][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
