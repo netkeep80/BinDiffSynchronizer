@@ -301,8 +301,7 @@ inline void pam_pmm_init( const char* filename )
                     if ( !root_pptr.is_null() )
                     {
                         pam_pmm_root* root = root_pptr.resolve();
-                        if ( root != nullptr && root->magic == PAM_PMM_MAGIC
-                             && root->version == PAM_PMM_VERSION )
+                        if ( root != nullptr && root->magic == PAM_PMM_MAGIC && root->version == PAM_PMM_VERSION )
                         {
                             detail::pam_pmm_root_offset() = pptr_to_offset( root_pptr );
                             loaded                        = true;
