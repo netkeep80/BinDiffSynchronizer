@@ -57,12 +57,12 @@ namespace pjson
  */
 struct pjson_pool_pmm
 {
-    uintptr_t nodes_size_; ///< Число узлов в массиве
-    uintptr_t nodes_cap_;  ///< Ёмкость массива
-    uintptr_t nodes_data_off_; ///< Байтовое смещение массива node[] в ПАП; 0 = не выделено
+    uintptr_t nodes_size_ = 0; ///< Число узлов в массиве
+    uintptr_t nodes_cap_  = 0; ///< Ёмкость массива
+    uintptr_t nodes_data_off_ = 0; ///< Байтовое смещение массива node[] в ПАП; 0 = не выделено
 
-    node_id   free_head_;  ///< node_id головы free-list; 0 = пусто
-    uintptr_t free_count_; ///< Число узлов в free-list
+    node_id   free_head_  = 0; ///< node_id головы free-list; 0 = пусто
+    uintptr_t free_count_ = 0; ///< Число узлов в free-list
 };
 
 static_assert( std::is_trivially_copyable<pjson_pool_pmm>::value, "pjson_pool_pmm должен быть тривиально копируемым" );
