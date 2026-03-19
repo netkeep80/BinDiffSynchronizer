@@ -35,16 +35,16 @@ TEST_CASE( "pjson: string_val is PamManager::pstring (12 bytes)", "[pjson][layou
     REQUIRE( sizeof( PamManager::pstring ) == 12 );
 }
 
-TEST_CASE( "pjson: array_val layout is 3 * sizeof(void*)", "[pjson][layout]" )
+TEST_CASE( "pjson: array_val layout is 12 bytes (parray)", "[pjson][layout]" )
 {
-    // array_val — раскладка pvector<node_id> (size + capacity + data_off).
-    REQUIRE( sizeof( node::array_val ) == 3 * sizeof( void* ) );
+    // array_val — PamManager::parray<node_id> = uint32_t * 3 = 12 байт.
+    REQUIRE( sizeof( node::array_val ) == 12u );
 }
 
-TEST_CASE( "pjson: object_val layout is 3 * sizeof(void*)", "[pjson][layout]" )
+TEST_CASE( "pjson: object_val layout is 12 bytes (parray)", "[pjson][layout]" )
 {
-    // object_val — раскладка pmap<pstringview, node_id> (size + capacity + data_off).
-    REQUIRE( sizeof( node::object_val ) == 3 * sizeof( void* ) );
+    // object_val — PamManager::parray<object_entry> = uint32_t * 3 = 12 байт.
+    REQUIRE( sizeof( node::object_val ) == 12u );
 }
 
 // =============================================================================

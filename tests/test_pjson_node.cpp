@@ -56,19 +56,19 @@ TEST_CASE( "node: string_val is PamManager::pstring (12 bytes)", "[pjson_node][l
     REQUIRE( sizeof( PamManager::pstring ) == 12 );
 }
 
-TEST_CASE( "node: array_val layout is 3 * sizeof(void*)", "[pjson_node][layout][node]" )
+TEST_CASE( "node: array_val layout is 12 bytes (parray)", "[pjson_node][layout][node]" )
 {
-    REQUIRE( sizeof( node::array_val ) == 3 * sizeof( void* ) );
+    REQUIRE( sizeof( node::array_val ) == 12u );
 }
 
-TEST_CASE( "node: object_val layout is 3 * sizeof(void*)", "[pjson_node][layout][node]" )
+TEST_CASE( "node: object_val layout is 12 bytes (parray)", "[pjson_node][layout][node]" )
 {
-    REQUIRE( sizeof( node::object_val ) == 3 * sizeof( void* ) );
+    REQUIRE( sizeof( node::object_val ) == 12u );
 }
 
-TEST_CASE( "node: binary_val layout is 3 * sizeof(void*)", "[pjson_node][layout][node]" )
+TEST_CASE( "node: binary_val layout is 12 bytes (parray)", "[pjson_node][layout][node]" )
 {
-    REQUIRE( sizeof( node::binary_val ) == 3 * sizeof( void* ) );
+    REQUIRE( sizeof( node::binary_val ) == 12u );
 }
 
 TEST_CASE( "node: ref_val layout is 3 * sizeof(void*)", "[pjson_node][layout][node]" )
@@ -598,11 +598,11 @@ TEST_CASE( "node: object keys are interned (pstringview) - same chars_offset", "
     const node* n2 = pmm_resolve<node>( obj2_off );
 
     // Доступ к first entry каждого object_val.
-    REQUIRE( n1->object_val.size == 1u );
-    REQUIRE( n2->object_val.size == 1u );
+    REQUIRE( n1->object_val.size() == 1u );
+    REQUIRE( n2->object_val.size() == 1u );
 
-    const object_entry* e1 = pmm_resolve<object_entry>( n1->object_val.data_off );
-    const object_entry* e2 = pmm_resolve<object_entry>( n2->object_val.data_off );
+    const object_entry* e1 = n1->object_val.data();
+    const object_entry* e2 = n2->object_val.data();
 
     REQUIRE( e1 != nullptr );
     REQUIRE( e2 != nullptr );
@@ -724,8 +724,8 @@ TEST_CASE( "node: object keys are pstringview (readonly) - not pstring (readwrit
 
     // После вставки ключ должен иметь тот же chars_offset что pam_intern_string.
     const node* n = pmm_resolve<node>( obj_off );
-    REQUIRE( n->object_val.size == 1u );
-    const object_entry* e = pmm_resolve<object_entry>( n->object_val.data_off );
+    REQUIRE( n->object_val.size() == 1u );
+    const object_entry* e = n->object_val.data();
     REQUIRE( e->key_chars_offset == r1.chars_offset ); // тот же интернированный offset
 
     fn_obj.Delete();

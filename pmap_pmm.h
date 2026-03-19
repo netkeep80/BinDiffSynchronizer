@@ -4,12 +4,13 @@
  * @brief Каноническая реализация персистной карты на базе PMM.
  *
  * pmap_pmm<K, V> — персистный sorted-array контейнер, аналог std::map<K, V>.
- * Все операции делегируются функциям из pmem_array_pmm.h.
+ * Внутренне использует PamManager::parray<Entry> для хранения.
  *
- * @see pmem_array_pmm.h — примитив персистного массива на базе PMM
+ * @see parray — pmm::parray<T, ManagerT> (persistent dynamic array)
  */
 
-#include "pmem_array_pmm.h"
+#include "pam_pmm_config.h"
+#include "pam_adapter.h"
 #include <cstring>
 #include <type_traits>
 
@@ -56,6 +57,7 @@ template <typename K, typename V> struct pmap_pmm_trivial_check
  *
  * Реализована как sorted array пар {K, V}. Поиск — бинарный O(log n).
  * Вставка и удаление — O(n) из-за сдвигов.
+ * Внутренне использует PamManager::parray<Entry> для хранения.
  *
  * @tparam K Тип ключа. Должен быть тривиально копируемым и поддерживать operator<.
  * @tparam V Тип значения. Должен быть тривиально копируемым.
@@ -67,15 +69,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
 {
     using Entry = pmap_entry_pmm<K, V>;
 
-    // Единственное поле — заголовок pmem_array_hdr_pmm (3 * sizeof(uintptr_t)).
-    // Раскладка идентична pmap: [size | capacity | data_off].
-    pmem_array_hdr_pmm hdr_{}; ///< Заголовок персистного массива (инициализирован нулями)
-
-    // Вспомогательные функторы для pmem_array_pmm_insert_sorted / pmem_array_pmm_find_sorted.
-    struct KeyOf
-    {
-        const K& operator()( const Entry& e ) const { return e.key; }
-    };
+    PamManager::parray<Entry> arr_{}; ///< Внутренний parray (инициализирован нулями)
 
     struct Less
     {
@@ -86,12 +80,12 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
     /**
      * @brief Получить текущий размер карты (количество элементов).
      */
-    uintptr_t size() const { return hdr_.size; }
+    uintptr_t size() const { return static_cast<uintptr_t>( arr_.size() ); }
 
     /**
      * @brief Проверить, пуста ли карта.
      */
-    bool empty() const { return hdr_.size == 0; }
+    bool empty() const { return arr_.empty(); }
 
     /**
      * @brief Вставить или обновить пару ключ-значение.
@@ -101,34 +95,99 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
      *
      * @param k Ключ.
      * @param v Значение.
-     * @param self_off Байтовое смещение этого pmap_pmm в ПАП (для realloc-безопасности).
+     * @param self_off Байтовое смещение этого pmap_pmm в ПАП (игнорируется, сохранён для совместимости).
      */
-    void insert( const K& k, const V& v, uintptr_t self_off )
-    {
-        Entry e;
-        e.key   = k;
-        e.value = v;
-        pmem_array_pmm_insert_sorted<Entry, KeyOf, Less>( self_off, e, KeyOf{}, Less{} );
-    }
+    void insert( const K& k, const V& v, uintptr_t self_off ) { _insert_impl( k, v, self_off ); }
 
     /**
-     * @brief Вставить или обновить пару (вычисляет смещение автоматически).
-     *
-     * Вычисляет байтовое смещение hdr_ в ПАП и делегирует в 3-аргументную
-     * версию insert.
+     * @brief Вставить или обновить пару.
      *
      * @param k Ключ.
      * @param v Значение.
-     *
-     * @warning Требует, чтобы объект находился в PMM-памяти.
      */
     void insert( const K& k, const V& v )
     {
-        const std::uint8_t* base     = PamManager::backend().base_ptr();
-        uintptr_t           self_off = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( &hdr_ ) - base );
-        insert( k, v, self_off );
+        // Вычисляем смещение this в PMM для безопасной повторной резолвации
+        // после возможного роста пула.
+        std::uint8_t* base = PamManager::backend().base_ptr();
+        uintptr_t     self_off =
+            ( base != nullptr ) ? static_cast<uintptr_t>( reinterpret_cast<std::uint8_t*>( this ) - base ) : 0;
+        _insert_impl( k, v, self_off );
     }
 
+  private:
+    /**
+     * @brief Внутренняя реализация вставки, безопасная при росте PMM-пула.
+     *
+     * Когда pmap_pmm хранится внутри PMM-пула, операция push_back может
+     * вызвать рост пула (malloc+memcpy+free), после чего указатель this
+     * становится невалидным. Поэтому после push_back необходимо повторно
+     * разрешить self_off для получения актуального this.
+     */
+    void _insert_impl( const K& k, const V& v, uintptr_t self_off )
+    {
+        uintptr_t sz = arr_.size();
+        uintptr_t lo = 0, hi = sz;
+
+        // Бинарный поиск (lower_bound)
+        {
+            const Entry* raw = arr_.data();
+            if ( raw != nullptr )
+            {
+                while ( lo < hi )
+                {
+                    uintptr_t mid = ( lo + hi ) / 2;
+                    if ( Less{}( raw[mid].key, k ) )
+                        lo = mid + 1;
+                    else
+                        hi = mid;
+                }
+            }
+        }
+
+        uintptr_t idx = lo;
+
+        // Проверяем, существует ли уже такой ключ
+        {
+            const Entry* raw = arr_.data();
+            if ( raw != nullptr && idx < sz && !Less{}( k, raw[idx].key ) && !Less{}( raw[idx].key, k ) )
+            {
+                // Ключ найден — обновляем значение
+                Entry updated;
+                updated.key   = k;
+                updated.value = v;
+                arr_.set( idx, updated );
+                return;
+            }
+        }
+
+        // Вставляем новый элемент: push_back может вызвать рост PMM-пула,
+        // что инвалидирует this. Сохраняем состояние arr_ и выполняем
+        // push_back через копию, затем записываем результат обратно.
+        {
+            PamManager::parray<Entry> arr_copy = arr_;
+            Entry                     empty_entry{};
+            arr_copy.push_back( empty_entry );
+
+            // После push_back пул мог вырасти — перечитываем this.
+            pmap_pmm<K, V>* self =
+                ( self_off != 0 ) ? reinterpret_cast<pmap_pmm<K, V>*>( PamManager::backend().base_ptr() + self_off )
+                                  : this;
+            self->arr_ = arr_copy;
+
+            Entry* raw = self->arr_.data();
+            if ( raw != nullptr && sz > idx )
+                std::memmove( raw + idx + 1, raw + idx, ( sz - idx ) * sizeof( Entry ) );
+
+            if ( raw != nullptr )
+            {
+                raw[idx].key   = k;
+                raw[idx].value = v;
+            }
+        }
+    }
+
+  public:
     /// Псевдоним для insert(k, v).
     void insert_direct( const K& k, const V& v ) { insert( k, v ); }
 
@@ -140,11 +199,13 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
      */
     V* find( const K& k )
     {
-        if ( hdr_.size == 0 || hdr_.data_off == 0 )
+        if ( arr_.empty() )
             return nullptr;
 
-        Entry*    raw = pmm_resolve<Entry>( hdr_.data_off );
-        uintptr_t lo = 0, hi = hdr_.size;
+        Entry* raw = arr_.data();
+        if ( raw == nullptr )
+            return nullptr;
+        uintptr_t lo = 0, hi = arr_.size();
         while ( lo < hi )
         {
             uintptr_t mid = ( lo + hi ) / 2;
@@ -154,7 +215,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
                 hi = mid;
         }
 
-        if ( lo < hdr_.size && !Less{}( k, raw[lo].key ) && !Less{}( raw[lo].key, k ) )
+        if ( lo < arr_.size() && !Less{}( k, raw[lo].key ) && !Less{}( raw[lo].key, k ) )
             return &raw[lo].value;
 
         return nullptr;
@@ -165,11 +226,13 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
      */
     const V* find( const K& k ) const
     {
-        if ( hdr_.size == 0 || hdr_.data_off == 0 )
+        if ( arr_.empty() )
             return nullptr;
 
-        const Entry* raw = pmm_resolve_const<Entry>( hdr_.data_off );
-        uintptr_t    lo = 0, hi = hdr_.size;
+        const Entry* raw = arr_.data();
+        if ( raw == nullptr )
+            return nullptr;
+        uintptr_t lo = 0, hi = arr_.size();
         while ( lo < hi )
         {
             uintptr_t mid = ( lo + hi ) / 2;
@@ -179,7 +242,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
                 hi = mid;
         }
 
-        if ( lo < hdr_.size && !Less{}( k, raw[lo].key ) && !Less{}( raw[lo].key, k ) )
+        if ( lo < arr_.size() && !Less{}( k, raw[lo].key ) && !Less{}( raw[lo].key, k ) )
             return &raw[lo].value;
 
         return nullptr;
@@ -193,11 +256,13 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
      */
     bool erase( const K& k )
     {
-        if ( hdr_.size == 0 || hdr_.data_off == 0 )
+        if ( arr_.empty() )
             return false;
 
-        Entry*    raw = pmm_resolve<Entry>( hdr_.data_off );
-        uintptr_t lo = 0, hi = hdr_.size;
+        Entry* raw = arr_.data();
+        if ( raw == nullptr )
+            return false;
+        uintptr_t lo = 0, hi = arr_.size();
         while ( lo < hi )
         {
             uintptr_t mid = ( lo + hi ) / 2;
@@ -207,14 +272,15 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
                 hi = mid;
         }
 
-        if ( lo >= hdr_.size || Less{}( k, raw[lo].key ) || Less{}( raw[lo].key, k ) )
+        if ( lo >= arr_.size() || Less{}( k, raw[lo].key ) || Less{}( raw[lo].key, k ) )
             return false;
 
         // Сдвигаем элементы [lo+1..size-1] влево
-        if ( lo + 1 < hdr_.size )
-            std::memmove( raw + lo, raw + lo + 1, ( hdr_.size - lo - 1 ) * sizeof( Entry ) );
+        uintptr_t sz = arr_.size();
+        if ( lo + 1 < sz )
+            std::memmove( raw + lo, raw + lo + 1, ( sz - lo - 1 ) * sizeof( Entry ) );
 
-        hdr_.size--;
+        arr_._size--;
         return true;
     }
 
@@ -246,22 +312,12 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
     /**
      * @brief Обнулить размер. Не освобождает выделенный буфер.
      */
-    void clear() { hdr_.size = 0; }
+    void clear() { arr_.clear(); }
 
     /**
      * @brief Полностью освободить выделенный буфер.
      */
-    void free()
-    {
-        if ( hdr_.data_off != 0 )
-        {
-            auto pptr = offset_to_pptr<Entry>( hdr_.data_off );
-            PamManager::template deallocate_typed<Entry>( pptr );
-        }
-        hdr_.size     = 0;
-        hdr_.capacity = 0;
-        hdr_.data_off = 0;
-    }
+    void free() { arr_.free_data(); }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Итераторы
@@ -280,13 +336,13 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
 
         Entry& operator*()
         {
-            Entry* raw = pmm_resolve<Entry>( _pm->hdr_.data_off );
+            Entry* raw = _pm->arr_.data();
             return raw[_idx];
         }
 
         Entry* operator->()
         {
-            Entry* raw = pmm_resolve<Entry>( _pm->hdr_.data_off );
+            Entry* raw = _pm->arr_.data();
             return &raw[_idx];
         }
 
@@ -320,13 +376,13 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
 
         const Entry& operator*() const
         {
-            const Entry* raw = pmm_resolve_const<Entry>( _pm->hdr_.data_off );
+            const Entry* raw = _pm->arr_.data();
             return raw[_idx];
         }
 
         const Entry* operator->() const
         {
-            const Entry* raw = pmm_resolve_const<Entry>( _pm->hdr_.data_off );
+            const Entry* raw = _pm->arr_.data();
             return &raw[_idx];
         }
 
@@ -348,27 +404,23 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
     };
 
     iterator       begin() { return iterator( this, 0 ); }
-    iterator       end() { return iterator( this, hdr_.size ); }
+    iterator       end() { return iterator( this, arr_.size() ); }
     const_iterator begin() const { return const_iterator( this, 0 ); }
-    const_iterator end() const { return const_iterator( this, hdr_.size ); }
+    const_iterator end() const { return const_iterator( this, arr_.size() ); }
     const_iterator cbegin() const { return const_iterator( this, 0 ); }
-    const_iterator cend() const { return const_iterator( this, hdr_.size ); }
+    const_iterator cend() const { return const_iterator( this, arr_.size() ); }
 
   public:
     // Конструктор по умолчанию — public для совместимости с PMM::allocate_typed.
-    // Предупреждение: создание на стеке не рекомендуется — pmap_pmm предназначен
-    // для использования внутри персистного адресного пространства.
     pmap_pmm()  = default;
     ~pmap_pmm() = default;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Проверки размера
+// Проверки тривиальной копируемости
 // ═══════════════════════════════════════════════════════════════════════════
 
-static_assert( sizeof( pmap_pmm<int, int> ) == 3 * sizeof( void* ),
-               "pmap_pmm<int,int> должен занимать 3 * sizeof(void*) байт" );
-static_assert( sizeof( pmap_pmm<int, double> ) == 3 * sizeof( void* ),
-               "pmap_pmm<int,double> должен занимать 3 * sizeof(void*) байт" );
+static_assert( std::is_trivially_copyable<pmap_pmm<int, int>>::value,
+               "pmap_pmm<int,int> должен быть тривиально копируемым" );
 
 } // namespace pjson

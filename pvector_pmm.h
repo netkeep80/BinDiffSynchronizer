@@ -4,17 +4,17 @@
  * @brief Реализация pvector на базе PersistMemoryManager.
  *
  * pvector_pmm<T> — персистный динамический массив, тонкая обёртка
- * над pmem_array_hdr_pmm. Все операции делегируются функциям из pmem_array_pmm.h.
+ * над PamManager::parray<T>. Все операции делегируются методам parray.
  *
  * Особенности:
  *   - Использует PMM для аллокации/деаллокации
  *   - Требует инициализации PamManager::create() перед использованием
  *   - Смещения кратны размеру гранулы PMM (16 байт)
  *
- * @see pmem_array_pmm.h — примитив персистного массива на базе PMM
+ * @see parray — pmm::parray<T, ManagerT> (persistent dynamic array)
  */
 
-#include "pmem_array_pmm.h"
+#include "pam_pmm_config.h"
 
 namespace pjson
 {
@@ -24,6 +24,7 @@ namespace pjson
  *
  * Аналог std::vector<T>, но все данные хранятся в персистном адресном
  * пространстве, управляемом PersistMemoryManager.
+ * Тонкая обёртка над PamManager::parray<T>.
  *
  * @tparam T Тип элементов. Должен быть тривиально копируемым.
  *
@@ -34,26 +35,23 @@ template <typename T> class pvector_pmm
 {
     static_assert( std::is_trivially_copyable<T>::value, "pvector_pmm<T> требует, чтобы T был тривиально копируемым" );
 
-    // Единственное поле — заголовок pmem_array_hdr_pmm (3 * sizeof(uintptr_t)).
-    // NOLINTBEGIN(cppcoreguidelines-pro-type-member-init)
-    pmem_array_hdr_pmm hdr_{}; ///< Заголовок персистного массива (инициализирован нулями)
-                               // NOLINTEND(cppcoreguidelines-pro-type-member-init)
+    PamManager::parray<T> arr_{}; ///< Внутренний parray (инициализирован нулями)
 
   public:
     /**
      * @brief Получить текущий размер массива.
      */
-    uintptr_t size() const { return hdr_.size; }
+    uintptr_t size() const { return static_cast<uintptr_t>( arr_.size() ); }
 
     /**
      * @brief Получить текущую ёмкость массива.
      */
-    uintptr_t capacity() const { return hdr_.capacity; }
+    uintptr_t capacity() const { return static_cast<uintptr_t>( arr_.capacity() ); }
 
     /**
      * @brief Проверить, пуст ли массив.
      */
-    bool empty() const { return hdr_.size == 0; }
+    bool empty() const { return arr_.empty(); }
 
     /**
      * @brief Добавить элемент в конец массива.
@@ -62,59 +60,12 @@ template <typename T> class pvector_pmm
      *
      * @param val Добавляемое значение.
      */
-    void push_back( const T& val )
-    {
-        // Резервируем место
-        uintptr_t cur_cap  = hdr_.capacity;
-        uintptr_t new_size = hdr_.size + 1;
-
-        if ( new_size > cur_cap )
-        {
-            uintptr_t new_cap = ( cur_cap == 0 ) ? 4 : cur_cap * 2;
-            while ( new_cap < new_size )
-                new_cap *= 2;
-
-            // Выделяем новый блок
-            auto new_data_pptr = PamManager::template allocate_typed<T>( new_cap );
-            if ( new_data_pptr.is_null() )
-                return;
-
-            uintptr_t new_data_off = pptr_to_offset( new_data_pptr );
-
-            // Копируем существующие элементы
-            if ( hdr_.data_off != 0 && hdr_.size > 0 )
-            {
-                T*       new_raw = new_data_pptr.resolve();
-                const T* old_raw = pmm_resolve_const<T>( hdr_.data_off );
-                if ( new_raw != nullptr && old_raw != nullptr )
-                    std::memcpy( new_raw, old_raw, hdr_.size * sizeof( T ) );
-            }
-
-            // Освобождаем старый буфер
-            if ( hdr_.data_off != 0 )
-            {
-                auto old_pptr = offset_to_pptr<T>( hdr_.data_off );
-                PamManager::template deallocate_typed<T>( old_pptr );
-            }
-
-            hdr_.data_off = new_data_off;
-            hdr_.capacity = new_cap;
-        }
-
-        // Добавляем элемент
-        T* raw         = pmm_resolve<T>( hdr_.data_off );
-        raw[hdr_.size] = val;
-        hdr_.size++;
-    }
+    void push_back( const T& val ) { arr_.push_back( val ); }
 
     /**
      * @brief Удалить последний элемент.
      */
-    void pop_back()
-    {
-        if ( hdr_.size > 0 )
-            hdr_.size--;
-    }
+    void pop_back() { arr_.pop_back(); }
 
     /**
      * @brief Доступ к элементу по индексу.
@@ -123,7 +74,7 @@ template <typename T> class pvector_pmm
      */
     T& operator[]( uintptr_t idx )
     {
-        T* raw = pmm_resolve<T>( hdr_.data_off );
+        T* raw = arr_.data();
         return raw[idx];
     }
 
@@ -132,7 +83,7 @@ template <typename T> class pvector_pmm
      */
     const T& operator[]( uintptr_t idx ) const
     {
-        const T* raw = pmm_resolve_const<T>( hdr_.data_off );
+        const T* raw = arr_.data();
         return raw[idx];
     }
 
@@ -141,13 +92,13 @@ template <typename T> class pvector_pmm
      */
     T& front()
     {
-        T* raw = pmm_resolve<T>( hdr_.data_off );
+        T* raw = arr_.data();
         return raw[0];
     }
 
     const T& front() const
     {
-        const T* raw = pmm_resolve_const<T>( hdr_.data_off );
+        const T* raw = arr_.data();
         return raw[0];
     }
 
@@ -156,35 +107,25 @@ template <typename T> class pvector_pmm
      */
     T& back()
     {
-        T* raw = pmm_resolve<T>( hdr_.data_off );
-        return raw[hdr_.size - 1];
+        T* raw = arr_.data();
+        return raw[arr_.size() - 1];
     }
 
     const T& back() const
     {
-        const T* raw = pmm_resolve_const<T>( hdr_.data_off );
-        return raw[hdr_.size - 1];
+        const T* raw = arr_.data();
+        return raw[arr_.size() - 1];
     }
 
     /**
      * @brief Обнулить размер. Не освобождает выделенный буфер.
      */
-    void clear() { hdr_.size = 0; }
+    void clear() { arr_.clear(); }
 
     /**
      * @brief Полностью освободить выделенный буфер.
      */
-    void free()
-    {
-        if ( hdr_.data_off != 0 )
-        {
-            auto pptr = offset_to_pptr<T>( hdr_.data_off );
-            PamManager::template deallocate_typed<T>( pptr );
-        }
-        hdr_.size     = 0;
-        hdr_.capacity = 0;
-        hdr_.data_off = 0;
-    }
+    void free() { arr_.free_data(); }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Итераторы
@@ -245,11 +186,11 @@ template <typename T> class pvector_pmm
     };
 
     iterator       begin() { return iterator( this, 0 ); }
-    iterator       end() { return iterator( this, hdr_.size ); }
+    iterator       end() { return iterator( this, arr_.size() ); }
     const_iterator begin() const { return const_iterator( this, 0 ); }
-    const_iterator end() const { return const_iterator( this, hdr_.size ); }
+    const_iterator end() const { return const_iterator( this, arr_.size() ); }
     const_iterator cbegin() const { return const_iterator( this, 0 ); }
-    const_iterator cend() const { return const_iterator( this, hdr_.size ); }
+    const_iterator cend() const { return const_iterator( this, arr_.size() ); }
 
   private:
     // Создание pvector_pmm<T> на стеке запрещено.
@@ -261,10 +202,8 @@ template <typename T> class pvector_pmm
     template <typename U> friend class fptr_pmm;
 };
 
-// Проверка размера
-static_assert( sizeof( pvector_pmm<int> ) == 3 * sizeof( void* ),
-               "pvector_pmm<int> должен занимать 3 * sizeof(void*) байт" );
-static_assert( sizeof( pvector_pmm<double> ) == 3 * sizeof( void* ),
-               "pvector_pmm<double> должен занимать 3 * sizeof(void*) байт" );
+// Проверка тривиальной копируемости
+static_assert( std::is_trivially_copyable<pvector_pmm<int>>::value,
+               "pvector_pmm<int> должен быть тривиально копируемым" );
 
 } // namespace pjson

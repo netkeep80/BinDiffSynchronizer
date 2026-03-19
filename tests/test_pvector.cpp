@@ -23,10 +23,10 @@ static void ensure_pmm()
 // ---------------------------------------------------------------------------
 TEST_CASE( "pvector_pmm<int>: size and capacity are uintptr_t", "[pvector_pmm][layout]" )
 {
-    // sizeof(uintptr_t) == sizeof(void*) на любой платформе.
-    // pvector_pmm<T> = size_ (uintptr_t) + capacity_ (uintptr_t) + data_ (fptr<T>) = 3 * sizeof(void*)
-    REQUIRE( sizeof( pvector_pmm<int> ) == 3 * sizeof( void* ) );
-    REQUIRE( sizeof( pvector_pmm<double> ) == 3 * sizeof( void* ) );
+    // pvector_pmm<T> оборачивает PamManager::parray<T> = uint32_t * 3 = 12 байт
+    REQUIRE( sizeof( pvector_pmm<int> ) == sizeof( PamManager::parray<int> ) );
+    REQUIRE( sizeof( pvector_pmm<double> ) == sizeof( PamManager::parray<double> ) );
+    REQUIRE( sizeof( pvector_pmm<int> ) == 12u );
 }
 
 // ---------------------------------------------------------------------------

@@ -115,18 +115,21 @@ JSON-базу данных поверх PMM. Текущая архитектур
 - Устранены предупреждения memset для non-trivial node в `pjson_pool_pmm.h`
 - Все 596 тестов проходят
 
-### 2.2 Замена pmem_array_pmm на pmm::parray
+### 2.2 Замена pmem_array_pmm на pmm::parray ✅
 
-**Текущая ситуация:** `pmem_array_pmm` — низкоуровневый массив с заголовком
-`[size | capacity | data_offset]`.
+**Выполнено (Issue #145):** `pmem_array_pmm` заменён на `PamManager::parray<T>` (pmm::parray<T, PamManager>).
 
-**После pmm 3.2:** pmm будет предоставлять `parray<T, ManagerT>` с тем же API.
-
-**Действия:**
-- Заменить все вызовы `pmem_array_pmm_*` на методы `parray<T>`
-- Обновить `pvector_pmm` — делегировать к `parray<T>` вместо `pmem_array_pmm`
-- Обновить `pmap_pmm` — использовать `parray<pmap_entry<K,V>>` для хранения
-- Удалить `pmem_array_pmm.h`
+**Что сделано:**
+- `node::array_val`, `node::object_val`, `node::binary_val` теперь имеют тип `PamManager::parray<T>` (12 байт: uint32_t _size + _capacity + _data_idx) вместо `pmem_array_hdr_pmm` (24 байта: uintptr_t size + capacity + data_off)
+- `pvector_pmm<T>` переписан как обёртка над `PamManager::parray<T>`, все операции делегируются методам parray
+- `pmap_pmm<K,V>` переписан с хранением `PamManager::parray<Entry>` вместо `pmem_array_hdr_pmm`, с безопасной вставкой при росте PMM-пула (self-offset pattern)
+- Добавлена свободная функция `parray_insert_sorted_object_entry()` для sorted insert в object_val
+- `pjson_node.h`: структура `object_entry` перемещена перед `node` (необходимо для `parray<object_entry>`)
+- `pjson_db_pmm.h`: деаллокация данных через `free_data()` вместо ручного `offset_to_pptr + deallocate_typed`
+- `pjson_codec.h`, `pjson_db_helpers.h`, `pjson_pool_pmm.h`: обновлены для нового API
+- Удалён `pmem_array_pmm.h` — обёртка больше не нужна
+- Все тесты обновлены: размерные проверки отражают 12-байтовый parray
+- Все 593 теста проходят
 
 ### 2.3 Миграция pmap_pmm
 

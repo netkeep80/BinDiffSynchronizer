@@ -3,7 +3,7 @@
 #include "pam_pmm_config.h"
 #include "pvector_pmm.h"
 #include "pmap_pmm.h"
-#include "pmem_array_pmm.h"
+#include "pam_adapter.h"
 #include "fptr_pmm.h"
 
 using namespace pjson;
@@ -104,13 +104,41 @@ inline const char* node_error_message( node_error err )
 using node_id = uintptr_t;
 
 // ---------------------------------------------------------------------------
+// object_entry — запись в объектной карте (ключ + значение)
+// ---------------------------------------------------------------------------
+//
+// Раскладка идентична pmap_entry<pstringview, node_id>:
+//   key_length:       uintptr_t  — длина ключа (pstringview::length)
+//   key_chars_offset: uintptr_t  — смещение символов ключа в ПАП (pstringview::chars_offset)
+//   value:            node_id    — смещение узла-значения в ПАП
+//
+// Используется вместо pmap_entry<pstringview, node_id> для избежания
+// конфликта с приватным конструктором pstringview.
+// Физическая раскладка совместима с pmap_entry<pstringview, node_id>,
+// позволяет хранить сортированный массив пар ключ-значение в ПАП.
+
+struct object_entry
+{
+    uintptr_t key_length; ///< Длина строки ключа (аналог pstringview::length)
+    uintptr_t key_chars_offset; ///< Смещение массива char ключа в ПАП (аналог pstringview::chars_offset)
+    node_id value; ///< node_id узла-значения; 0 = invalid
+};
+
+static_assert( std::is_trivially_copyable<object_entry>::value, "object_entry должен быть тривиально копируемым" );
+// Проверяем, что раскладка совместима с pmap_entry<pstringview, node_id>:
+// pstringview занимает 2 * sizeof(void*), node_id занимает sizeof(void*).
+static_assert(
+    sizeof( object_entry ) == 3 * sizeof( void* ),
+    "object_entry должен занимать 3 * sizeof(void*) байт (совместимость с pmap_entry<pstringview, node_id>)" );
+
+// ---------------------------------------------------------------------------
 // node — структура узла JSON в ПАП
 // ---------------------------------------------------------------------------
 //
 // Раскладка:
 //   tag:  4 байта — дискриминант (node_tag : uint32_t)
 //   _pad: 4 байта — выравнивание для 8-байтового union (на 64-битных платформах)
-//   union: 3 * sizeof(void*) байт — payload (максимальный из вариантов)
+//   union: payload
 //
 // Все поля — POD (тривиально копируемые), живут только в ПАП.
 // Доступ — только через смещение (node_id) и pmm_resolve<node>.
@@ -140,17 +168,17 @@ struct node
         PamManager::pstring string_val;
 
         /// binary: массив uint8_t в ПАП ($base64 при сериализации).
-        /// Используем pmem_array_hdr_pmm: { uintptr_t size; uintptr_t capacity; uintptr_t data_off; }.
-        pmem_array_hdr_pmm binary_val;
+        /// PamManager::parray<uint8_t>: { uint32_t _size; uint32_t _capacity; index_type _data_idx; }.
+        PamManager::parray<uint8_t> binary_val;
 
         /// array: массив node_id в ПАП.
-        /// Используем pmem_array_hdr_pmm: { uintptr_t size; uintptr_t capacity; uintptr_t data_off; }.
-        pmem_array_hdr_pmm array_val;
+        /// PamManager::parray<node_id>: { uint32_t _size; uint32_t _capacity; index_type _data_idx; }.
+        PamManager::parray<node_id> array_val;
 
         /// object: сортированный массив object_entry в ПАП.
         /// Ключи — readonly pstringview (интернированные), значения — node_id.
-        /// Используем pmem_array_hdr_pmm: { uintptr_t size; uintptr_t capacity; uintptr_t data_off; }.
-        pmem_array_hdr_pmm object_val;
+        /// PamManager::parray<object_entry>: { uint32_t _size; uint32_t _capacity; index_type _data_idx; }.
+        PamManager::parray<object_entry> object_val;
 
         /// ref: путь ($ref) + целевой node_id.
         /// path_* — pstringview-совместимые поля (readonly, интернированные).
@@ -171,37 +199,9 @@ struct node
 static_assert( std::is_trivially_copyable<node>::value, "node должен быть тривиально копируемым" );
 static_assert( std::is_trivially_copyable<PamManager::pstring>::value,
                "PamManager::pstring (node::string_val) должен быть тривиально копируемым" );
-static_assert( sizeof( pmem_array_hdr_pmm ) == 3 * sizeof( void* ),
-               "pmem_array_hdr_pmm (node::array_val и др.) должен занимать 3 * sizeof(void*) байт" );
+static_assert( std::is_trivially_copyable<PamManager::parray<node_id>>::value,
+               "PamManager::parray<node_id> (node::array_val) должен быть тривиально копируемым" );
 static_assert( sizeof( node::ref_val ) == 3 * sizeof( void* ), "node::ref_val должен занимать 3 * sizeof(void*) байт" );
-
-// ---------------------------------------------------------------------------
-// object_entry — запись в объектной карте (ключ + значение)
-// ---------------------------------------------------------------------------
-//
-// Раскладка идентична pmap_entry<pstringview, node_id>:
-//   key_length:       uintptr_t  — длина ключа (pstringview::length)
-//   key_chars_offset: uintptr_t  — смещение символов ключа в ПАП (pstringview::chars_offset)
-//   value:            node_id    — смещение узла-значения в ПАП
-//
-// Используется вместо pmap_entry<pstringview, node_id> для избежания
-// конфликта с приватным конструктором pstringview.
-// Физическая раскладка совместима с pmap_entry<pstringview, node_id>,
-// позволяет хранить сортированный массив пар ключ-значение в ПАП.
-
-struct object_entry
-{
-    uintptr_t key_length; ///< Длина строки ключа (аналог pstringview::length)
-    uintptr_t key_chars_offset; ///< Смещение массива char ключа в ПАП (аналог pstringview::chars_offset)
-    node_id value; ///< node_id узла-значения; 0 = invalid
-};
-
-static_assert( std::is_trivially_copyable<object_entry>::value, "object_entry должен быть тривиально копируемым" );
-// Проверяем, что раскладка совместима с pmap_entry<pstringview, node_id>:
-// pstringview занимает 2 * sizeof(void*), node_id занимает sizeof(void*).
-static_assert(
-    sizeof( object_entry ) == 3 * sizeof( void* ),
-    "object_entry должен занимать 3 * sizeof(void*) байт (совместимость с pmap_entry<pstringview, node_id>)" );
 
 // ---------------------------------------------------------------------------
 // Предварительные объявления итераторов
@@ -229,7 +229,7 @@ struct object_find_result
 };
 
 /// Бинарный поиск ключа в отсортированном массиве object_entry.
-inline object_find_result node_object_find_key( uintptr_t data_off, uintptr_t sz, const char* key );
+inline object_find_result node_object_find_key( const object_entry* entries, uintptr_t sz, const char* key );
 
 // ---------------------------------------------------------------------------
 // node_view — безопасный accessor для чтения узлов
@@ -415,11 +415,11 @@ struct node_view
         if ( n == nullptr )
             return 0;
         if ( n->tag == node_tag::array )
-            return n->array_val.size;
+            return n->array_val.size();
         if ( n->tag == node_tag::object )
-            return n->object_val.size;
+            return n->object_val.size();
         if ( n->tag == node_tag::binary )
-            return n->binary_val.size;
+            return n->binary_val.size();
         if ( n->tag == node_tag::string )
             return static_cast<uintptr_t>( n->string_val.size() );
         return 0;
@@ -434,11 +434,9 @@ struct node_view
         const node* n = _resolve();
         if ( n == nullptr || n->tag != node_tag::array )
             return node_view{};
-        if ( idx >= n->array_val.size )
+        if ( idx >= n->array_val.size() )
             return node_view{};
-        if ( n->array_val.data_off == 0 )
-            return node_view{};
-        const node_id* arr = pmm_resolve<node_id>( n->array_val.data_off );
+        const node_id* arr = n->array_val.data();
         if ( arr == nullptr )
             return node_view{};
         return node_view{ arr[idx] };
@@ -454,15 +452,15 @@ struct node_view
         const node* n = _resolve();
         if ( n == nullptr || n->tag != node_tag::object )
             return node_view{};
-        if ( n->object_val.size == 0 || n->object_val.data_off == 0 )
+        if ( n->object_val.empty() )
             return node_view{};
 
         // Делегируем бинарный поиск в node_object_find_key.
-        auto result = node_object_find_key( n->object_val.data_off, n->object_val.size, key );
-        if ( !result.found )
-            return node_view{};
-        const object_entry* entries = pmm_resolve<object_entry>( n->object_val.data_off );
+        const object_entry* entries = n->object_val.data();
         if ( entries == nullptr )
+            return node_view{};
+        auto result = node_object_find_key( entries, n->object_val.size(), key );
+        if ( !result.found )
             return node_view{};
         return node_view{ entries[result.index].value };
     }
@@ -474,9 +472,9 @@ struct node_view
         const node* n = _resolve();
         if ( n == nullptr || n->tag != node_tag::object )
             return std::string_view{};
-        if ( idx >= n->object_val.size || n->object_val.data_off == 0 )
+        if ( idx >= n->object_val.size() )
             return std::string_view{};
-        const object_entry* entries = pmm_resolve<object_entry>( n->object_val.data_off );
+        const object_entry* entries = n->object_val.data();
         if ( entries == nullptr )
             return std::string_view{};
         const object_entry& e = entries[idx];
@@ -494,9 +492,9 @@ struct node_view
         const node* n = _resolve();
         if ( n == nullptr || n->tag != node_tag::object )
             return node_view{};
-        if ( idx >= n->object_val.size || n->object_val.data_off == 0 )
+        if ( idx >= n->object_val.size() )
             return node_view{};
-        const object_entry* entries = pmm_resolve<object_entry>( n->object_val.data_off );
+        const object_entry* entries = n->object_val.data();
         if ( entries == nullptr )
             return node_view{};
         return node_view{ entries[idx].value };
@@ -605,30 +603,28 @@ inline node* node_resolve_and_set_tag( uintptr_t node_off, node_tag tag )
 
 /// Инициализировать контейнерный узел (array/object/binary) — пустой.
 /// Устанавливает тег, обнуляет всю область данных union через array_val
-/// (все контейнерные поля имеют одинаковую раскладку: size/capacity/data_off).
+/// (все контейнерные поля имеют одинаковую раскладку: _size/_capacity/_data_idx).
 inline void node_set_container_empty( uintptr_t node_off, node_tag tag )
 {
     node* n = node_resolve_and_set_tag( node_off, tag );
     if ( n == nullptr )
         return;
-    // array_val, object_val, binary_val имеют одинаковую раскладку {size, capacity, data_off}.
+    // array_val, object_val, binary_val имеют одинаковую раскладку {_size, _capacity, _data_idx}.
     // Обнуляем через array_val (все три union-члена перекрывают одну и ту же область памяти).
-    n->array_val.size     = 0;
-    n->array_val.capacity = 0;
-    n->array_val.data_off = 0;
+    n->array_val = PamManager::parray<node_id>{};
 }
 
 // ---------------------------------------------------------------------------
 // Вспомогательные функторы для сортированного массива object_entry
 // ---------------------------------------------------------------------------
 
-/// Извлечение ключа (chars_offset) из object_entry для pmem_array_pmm_insert_sorted.
+/// Извлечение ключа (chars_offset) из object_entry.
 struct object_entry_key_of
 {
     uintptr_t operator()( const object_entry& e ) const { return e.key_chars_offset; }
 };
 
-/// Лексикографическое сравнение ключей по chars_offset для pmem_array_pmm_insert_sorted.
+/// Лексикографическое сравнение ключей по chars_offset.
 struct object_entry_less
 {
     bool operator()( uintptr_t a_offset, uintptr_t b_offset ) const
@@ -647,24 +643,76 @@ struct object_entry_less
     }
 };
 
+/// Вставить object_entry в отсортированный parray (вставка или обновление).
+/// Выполняет бинарный поиск, вставляет со сдвигом или обновляет существующий.
+inline void parray_insert_sorted_object_entry( PamManager::parray<object_entry>& arr, const object_entry& value )
+{
+    uintptr_t sz = arr.size();
+    uintptr_t lo = 0, hi = sz;
+
+    // Бинарный поиск (lower_bound)
+    {
+        const object_entry* raw = arr.data();
+        if ( raw != nullptr )
+        {
+            while ( lo < hi )
+            {
+                uintptr_t mid = ( lo + hi ) / 2;
+                if ( object_entry_less{}( object_entry_key_of{}( raw[mid] ), object_entry_key_of{}( value ) ) )
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+        }
+    }
+
+    uintptr_t idx = lo;
+
+    // Проверяем, существует ли уже такой ключ
+    {
+        const object_entry* raw = arr.data();
+        if ( raw != nullptr && idx < sz &&
+             !object_entry_less{}( object_entry_key_of{}( value ), object_entry_key_of{}( raw[idx] ) ) &&
+             !object_entry_less{}( object_entry_key_of{}( raw[idx] ), object_entry_key_of{}( value ) ) )
+        {
+            // Ключ найден — обновляем элемент
+            arr.set( idx, value );
+            return;
+        }
+    }
+
+    // Нужно вставить новый элемент в позицию idx.
+    // Добавляем пустой элемент в конец, затем сдвигаем.
+    object_entry empty{};
+    arr.push_back( empty );
+
+    // После push_back данные могли переместиться — получаем свежий указатель.
+    object_entry* raw = arr.data();
+    if ( raw != nullptr && sz > idx )
+        std::memmove( raw + idx + 1, raw + idx, ( sz - idx ) * sizeof( object_entry ) );
+
+    // Записываем новый элемент.
+    if ( raw != nullptr )
+        raw[idx] = value;
+}
+
 // ---------------------------------------------------------------------------
 // Бинарный поиск по ключу в отсортированном массиве object_entry
 // ---------------------------------------------------------------------------
 
 /// Реализация бинарного поиска ключа key в отсортированном массиве object_entry.
-/// data_off — смещение массива object_entry в ПАП, sz — число элементов.
+/// entries — указатель на массив, sz — число элементов.
 /// Возвращает object_find_result { index, found }.
 /// Делегирует три ранее дублировавшихся реализации бинарного поиска.
-inline object_find_result node_object_find_key( uintptr_t data_off, uintptr_t sz, const char* key )
+inline object_find_result node_object_find_key( const object_entry* entries, uintptr_t sz, const char* key )
 {
+    if ( entries == nullptr )
+        return { sz, false };
     uintptr_t lo = 0, hi = sz;
     while ( lo < hi )
     {
-        uintptr_t           mid     = ( lo + hi ) / 2;
-        const object_entry* entries = pmm_resolve<object_entry>( data_off );
-        if ( entries == nullptr )
-            return { sz, false };
-        const object_entry& e = entries[mid];
+        uintptr_t           mid = ( lo + hi ) / 2;
+        const object_entry& e   = entries[mid];
         int                 cmp;
         if ( e.key_chars_offset == 0 )
             cmp = ( key[0] == '\0' ) ? 0 : 1;
@@ -880,61 +928,8 @@ inline node_id node_array_push_back( uintptr_t node_off )
     if ( n == nullptr || n->tag != node_tag::array )
         return slot_off;
 
-    uintptr_t old_size = n->array_val.size;
-    uintptr_t new_size = old_size + 1;
-    uintptr_t cap      = n->array_val.capacity;
-
-    if ( new_size > cap )
-    {
-        uintptr_t new_cap = ( cap == 0 ) ? 4 : cap * 2;
-        if ( new_cap < new_size )
-            new_cap = new_size;
-        uintptr_t old_data = n->array_val.data_off;
-
-        fptr<node_id> new_arr;
-        new_arr.NewArray( static_cast<unsigned>( new_cap ) ); // Может вызвать realloc!
-        uintptr_t new_data = new_arr.addr();
-
-        // Инициализируем новые слоты нулём.
-        node_id* new_raw = pmm_resolve<node_id>( new_data );
-        if ( new_raw != nullptr )
-        {
-            for ( uintptr_t i = 0; i < new_cap; i++ )
-                new_raw[i] = 0;
-        }
-
-        // Копируем существующие элементы.
-        if ( old_data != 0 )
-        {
-            const node_id* old_raw = pmm_resolve<node_id>( old_data );
-            new_raw                = pmm_resolve<node_id>( new_data );
-            if ( old_raw != nullptr && new_raw != nullptr )
-            {
-                for ( uintptr_t i = 0; i < old_size; i++ )
-                    new_raw[i] = old_raw[i];
-            }
-            // Освобождаем старый массив.
-            fptr<node_id> old_fptr;
-            old_fptr.set_addr( old_data );
-            old_fptr.DeleteArray();
-        }
-
-        // Переразрешаем n после возможного realloc.
-        n = pmm_resolve<node>( node_off );
-        if ( n == nullptr )
-            return slot_off;
-        n->array_val.data_off = new_data;
-        n->array_val.capacity = new_cap;
-    }
-
-    // Записываем slot_off в массив.
-    n = pmm_resolve<node>( node_off );
-    if ( n == nullptr )
-        return slot_off;
-    node_id* arr = pmm_resolve<node_id>( n->array_val.data_off );
-    if ( arr != nullptr )
-        arr[old_size] = slot_off;
-    n->array_val.size = new_size;
+    // Добавляем slot_off в массив через parray::push_back.
+    n->array_val.push_back( slot_off );
 
     return slot_off;
 }
@@ -955,17 +950,16 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     if ( n == nullptr || n->tag != node_tag::object )
         return 0;
 
-    uintptr_t sz       = n->object_val.size;
-    uintptr_t data_off = n->object_val.data_off;
+    uintptr_t sz = n->object_val.size();
 
     // Ищем существующий ключ через бинарный поиск.
-    if ( sz > 0 && data_off != 0 )
+    if ( sz > 0 )
     {
-        auto find_result = node_object_find_key( data_off, sz, key );
-        if ( find_result.found )
+        const object_entry* entries = n->object_val.data();
+        if ( entries != nullptr )
         {
-            const object_entry* entries = pmm_resolve<object_entry>( data_off );
-            if ( entries != nullptr )
+            auto find_result = node_object_find_key( entries, sz, key );
+            if ( find_result.found )
                 return entries[find_result.index].value; // ключ существует — возвращаем slot
         }
     }
@@ -992,17 +986,12 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
         return slot_off;
 
     // Вставляем новую запись в отсортированный массив object_entry.
-    // Используем общие функторы object_entry_key_of / object_entry_less.
     object_entry new_entry;
     new_entry.key_length       = key_result.length;
     new_entry.key_chars_offset = key_result.chars_offset;
     new_entry.value            = slot_off;
 
-    // object_val — это pmem_array_hdr_pmm напрямую, берём его адрес.
-    uintptr_t hdr_off = pam_pmm_ptr_to_offset( &( pmm_resolve<node>( node_off )->object_val ) );
-
-    pmem_array_pmm_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
-        hdr_off, new_entry, object_entry_key_of{}, object_entry_less{} );
+    parray_insert_sorted_object_entry( n->object_val, new_entry );
 
     return slot_off;
 }
@@ -1012,11 +1001,10 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
 {
     if ( node_off == 0 )
         return;
-    // binary_val — это pmem_array_hdr_pmm напрямую, берём его адрес.
-    uintptr_t hdr_off = pam_pmm_ptr_to_offset( &( pmm_resolve<node>( node_off )->binary_val ) );
-
-    uint8_t& slot = pmem_array_pmm_push_back<uint8_t>( hdr_off );
-    slot          = byte;
+    node* n = pmm_resolve<node>( node_off );
+    if ( n == nullptr || n->tag != node_tag::binary )
+        return;
+    n->binary_val.push_back( byte );
 }
 
 // ---------------------------------------------------------------------------
@@ -1092,10 +1080,10 @@ inline node_id node_clone( node_id src_id )
         src = pmm_resolve<node>( src_id );
         if ( src == nullptr )
             break;
-        uintptr_t bin_size = src->binary_val.size;
-        if ( bin_size > 0 && src->binary_val.data_off != 0 )
+        uintptr_t bin_size = src->binary_val.size();
+        if ( bin_size > 0 )
         {
-            const uint8_t* bin_data = pmm_resolve<uint8_t>( src->binary_val.data_off );
+            const uint8_t* bin_data = src->binary_val.data();
             if ( bin_data != nullptr )
             {
                 for ( uintptr_t i = 0; i < bin_size; ++i )
@@ -1104,9 +1092,9 @@ inline node_id node_clone( node_id src_id )
                     node_binary_push_back( dst_id, byte );
                     // Переразрешаем bin_data после push_back (может вызвать realloc).
                     src = pmm_resolve<node>( src_id );
-                    if ( src == nullptr || src->binary_val.data_off == 0 )
+                    if ( src == nullptr )
                         break;
-                    bin_data = pmm_resolve<uint8_t>( src->binary_val.data_off );
+                    bin_data = src->binary_val.data();
                     if ( bin_data == nullptr )
                         break;
                 }
@@ -1123,7 +1111,7 @@ inline node_id node_clone( node_id src_id )
         src = pmm_resolve<node>( src_id );
         if ( src == nullptr )
             break;
-        uintptr_t arr_size = src->array_val.size;
+        uintptr_t arr_size = src->array_val.size();
         for ( uintptr_t i = 0; i < arr_size; ++i )
         {
             // Получаем node_id i-го элемента исходного массива.
@@ -1138,12 +1126,12 @@ inline node_id node_clone( node_id src_id )
             // Так как push_back создаёт null-узел, а clone создаёт полную копию,
             // нужно переместить данные. Проще: записываем node_id прямо в массив.
             node* dst_node = pmm_resolve<node>( dst_id );
-            if ( dst_node != nullptr && dst_node->tag == node_tag::array && dst_node->array_val.data_off != 0 )
+            if ( dst_node != nullptr && dst_node->tag == node_tag::array )
             {
-                node_id* arr = pmm_resolve<node_id>( dst_node->array_val.data_off );
-                if ( arr != nullptr && dst_node->array_val.size > 0 )
+                node_id* arr = dst_node->array_val.data();
+                if ( arr != nullptr && dst_node->array_val.size() > 0 )
                 {
-                    arr[dst_node->array_val.size - 1] = elem_clone;
+                    arr[dst_node->array_val.size() - 1] = elem_clone;
                 }
             }
             // Удаляем временный null-слот.
@@ -1176,13 +1164,13 @@ inline node_id node_clone( node_id src_id )
             node_id slot_id = node_object_insert( dst_id, key_s.c_str() );
             // Записываем склонированное значение в слот.
             node* dst_node = pmm_resolve<node>( dst_id );
-            if ( dst_node != nullptr && dst_node->tag == node_tag::object && dst_node->object_val.data_off != 0 )
+            if ( dst_node != nullptr && dst_node->tag == node_tag::object )
             {
-                object_entry* entries = pmm_resolve<object_entry>( dst_node->object_val.data_off );
+                object_entry* entries = dst_node->object_val.data();
                 if ( entries != nullptr )
                 {
                     // Ищем запись по slot_id (value) и заменяем.
-                    for ( uintptr_t j = 0; j < dst_node->object_val.size; ++j )
+                    for ( uintptr_t j = 0; j < dst_node->object_val.size(); ++j )
                     {
                         if ( entries[j].value == slot_id )
                         {

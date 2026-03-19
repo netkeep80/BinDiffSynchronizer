@@ -1,6 +1,6 @@
 /**
  * @file test_pmem_array_pmm.cpp
- * @brief Тесты для pmem_array_pmm.
+ * @brief Тесты для PamManager::parray и pvector_pmm.
  *
  * Проверяют корректность работы персистного массива на базе PMM.
  */
@@ -9,314 +9,206 @@
 #include <cstring>
 #include <type_traits>
 
-#include "pmem_array_pmm.h"
+#include "pam_adapter.h"
 #include "pvector_pmm.h"
 
 using namespace pjson;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pmem_array_hdr_pmm — Layout
+// ТЕСТЫ PamManager::parray — Layout
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_hdr_pmm: is trivially copyable", "[pmem_array_pmm][layout]" )
+TEST_CASE( "parray: is trivially copyable", "[parray][layout]" )
 {
-    REQUIRE( std::is_trivially_copyable<pmem_array_hdr_pmm>::value );
+    REQUIRE( std::is_trivially_copyable<PamManager::parray<int>>::value );
 }
 
-TEST_CASE( "pmem_array_hdr_pmm: struct size is 3 * sizeof(void*)", "[pmem_array_pmm][layout]" )
+TEST_CASE( "parray: struct size is 12 bytes (uint32 + uint32 + uint32)", "[parray][layout]" )
 {
-    REQUIRE( sizeof( pmem_array_hdr_pmm ) == 3 * sizeof( void* ) );
-    REQUIRE( sizeof( pmem_array_hdr_pmm::size ) == sizeof( void* ) );
-    REQUIRE( sizeof( pmem_array_hdr_pmm::capacity ) == sizeof( void* ) );
-    REQUIRE( sizeof( pmem_array_hdr_pmm::data_off ) == sizeof( void* ) );
+    // parray содержит: _size (uint32_t) + _capacity (uint32_t) + _data_idx (uint32_t)
+    REQUIRE( sizeof( PamManager::parray<int> ) == 12u );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pmem_array_pmm_init
+// ТЕСТЫ parray — Инициализация
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_init: initialises header to zeroes", "[pmem_array_pmm][init]" )
+TEST_CASE( "parray: default construction initialises to zeroes", "[parray][init]" )
 {
     PamManager::create( 64 * 1024 );
 
-    // Аллоцируем заголовок через PMM
-    auto hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    REQUIRE( hdr_pptr );
+    // Аллоцируем parray через PMM
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    REQUIRE( arr_pptr );
 
-    uintptr_t hdr_off = pptr_to_offset( hdr_pptr );
+    // Инициализируем нулями (имитация персистного хранения)
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    pmem_array_pmm_init<int>( hdr_off );
+    REQUIRE( arr_pptr->size() == 0u );
+    REQUIRE( arr_pptr->capacity() == 0u );
+    REQUIRE( arr_pptr->empty() );
 
-    REQUIRE( hdr_pptr->size == 0u );
-    REQUIRE( hdr_pptr->capacity == 0u );
-    REQUIRE( hdr_pptr->data_off == 0u );
-
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pmem_array_pmm_push_back / pmem_array_pmm_at
+// ТЕСТЫ parray — push_back / data access
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_push_back: appends elements and increases size", "[pmem_array_pmm][push_back]" )
+TEST_CASE( "parray: push_back appends elements and increases size", "[parray][push_back]" )
 {
     PamManager::create( 64 * 1024 );
 
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    pmem_array_pmm_init<int>( hdr_off );
+    arr_pptr->push_back( 10 );
+    arr_pptr->push_back( 20 );
+    arr_pptr->push_back( 30 );
 
-    pmem_array_pmm_push_back<int>( hdr_off ) = 10;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 20;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 30;
+    REQUIRE( arr_pptr->size() == 3u );
 
-    pmem_array_hdr_pmm* hdr = pmm_resolve<pmem_array_hdr_pmm>( hdr_off );
+    int* d = arr_pptr->data();
+    REQUIRE( d != nullptr );
+    REQUIRE( d[0] == 10 );
+    REQUIRE( d[1] == 20 );
+    REQUIRE( d[2] == 30 );
 
-    REQUIRE( hdr->size == 3u );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 0 ) == 10 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 1 ) == 20 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 2 ) == 30 );
-
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pmem_array_pmm_reserve
+// ТЕСТЫ parray — reserve
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_reserve: capacity grows to accommodate elements", "[pmem_array_pmm][reserve]" )
+TEST_CASE( "parray: reserve capacity grows to accommodate elements", "[parray][reserve]" )
 {
     PamManager::create( 64 * 1024 );
 
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    pmem_array_pmm_init<int>( hdr_off );
+    arr_pptr->reserve( 100 );
 
-    pmem_array_pmm_reserve<int>( hdr_off, 100 );
+    REQUIRE( arr_pptr->capacity() >= 100u );
+    REQUIRE( arr_pptr->size() == 0u ); // reserve не изменяет size
 
-    pmem_array_hdr_pmm* hdr = pmm_resolve<pmem_array_hdr_pmm>( hdr_off );
-
-    REQUIRE( hdr->capacity >= 100u );
-    REQUIRE( hdr->size == 0u ); // reserve не изменяет size
-
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
-    PamManager::destroy();
-}
-
-TEST_CASE( "pmem_array_pmm_reserve: doubling strategy", "[pmem_array_pmm][reserve]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
-
-    pmem_array_pmm_init<int>( hdr_off );
-
-    // Первый reserve: 0 -> 4 (начальная ёмкость)
-    pmem_array_pmm_reserve<int>( hdr_off, 1 );
-    pmem_array_hdr_pmm* hdr = pmm_resolve<pmem_array_hdr_pmm>( hdr_off );
-    REQUIRE( hdr->capacity == 4u );
-
-    // Следующий reserve: 4 -> 8
-    pmem_array_pmm_reserve<int>( hdr_off, 5 );
-    hdr = pmm_resolve<pmem_array_hdr_pmm>( hdr_off );
-    REQUIRE( hdr->capacity == 8u );
-
-    // Следующий reserve: 8 -> 16
-    pmem_array_pmm_reserve<int>( hdr_off, 10 );
-    hdr = pmm_resolve<pmem_array_hdr_pmm>( hdr_off );
-    REQUIRE( hdr->capacity == 16u );
-
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pmem_array_pmm_pop_back
+// ТЕСТЫ parray — pop_back
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_pop_back: decreases size", "[pmem_array_pmm][pop_back]" )
+TEST_CASE( "parray: pop_back decreases size", "[parray][pop_back]" )
 {
     PamManager::create( 64 * 1024 );
 
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    pmem_array_pmm_init<int>( hdr_off );
+    arr_pptr->push_back( 1 );
+    arr_pptr->push_back( 2 );
+    arr_pptr->push_back( 3 );
 
-    pmem_array_pmm_push_back<int>( hdr_off ) = 1;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 2;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 3;
+    REQUIRE( arr_pptr->size() == 3u );
 
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 3u );
+    arr_pptr->pop_back();
+    REQUIRE( arr_pptr->size() == 2u );
 
-    pmem_array_pmm_pop_back<int>( hdr_off );
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 2u );
-
-    pmem_array_pmm_pop_back<int>( hdr_off );
-    pmem_array_pmm_pop_back<int>( hdr_off );
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 0u );
+    arr_pptr->pop_back();
+    arr_pptr->pop_back();
+    REQUIRE( arr_pptr->size() == 0u );
 
     // pop_back на пустом массиве — ничего не делает
-    pmem_array_pmm_pop_back<int>( hdr_off );
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 0u );
+    arr_pptr->pop_back();
+    REQUIRE( arr_pptr->size() == 0u );
 
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pmem_array_pmm_erase_at
+// ТЕСТЫ parray — set
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_erase_at: removes element and shifts left", "[pmem_array_pmm][erase]" )
+TEST_CASE( "parray: set modifies element at index", "[parray][set]" )
 {
     PamManager::create( 64 * 1024 );
 
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    pmem_array_pmm_init<int>( hdr_off );
+    arr_pptr->push_back( 10 );
+    arr_pptr->push_back( 20 );
+    arr_pptr->push_back( 30 );
 
-    pmem_array_pmm_push_back<int>( hdr_off ) = 10;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 20;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 30;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 40;
+    REQUIRE( arr_pptr->set( 1, 99 ) );
 
-    // Удаляем элемент с индексом 1 (значение 20)
-    pmem_array_pmm_erase_at<int>( hdr_off, 1 );
+    int* d = arr_pptr->data();
+    REQUIRE( d[1] == 99 );
 
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 3u );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 0 ) == 10 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 1 ) == 30 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 2 ) == 40 );
+    // set вне границ — возвращает false
+    REQUIRE_FALSE( arr_pptr->set( 5, 42 ) );
 
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pmem_array_pmm_insert_sorted / pmem_array_pmm_find_sorted
+// ТЕСТЫ parray — free_data / clear
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_insert_sorted: maintains sorted order", "[pmem_array_pmm][sorted]" )
+TEST_CASE( "parray: free_data deallocates buffer and resets header", "[parray][free]" )
 {
     PamManager::create( 64 * 1024 );
 
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    pmem_array_pmm_init<int>( hdr_off );
+    arr_pptr->push_back( 10 );
+    arr_pptr->push_back( 20 );
 
-    auto identity = []( const int& x ) { return x; };
-    auto less     = []( int a, int b ) { return a < b; };
+    REQUIRE( arr_pptr->size() == 2u );
+    REQUIRE( arr_pptr->capacity() > 0u );
 
-    pmem_array_pmm_insert_sorted<int>( hdr_off, 30, identity, less );
-    pmem_array_pmm_insert_sorted<int>( hdr_off, 10, identity, less );
-    pmem_array_pmm_insert_sorted<int>( hdr_off, 20, identity, less );
-    pmem_array_pmm_insert_sorted<int>( hdr_off, 40, identity, less );
+    arr_pptr->free_data();
 
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 4u );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 0 ) == 10 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 1 ) == 20 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 2 ) == 30 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 3 ) == 40 );
+    REQUIRE( arr_pptr->size() == 0u );
+    REQUIRE( arr_pptr->capacity() == 0u );
+    REQUIRE( arr_pptr->data() == nullptr );
 
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
 
-TEST_CASE( "pmem_array_pmm_find_sorted: finds existing elements", "[pmem_array_pmm][sorted]" )
+TEST_CASE( "parray: clear resets size but keeps capacity", "[parray][clear]" )
 {
     PamManager::create( 64 * 1024 );
 
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    pmem_array_pmm_init<int>( hdr_off );
+    arr_pptr->push_back( 10 );
+    arr_pptr->push_back( 20 );
 
-    auto identity = []( const int& x ) { return x; };
-    auto less     = []( int a, int b ) { return a < b; };
-
-    pmem_array_pmm_insert_sorted<int>( hdr_off, 10, identity, less );
-    pmem_array_pmm_insert_sorted<int>( hdr_off, 20, identity, less );
-    pmem_array_pmm_insert_sorted<int>( hdr_off, 30, identity, less );
-
-    int* found = pmem_array_pmm_find_sorted<int, int>( hdr_off, 20, identity, less );
-    REQUIRE( found != nullptr );
-    REQUIRE( *found == 20 );
-
-    int* not_found = pmem_array_pmm_find_sorted<int, int>( hdr_off, 25, identity, less );
-    REQUIRE( not_found == nullptr );
-
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
-    PamManager::destroy();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pmem_array_pmm_free / pmem_array_pmm_clear
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE( "pmem_array_pmm_free: deallocates buffer and resets header", "[pmem_array_pmm][free]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
-
-    pmem_array_pmm_init<int>( hdr_off );
-
-    pmem_array_pmm_push_back<int>( hdr_off ) = 10;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 20;
-
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 2u );
-    REQUIRE( pmem_array_pmm_capacity( hdr_off ) > 0u );
-
-    pmem_array_pmm_free<int>( hdr_off );
-
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 0u );
-    REQUIRE( pmem_array_pmm_capacity( hdr_off ) == 0u );
-
-    pmem_array_hdr_pmm* hdr = pmm_resolve<pmem_array_hdr_pmm>( hdr_off );
-    REQUIRE( hdr->data_off == 0u );
-
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
-    PamManager::destroy();
-}
-
-TEST_CASE( "pmem_array_pmm_clear: resets size but keeps capacity", "[pmem_array_pmm][clear]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
-
-    pmem_array_pmm_init<int>( hdr_off );
-
-    pmem_array_pmm_push_back<int>( hdr_off ) = 10;
-    pmem_array_pmm_push_back<int>( hdr_off ) = 20;
-
-    uintptr_t cap_before = pmem_array_pmm_capacity( hdr_off );
+    std::size_t cap_before = arr_pptr->capacity();
     REQUIRE( cap_before > 0u );
 
-    pmem_array_pmm_clear<int>( hdr_off );
+    arr_pptr->clear();
 
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 0u );
-    REQUIRE( pmem_array_pmm_capacity( hdr_off ) == cap_before ); // capacity не изменился
+    REQUIRE( arr_pptr->size() == 0u );
+    REQUIRE( arr_pptr->capacity() == cap_before ); // capacity не изменился
 
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
 
@@ -324,10 +216,12 @@ TEST_CASE( "pmem_array_pmm_clear: resets size but keeps capacity", "[pmem_array_
 // ТЕСТЫ pvector_pmm
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pvector_pmm: size is 3 * sizeof(void*)", "[pvector_pmm][layout]" )
+TEST_CASE( "pvector_pmm: size matches parray (12 bytes)", "[pvector_pmm][layout]" )
 {
-    REQUIRE( sizeof( pvector_pmm<int> ) == 3 * sizeof( void* ) );
-    REQUIRE( sizeof( pvector_pmm<double> ) == 3 * sizeof( void* ) );
+    // pvector_pmm оборачивает PamManager::parray<T>, размер = 12 байт
+    REQUIRE( sizeof( pvector_pmm<int> ) == sizeof( PamManager::parray<int> ) );
+    REQUIRE( sizeof( pvector_pmm<double> ) == sizeof( PamManager::parray<double> ) );
+    REQUIRE( sizeof( pvector_pmm<int> ) == 12u );
 }
 
 TEST_CASE( "pvector_pmm: push_back and element access", "[pvector_pmm][push_back]" )
@@ -478,52 +372,56 @@ TEST_CASE( "pvector_pmm: capacity grows with elements", "[pvector_pmm][capacity]
 // ТЕСТЫ ИНТЕГРАЦИИ: Большой массив
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm: handles large arrays (1000 elements)", "[pmem_array_pmm][large]" )
+TEST_CASE( "parray: handles large arrays (1000 elements)", "[parray][large]" )
 {
     PamManager::create( 256 * 1024 );
 
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
-
-    pmem_array_pmm_init<int>( hdr_off );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
     for ( int i = 0; i < 1000; i++ )
     {
-        pmem_array_pmm_push_back<int>( hdr_off ) = i * i;
+        arr_pptr->push_back( i * i );
     }
 
-    REQUIRE( pmem_array_pmm_size( hdr_off ) == 1000u );
-    REQUIRE( pmem_array_pmm_capacity( hdr_off ) >= 1000u );
+    REQUIRE( arr_pptr->size() == 1000u );
+    REQUIRE( arr_pptr->capacity() >= 1000u );
 
     // Проверяем несколько значений
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 0 ) == 0 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 10 ) == 100 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 99 ) == 9801 );
-    REQUIRE( pmem_array_pmm_at<int>( hdr_off, 999 ) == 999 * 999 );
+    int* d = arr_pptr->data();
+    REQUIRE( d[0] == 0 );
+    REQUIRE( d[10] == 100 );
+    REQUIRE( d[99] == 9801 );
+    REQUIRE( d[999] == 999 * 999 );
 
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТ: смещения кратны размеру гранулы
+// ТЕСТ: данные корректно резолвятся через data()
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm: data_off is aligned to granule size", "[pmem_array_pmm][alignment]" )
+TEST_CASE( "parray: data() returns valid pointer after push_back", "[parray][alignment]" )
 {
     PamManager::create( 64 * 1024 );
 
-    auto      hdr_pptr = PamManager::template allocate_typed<pmem_array_hdr_pmm>();
-    uintptr_t hdr_off  = pptr_to_offset( hdr_pptr );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    pmem_array_pmm_init<int>( hdr_off );
-    pmem_array_pmm_push_back<int>( hdr_off ) = 42;
+    arr_pptr->push_back( 42 );
 
-    pmem_array_hdr_pmm* hdr = pmm_resolve<pmem_array_hdr_pmm>( hdr_off );
-    REQUIRE( is_aligned_offset( hdr->data_off ) );
+    int* d = arr_pptr->data();
+    REQUIRE( d != nullptr );
+    REQUIRE( d[0] == 42 );
 
-    pmem_array_pmm_free<int>( hdr_off );
-    PamManager::template deallocate_typed<pmem_array_hdr_pmm>( hdr_pptr );
+    // Проверяем, что указатель данных находится внутри PMM области
+    std::uint8_t* base = PamManager::backend().base_ptr();
+    REQUIRE( base != nullptr );
+    REQUIRE( reinterpret_cast<std::uint8_t*>( d ) >= base );
+
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
     PamManager::destroy();
 }
