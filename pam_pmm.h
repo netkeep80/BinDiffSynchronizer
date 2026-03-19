@@ -247,6 +247,9 @@ inline uintptr_t pam_pmm_create_root_and_registry()
     if ( root != nullptr )
         root->registry_off = reg_off;
 
+    // Сохраняем корень в заголовке PMM (Issue #163, Plan Stage 1.2).
+    PamManager::set_root( root_pptr );
+
     return root_off;
 }
 
@@ -292,23 +295,16 @@ inline void pam_pmm_init( const char* filename )
                 // Загружаем данные из файла.
                 if ( pmm::load_manager_from_file<PamManager>( filename ) )
                 {
-                    // Ищем корневую структуру.
-                    // Она аллоцируется первой, поэтому её смещение можно найти
-                    // через перебор первых возможных позиций или использовать
-                    // фиксированный offset (первый блок после заголовка PMM).
-                    //
-                    // Для простоты предполагаем, что корень находится в начале
-                    // пользовательских данных. Пробуем найти её по магическому числу.
-
-                    // Перебираем возможные смещения (кратные гранулу).
-                    for ( uintptr_t off = PMM_GRANULE_SIZE; off < 1024 * PMM_GRANULE_SIZE; off += PMM_GRANULE_SIZE )
+                    // Получаем корневую структуру через API корневого объекта PMM
+                    // (Issue #163, Plan Stage 1.2 — замена magic-number поиска).
+                    auto root_pptr = PamManager::template get_root<pam_pmm_root>();
+                    if ( !root_pptr.is_null() )
                     {
-                        pam_pmm_root* root = pmm_resolve<pam_pmm_root>( off );
+                        pam_pmm_root* root = root_pptr.resolve();
                         if ( root != nullptr && root->magic == PAM_PMM_MAGIC && root->version == PAM_PMM_VERSION )
                         {
-                            detail::pam_pmm_root_offset() = off;
+                            detail::pam_pmm_root_offset() = pptr_to_offset( root_pptr );
                             loaded                        = true;
-                            break;
                         }
                     }
                 }
