@@ -267,7 +267,7 @@ TEST_CASE( "pjson_db_pmm batch: mixed put, erase, parse_into in single batch", "
 
 TEST_CASE( "pjson_db_pmm batch perf: batch put is faster than individual put", "[pjson_db_pmm][batch][perf]" )
 {
-    using clk = std::chrono::steady_clock;
+    using clk            = std::chrono::steady_clock;
     constexpr unsigned N = 500;
 
     // Без пакетной операции.
