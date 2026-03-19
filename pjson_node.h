@@ -608,16 +608,48 @@ inline node_view node_view_error( node_error err )
 // Вспомогательные функции для работы с узлами в ПАП
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Шаблонные helpers для устранения дублирования boilerplate (Фаза 16, Задача 16.1)
+// ---------------------------------------------------------------------------
+
+/// Разрешить узел по смещению, установить тег и обнулить _pad.
+/// Возвращает указатель на узел (nullptr при невалидном смещении).
+/// Используется внутренне для устранения дублирования в node_set_* функциях.
+inline node* node_resolve_and_set_tag( uintptr_t node_off, node_tag tag )
+{
+    if ( node_off == 0 )
+        return nullptr;
+    node* n = pmm_resolve<node>( node_off );
+    if ( n == nullptr )
+        return nullptr;
+    n->tag  = tag;
+    n->_pad = 0;
+    return n;
+}
+
+/// Инициализировать контейнерный узел (array/object/binary) — пустой.
+/// Устанавливает тег, обнуляет всю область данных union через array_val
+/// (все контейнерные поля имеют одинаковую раскладку: size/capacity/data_off).
+inline void node_set_container_empty( uintptr_t node_off, node_tag tag )
+{
+    node* n = node_resolve_and_set_tag( node_off, tag );
+    if ( n == nullptr )
+        return;
+    // array_val, object_val, binary_val имеют одинаковую раскладку {size, capacity, data_off}.
+    // Обнуляем через array_val (все три union-члена перекрывают одну и ту же область памяти).
+    n->array_val.size     = 0;
+    n->array_val.capacity = 0;
+    n->array_val.data_off = 0;
+}
+
+// ---------------------------------------------------------------------------
+
 /// Инициализировать узел нулями (null-узел) по смещению node_off в ПАП.
 inline void node_init_null( uintptr_t node_off )
 {
-    if ( node_off == 0 )
-        return;
-    node* n = pmm_resolve<node>( node_off );
+    node* n = node_resolve_and_set_tag( node_off, node_tag::null );
     if ( n == nullptr )
         return;
-    n->tag                       = node_tag::null;
-    n->_pad                      = 0;
     n->ref_val.path_length       = 0;
     n->ref_val.path_chars_offset = 0;
     n->ref_val.target            = 0;
@@ -626,53 +658,33 @@ inline void node_init_null( uintptr_t node_off )
 /// Установить boolean-значение узла.
 inline void node_set_bool( uintptr_t node_off, bool v )
 {
-    if ( node_off == 0 )
-        return;
-    node* n = pmm_resolve<node>( node_off );
-    if ( n == nullptr )
-        return;
-    n->tag         = node_tag::boolean;
-    n->_pad        = 0;
-    n->boolean_val = v ? 1u : 0u;
+    node* n = node_resolve_and_set_tag( node_off, node_tag::boolean );
+    if ( n != nullptr )
+        n->boolean_val = v ? 1u : 0u;
 }
 
 /// Установить integer-значение узла.
 inline void node_set_int( uintptr_t node_off, int64_t v )
 {
-    if ( node_off == 0 )
-        return;
-    node* n = pmm_resolve<node>( node_off );
-    if ( n == nullptr )
-        return;
-    n->tag     = node_tag::integer;
-    n->_pad    = 0;
-    n->int_val = v;
+    node* n = node_resolve_and_set_tag( node_off, node_tag::integer );
+    if ( n != nullptr )
+        n->int_val = v;
 }
 
 /// Установить uinteger-значение узла.
 inline void node_set_uint( uintptr_t node_off, uint64_t v )
 {
-    if ( node_off == 0 )
-        return;
-    node* n = pmm_resolve<node>( node_off );
-    if ( n == nullptr )
-        return;
-    n->tag      = node_tag::uinteger;
-    n->_pad     = 0;
-    n->uint_val = v;
+    node* n = node_resolve_and_set_tag( node_off, node_tag::uinteger );
+    if ( n != nullptr )
+        n->uint_val = v;
 }
 
 /// Установить real-значение узла.
 inline void node_set_real( uintptr_t node_off, double v )
 {
-    if ( node_off == 0 )
-        return;
-    node* n = pmm_resolve<node>( node_off );
-    if ( n == nullptr )
-        return;
-    n->tag      = node_tag::real;
-    n->_pad     = 0;
-    n->real_val = v;
+    node* n = node_resolve_and_set_tag( node_off, node_tag::real );
+    if ( n != nullptr )
+        n->real_val = v;
 }
 
 /// Установить строковое значение узла (pstring, readwrite).
@@ -736,46 +748,19 @@ inline void node_assign_string( uintptr_t node_off, const char* s )
 /// Инициализировать array-узел (пустой массив).
 inline void node_set_array( uintptr_t node_off )
 {
-    if ( node_off == 0 )
-        return;
-    node* n = pmm_resolve<node>( node_off );
-    if ( n == nullptr )
-        return;
-    n->tag                = node_tag::array;
-    n->_pad               = 0;
-    n->array_val.size     = 0;
-    n->array_val.capacity = 0;
-    n->array_val.data_off = 0;
+    node_set_container_empty( node_off, node_tag::array );
 }
 
 /// Инициализировать object-узел (пустой объект).
 inline void node_set_object( uintptr_t node_off )
 {
-    if ( node_off == 0 )
-        return;
-    node* n = pmm_resolve<node>( node_off );
-    if ( n == nullptr )
-        return;
-    n->tag                 = node_tag::object;
-    n->_pad                = 0;
-    n->object_val.size     = 0;
-    n->object_val.capacity = 0;
-    n->object_val.data_off = 0;
+    node_set_container_empty( node_off, node_tag::object );
 }
 
 /// Инициализировать binary-узел (пустой массив байт).
 inline void node_set_binary( uintptr_t node_off )
 {
-    if ( node_off == 0 )
-        return;
-    node* n = pmm_resolve<node>( node_off );
-    if ( n == nullptr )
-        return;
-    n->tag                 = node_tag::binary;
-    n->_pad                = 0;
-    n->binary_val.size     = 0;
-    n->binary_val.capacity = 0;
-    n->binary_val.data_off = 0;
+    node_set_container_empty( node_off, node_tag::binary );
 }
 
 /// Установить ref-узел (путь + не разрешённый target).
