@@ -1,12 +1,12 @@
 // test_pjson_opt.cpp — Тесты новых оптимизаций: пул узлов, интернирование строк, сериализация.
-//   F2 — пул памяти для узлов (pjson_pool)
+//   F2 — пул памяти для узлов (pjson_pool_pmm)
 //   F3 — интернирование строк (pstringview_table / pam_intern_string)
 //   F6 — прямая сериализация/десериализация (pjson_codec)
 //
-// Мигрировано с pjson.h на pjson_pool.h, pstringview.h, pjson_codec.h в рамках Задачи 9.5.
+// Мигрировано с pjson.h на pjson_pool_pmm.h, pstringview.h, pjson_codec.h в рамках Задачи 9.5.
 //
 // Зависимости: Catch2, pjson_codec.h (включает pjson_node.h, pstringview.h),
-//              pjson_pool.h
+//              pjson_pool_pmm.h
 //
 // Все комментарии — на русском языке (Тр.6).
 
@@ -16,7 +16,8 @@
 #include <string>
 
 #include "pjson_codec.h"
-#include "pjson_pool.h"
+#include "pjson_pool_pmm.h"
+#include "fptr_pmm.h"
 
 using namespace pjson;
 
@@ -481,16 +482,16 @@ TEST_CASE( "pjson opt F3: pstringview deduplicates object keys", "[pjson][opt][f
 }
 
 // ============================================================================
-// F2: Пул памяти для узлов (pjson_pool)
+// F2: Пул памяти для узлов (pjson_pool_pmm)
 // ============================================================================
 
 TEST_CASE( "pjson opt F2: pool alloc returns valid node offset", "[pjson][opt][f2][pool]" )
 {
     reset_pam();
-    fptr<pjson_pool> pool;
+    fptr<pjson_pool_pmm> pool;
     pool.New();
 
-    node_id node_off = pool->alloc();
+    node_id node_off = pjson_pool_pmm_alloc( pool.addr() );
     REQUIRE( node_off != 0u );
 
     node* n = pmm_resolve<node>( node_off );
@@ -498,23 +499,23 @@ TEST_CASE( "pjson opt F2: pool alloc returns valid node offset", "[pjson][opt][f
     // Новый узел должен быть нулевым (null).
     REQUIRE( node_view{ node_off }.is_null() );
 
-    pool->free( node_off );
+    pjson_pool_pmm_free( pool.addr(), node_off );
     pool.Delete();
 }
 
 TEST_CASE( "pjson opt F2: pool alloc and use node", "[pjson][opt][f2][pool]" )
 {
     reset_pam();
-    fptr<pjson_pool> pool;
+    fptr<pjson_pool_pmm> pool;
     pool.New();
 
-    node_id node_off = pool->alloc();
+    node_id node_off = pjson_pool_pmm_alloc( pool.addr() );
     node_set_int( node_off, 42 );
     REQUIRE( node_view{ node_off }.as_int() == 42 );
-    REQUIRE( pool->used_count() == 1u );
+    REQUIRE( pjson_pool_pmm_used_count( pool.addr() ) == 1u );
 
-    pool->free( node_off );
-    REQUIRE( pool->used_count() == 0u );
+    pjson_pool_pmm_free( pool.addr(), node_off );
+    REQUIRE( pjson_pool_pmm_used_count( pool.addr() ) == 0u );
 
     pool.Delete();
 }
@@ -522,7 +523,7 @@ TEST_CASE( "pjson opt F2: pool alloc and use node", "[pjson][opt][f2][pool]" )
 TEST_CASE( "pjson opt F2: pool alloc multiple nodes", "[pjson][opt][f2][pool]" )
 {
     reset_pam();
-    fptr<pjson_pool> pool;
+    fptr<pjson_pool_pmm> pool;
     pool.New();
 
     // Выделяем 10 узлов.
@@ -530,7 +531,7 @@ TEST_CASE( "pjson opt F2: pool alloc multiple nodes", "[pjson][opt][f2][pool]" )
     node_id       offsets[N];
     for ( int i = 0; i < N; i++ )
     {
-        offsets[i] = pool->alloc();
+        offsets[i] = pjson_pool_pmm_alloc( pool.addr() );
         REQUIRE( offsets[i] != 0u );
         node_set_int( offsets[i], i );
     }
@@ -539,12 +540,12 @@ TEST_CASE( "pjson opt F2: pool alloc multiple nodes", "[pjson][opt][f2][pool]" )
     for ( int i = 0; i < N; i++ )
         REQUIRE( node_view{ offsets[i] }.as_int() == i );
 
-    REQUIRE( pool->used_count() == (uintptr_t)N );
+    REQUIRE( pjson_pool_pmm_used_count( pool.addr() ) == (uintptr_t)N );
 
     // Возвращаем все узлы в пул.
     for ( int i = 0; i < N; i++ )
-        pool->free( offsets[i] );
-    REQUIRE( pool->used_count() == 0u );
+        pjson_pool_pmm_free( pool.addr(), offsets[i] );
+    REQUIRE( pjson_pool_pmm_used_count( pool.addr() ) == 0u );
 
     pool.Delete();
 }
@@ -552,41 +553,41 @@ TEST_CASE( "pjson opt F2: pool alloc multiple nodes", "[pjson][opt][f2][pool]" )
 TEST_CASE( "pjson opt F2: pool reuses freed nodes", "[pjson][opt][f2][pool]" )
 {
     reset_pam();
-    fptr<pjson_pool> pool;
+    fptr<pjson_pool_pmm> pool;
     pool.New();
 
     // Выделяем узел и освобождаем.
-    node_id off1 = pool->alloc();
+    node_id off1 = pjson_pool_pmm_alloc( pool.addr() );
     node_set_int( off1, 1 );
-    uintptr_t free_before = pool->free_in_pool();
-    pool->free( off1 );
-    uintptr_t free_after = pool->free_in_pool();
+    uintptr_t free_before = pjson_pool_pmm_free_in_pool( pool.addr() );
+    pjson_pool_pmm_free( pool.addr(), off1 );
+    uintptr_t free_after = pjson_pool_pmm_free_in_pool( pool.addr() );
 
     // После возврата off1 в пул количество свободных узлов увеличилось на 1.
     REQUIRE( free_after == free_before + 1 );
 
     // Следующий alloc должен вернуть off1 (LIFO free-list).
-    node_id off2 = pool->alloc();
+    node_id off2 = pjson_pool_pmm_alloc( pool.addr() );
     REQUIRE( off2 == off1 ); // Узел переиспользован.
 
-    pool->free( off2 );
+    pjson_pool_pmm_free( pool.addr(), off2 );
     pool.Delete();
 }
 
 TEST_CASE( "pjson opt F2: pool total_count tracks allocated nodes", "[pjson][opt][f2][pool]" )
 {
     reset_pam();
-    fptr<pjson_pool> pool;
+    fptr<pjson_pool_pmm> pool;
     pool.New();
 
-    REQUIRE( pool->total_count() == 0u );
+    REQUIRE( pjson_pool_pmm_total_count( pool.addr() ) == 0u );
 
-    node_id off = pool->alloc();
-    REQUIRE( pool->total_count() >= 1u );
-    REQUIRE( pool->used_count() == 1u );
+    node_id off = pjson_pool_pmm_alloc( pool.addr() );
+    REQUIRE( pjson_pool_pmm_total_count( pool.addr() ) >= 1u );
+    REQUIRE( pjson_pool_pmm_used_count( pool.addr() ) == 1u );
 
-    pool->free( off );
-    REQUIRE( pool->used_count() == 0u );
+    pjson_pool_pmm_free( pool.addr(), off );
+    REQUIRE( pjson_pool_pmm_used_count( pool.addr() ) == 0u );
 
     pool.Delete();
 }

@@ -3,19 +3,12 @@
  * @file pjson_db_pmm.h
  * @brief Менеджер персистной JSON-БД на базе PMM (Задача 14.8).
  *
- * PMM-версия pjson_db, использующая PersistMemoryManager вместо
- * PersistentAddressSpace (pam_core.h).
+ * Менеджер персистной JSON-БД на базе PersistMemoryManager (PMM).
  *
- * Ключевые отличия от оригинального pjson_db.h:
- *   - Использует pam_pmm_* функции вместо PersistentAddressSpace
- *   - Использует pjson_pool_pmm вместо pjson_pool
- *   - Использует pmm_resolve<T>() вместо pam.Resolve<T>()
- *   - Метрики маппятся на PMM stats API
+ * Использует pam_pmm_* функции, pjson_pool_pmm и pmm_resolve<T>()
+ * для работы с персистным адресным пространством.
  *
- * API полностью совместим с pjson_db для упрощения миграции.
- *
- * @see plan.md Задача 14.8 — Миграция pjson_db (высокоуровневый API)
- * @see pam_pmm.h — фасад PersistentAddressSpace на базе PMM
+ * @see pam_pmm.h — фасад ПАМ на PMM
  * @see pjson_pool_pmm.h — пул узлов на PMM
  */
 
@@ -1100,11 +1093,11 @@ class pjson_db_pmm
         if ( n == nullptr )
             return false;
 
-        uintptr_t hdr_off = pam_pmm_ptr_to_offset( reinterpret_cast<pmem_array_hdr*>( &( n->object_val.size ) ) );
+        uintptr_t hdr_off = pam_pmm_ptr_to_offset( reinterpret_cast<pmem_array_hdr_pmm*>( &( n->object_val.size ) ) );
         if ( hdr_off == 0 )
             return false;
 
-        pmem_array_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
+        pmem_array_pmm_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
             hdr_off, new_entry, object_entry_key_of{}, object_entry_less{} );
 
         return true;

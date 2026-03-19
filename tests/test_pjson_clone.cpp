@@ -14,7 +14,7 @@
 //   - Клонирование object-узла (рекурсивно)
 //   - Клонирование ref-узла (path копируется, target = 0)
 //
-// Задача 13.2: pjson_db::clone — высокоуровневый API
+// Задача 13.2: pjson_db_pmm::clone — высокоуровневый API
 //   - Клонирование по пути
 //   - Изменение копии не влияет на оригинал
 //   - Клонирование вложенных структур
@@ -23,7 +23,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "pjson_db.h"
+#include "pjson_db_pmm.h"
 
 using namespace pjson;
 
@@ -272,13 +272,13 @@ TEST_CASE( "node_clone: cloning nested structure", "[phase13][clone]" )
 }
 
 // ===========================================================================
-// Задача 13.2: pjson_db::clone — высокоуровневый API
+// Задача 13.2: pjson_db_pmm::clone — высокоуровневый API
 // ===========================================================================
 
-TEST_CASE( "pjson_db::clone: clone path to another path", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone path to another path", "[phase13][clone][db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     db.put( "/original/name", "Alice" );
     db.put( "/original/age", 30 );
@@ -290,10 +290,10 @@ TEST_CASE( "pjson_db::clone: clone path to another path", "[phase13][clone][db]"
     REQUIRE( db.get( "/copy/age" ).as_int() == 30 );
 }
 
-TEST_CASE( "pjson_db::clone: modifying copy does not affect original", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: modifying copy does not affect original", "[phase13][clone][db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     db.put( "/original/value", "original_value" );
 
@@ -308,10 +308,10 @@ TEST_CASE( "pjson_db::clone: modifying copy does not affect original", "[phase13
     REQUIRE( db.get( "/copy/value" ).as_string() == "modified_value" );
 }
 
-TEST_CASE( "pjson_db::clone: clone nested structure", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone nested structure", "[phase13][clone][db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     db.parse_into( "/data", R"({"users": [{"name": "Alice"}, {"name": "Bob"}], "count": 2})" );
 
@@ -323,19 +323,19 @@ TEST_CASE( "pjson_db::clone: clone nested structure", "[phase13][clone][db]" )
     REQUIRE( db.get( "/backup/users/1/name" ).as_string() == "Bob" );
 }
 
-TEST_CASE( "pjson_db::clone: clone nonexistent path returns false", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone nonexistent path returns false", "[phase13][clone][db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     bool ok = db.clone( "/nonexistent", "/copy" );
     REQUIRE( ok == false );
 }
 
-TEST_CASE( "pjson_db::clone: clone to metrics path returns false", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone to metrics path returns false", "[phase13][clone][db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     db.put( "/data", 42 );
 
@@ -343,19 +343,19 @@ TEST_CASE( "pjson_db::clone: clone to metrics path returns false", "[phase13][cl
     REQUIRE( ok == false );
 }
 
-TEST_CASE( "pjson_db::clone: clone from metrics path returns false", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone from metrics path returns false", "[phase13][clone][db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     bool ok = db.clone( "/$metrics/node_count_total", "/copy" );
     REQUIRE( ok == false );
 }
 
-TEST_CASE( "pjson_db::clone(node_id): low-level clone by node_id", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone(node_id): low-level clone by node_id", "[phase13][clone][db]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     db.put( "/value", 42 );
     node_id src_id = db.get( "/value" ).id;

@@ -1,15 +1,10 @@
 #pragma once
 /**
  * @file pallocator_pmm.h
- * @brief STL-совместимый аллокатор на базе PMM (Задача 14.7).
+ * @brief STL-совместимый аллокатор на базе PMM.
  *
  * Этот файл реализует pallocator_pmm<T> — STL-совместимый аллокатор,
  * использующий PMM (pam_pmm.h) в качестве бэкенда для выделения памяти.
- *
- * Ключевые отличия от оригинального pallocator<T>:
- *   - Использует pam_pmm_create_array<T>() вместо PersistentAddressSpace::CreateArray<T>()
- *   - Использует pam_pmm_delete() вместо PersistentAddressSpace::Delete()
- *   - Использует pmm_resolve<T>() вместо Resolve<T>()
  *
  * Ограничения:
  *   - Возвращает raw-указатели C++ (через разрешение смещения ПАП -> указатель).
@@ -22,7 +17,6 @@
  *   std::vector<int, pjson::pallocator_pmm<int>> v;
  *   v.push_back(42);
  *
- * @see plan.md Задача 14.7 — Миграция persist<T> и fptr<T>
  * @see pam_pmm.h — фасад PMM для управления ПАП
  */
 
@@ -126,7 +120,6 @@ template <typename T> class pallocator_pmm
             pam_pmm_delete( offset );
         }
         // Если указатель не найден в PMM — ничего не делаем.
-        // Это отличие от оригинального pallocator, который вызывал delete[].
     }
 
     // -------------------------------------------------------------------------
@@ -178,10 +171,9 @@ template <typename T> class pallocator_pmm
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Алиас pallocator<T> = pallocator_pmm<T> для упрощения миграции.
+ * @brief Алиас pallocator<T> = pallocator_pmm<T>.
  *
- * Используйте pjson::pallocator<T> в новом коде для работы с PMM-бэкендом.
- * Оригинальный ::pallocator<T> из pallocator.h использует PersistentAddressSpace.
+ * Используйте pjson::pallocator<T> для работы с PMM-бэкендом.
  */
 template <typename T> using pallocator = pallocator_pmm<T>;
 

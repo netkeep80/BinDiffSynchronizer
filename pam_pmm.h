@@ -1,33 +1,19 @@
 #pragma once
 /**
  * @file pam_pmm.h
- * @brief Фасад PersistentAddressSpace на базе PMM (Задача 14.6).
+ * @brief Фасад управления персистным адресным пространством на базе PMM.
  *
- * Этот файл реализует API, совместимый с PersistentAddressSpace из pam_core.h,
- * но использует PersistMemoryManager (PMM) в качестве бэкенда.
+ * Этот файл реализует API для управления персистным адресным пространством,
+ * используя PersistMemoryManager (PMM) в качестве бэкенда.
  *
- * Таблица соответствия методов (из plan.md):
+ * Основные функции:
+ *   - pam_pmm_init(filename) — инициализация / загрузка хранилища
+ *   - pam_pmm_create<T>(name) / pam_pmm_create_array<T>(count, name) — создание объектов
+ *   - pmm_resolve<T>(offset) — разрешение смещения в указатель
+ *   - pam_pmm_delete(offset) — удаление объектов
+ *   - pam_pmm_find(name) / pam_pmm_find_typed<T>(name) — поиск по имени
+ *   - pam_pmm_save() — сохранение в файл
  *
- * | Текущий API (PersistentAddressSpace) | Новый API (pam_pmm)                                |
- * |--------------------------------------|---------------------------------------------------|
- * | Init(filename)                       | pam_pmm_init(filename) / load_manager_from_file() |
- * | Get()                                | Не нужен (статические методы)                      |
- * | Create<T>(name)                      | pam_pmm_create<T>(name)                            |
- * | CreateArray<T>(count, name)          | pam_pmm_create_array<T>(count, name)               |
- * | Resolve<T>(offset)                   | pmm_resolve<T>(offset)                             |
- * | Delete(offset)                       | pam_pmm_delete(offset)                             |
- * | Find(name)                           | pam_pmm_find(name)                                 |
- * | FindTyped<T>(name)                   | pam_pmm_find_typed<T>(name)                        |
- * | Realloc(...)                         | Аллокация нового + копирование + деаллокация       |
- * | Save()                               | pam_pmm_save()                                     |
- * | Load()                               | pam_pmm_load()                                     |
- * | GetBump()                            | PamManager::used_size()                            |
- * | GetDataSize()                        | PamManager::total_size()                           |
- * | GetFreeListSize()                    | (не поддерживается напрямую)                       |
- * | GetSlotCount()                       | pam_pmm_slot_count()                               |
- * | GetNamedCount()                      | pam_pmm_named_count()                              |
- *
- * @see plan.md Задача 14.6 — Миграция PersistentAddressSpace → PMM API
  * @see pam_pmm_config.h — определение PamManager
  * @see pmap_pmm.h — персистная карта для реестра имён
  */
@@ -47,7 +33,7 @@ namespace pjson
 // КОНСТАНТЫ ДЛЯ PAM_PMM
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Максимальная длина имени объекта (совместимо с pam_core.h PAM_NAME_SIZE).
+/// Максимальная длина имени объекта.
 constexpr unsigned PAM_PMM_NAME_SIZE = 64u;
 
 /// Начальный размер PMM (в байтах) при создании нового хранилища.
@@ -59,8 +45,6 @@ constexpr std::size_t PAM_PMM_INITIAL_SIZE = 64u * 1024u;
 
 /**
  * @brief Ключ для карты имён — фиксированный массив символов.
- *
- * Совместим по смыслу с name_key из pam_core.h, но используется в PMM-версии.
  */
 struct pam_pmm_name_key
 {
@@ -269,8 +253,6 @@ inline uintptr_t pam_pmm_create_root_and_registry()
 /**
  * @brief Инициализировать PMM из файла или создать новое хранилище.
  *
- * Аналог PersistentAddressSpace::Init(filename).
- *
  * @param filename Путь к файлу хранилища (может быть nullptr для in-memory).
  */
 inline void pam_pmm_init( const char* filename )
@@ -356,7 +338,7 @@ inline void pam_pmm_init( const char* filename )
 /**
  * @brief Сохранить PMM в файл.
  *
- * Аналог PersistentAddressSpace::Save().
+ * Сохраняет PMM данные на диск.
  */
 inline void pam_pmm_save()
 {
@@ -385,7 +367,7 @@ inline void pam_pmm_destroy()
 /**
  * @brief Сбросить PMM к пустому состоянию за O(1).
  *
- * Аналог PersistentAddressSpace::Reset().
+ * Пересоздаёт хранилище с чистым состоянием.
  */
 inline void pam_pmm_reset()
 {
@@ -413,8 +395,6 @@ inline bool pam_pmm_is_initialized()
 
 /**
  * @brief Создать один объект типа T в ПАП.
- *
- * Аналог PersistentAddressSpace::Create<T>(name).
  *
  * @tparam T Тип создаваемого объекта. Должен быть тривиально копируемым.
  * @param name Имя объекта (может быть nullptr для безымянного).
@@ -482,8 +462,6 @@ template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullpt
 
 /**
  * @brief Создать массив из count объектов типа T в ПАП.
- *
- * Аналог PersistentAddressSpace::CreateArray<T>(count, name).
  *
  * @tparam T Тип элементов массива. Должен быть тривиально копируемым.
  * @param count Количество элементов.
@@ -560,8 +538,6 @@ template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, con
 /**
  * @brief Удалить объект по байтовому смещению.
  *
- * Аналог PersistentAddressSpace::Delete(offset).
- *
  * @param offset Байтовое смещение объекта.
  */
 inline void pam_pmm_delete( uintptr_t offset )
@@ -614,8 +590,6 @@ inline void pam_pmm_delete( uintptr_t offset )
 /**
  * @brief Найти объект по имени.
  *
- * Аналог PersistentAddressSpace::Find(name).
- *
  * @param name Имя объекта.
  * @return Байтовое смещение объекта; 0 если не найден.
  */
@@ -640,8 +614,6 @@ inline uintptr_t pam_pmm_find( const char* name )
 
 /**
  * @brief Найти объект по имени с проверкой размера элемента.
- *
- * Аналог PersistentAddressSpace::FindTyped<T>(name).
  *
  * @tparam T Ожидаемый тип объекта.
  * @param name Имя объекта.
@@ -673,8 +645,6 @@ template <typename T> inline uintptr_t pam_pmm_find_typed( const char* name )
 /**
  * @brief Получить имя объекта по смещению.
  *
- * Аналог PersistentAddressSpace::GetName(offset).
- *
  * @param offset Байтовое смещение объекта.
  * @return Указатель на строку имени или nullptr.
  */
@@ -700,8 +670,6 @@ inline const char* pam_pmm_get_name( uintptr_t offset )
 /**
  * @brief Получить количество элементов для слота.
  *
- * Аналог PersistentAddressSpace::GetCount(offset).
- *
  * @param offset Байтовое смещение объекта.
  * @return Количество элементов; 0 если не найден.
  */
@@ -723,8 +691,6 @@ inline uintptr_t pam_pmm_get_count( uintptr_t offset )
 
 /**
  * @brief Получить размер элемента для слота.
- *
- * Аналог PersistentAddressSpace::GetElemSize(offset).
  *
  * @param offset Байтовое смещение объекта.
  * @return Размер одного элемента в байтах; 0 если не найден.
@@ -752,7 +718,7 @@ inline uintptr_t pam_pmm_get_elem_size( uintptr_t offset )
 /**
  * @brief Получить количество аллоцированных слотов.
  *
- * Аналог PersistentAddressSpace::GetSlotCount().
+ * Возвращает число записей в slot_map_.
  */
 inline uintptr_t pam_pmm_slot_count()
 {
@@ -765,7 +731,7 @@ inline uintptr_t pam_pmm_slot_count()
 /**
  * @brief Получить количество именованных объектов.
  *
- * Аналог PersistentAddressSpace::GetNamedCount().
+ * Возвращает число записей в name_map_.
  */
 inline uintptr_t pam_pmm_named_count()
 {
@@ -778,7 +744,7 @@ inline uintptr_t pam_pmm_named_count()
 /**
  * @brief Получить позицию bump-указателя (используемый размер).
  *
- * Аналог PersistentAddressSpace::GetBump().
+ * Возвращает текущий используемый размер PMM.
  */
 inline uintptr_t pam_pmm_get_bump()
 {
@@ -788,7 +754,7 @@ inline uintptr_t pam_pmm_get_bump()
 /**
  * @brief Получить общий размер области данных.
  *
- * Аналог PersistentAddressSpace::GetDataSize().
+ * Возвращает общий размер PMM области данных.
  */
 inline uintptr_t pam_pmm_get_data_size()
 {
@@ -814,8 +780,6 @@ inline uintptr_t pam_pmm_get_string_table_offset()
 /**
  * @brief Преобразовать смещение в T*.
  *
- * Аналог PersistentAddressSpace::Resolve<T>(offset).
- *
  * @tparam T Тип данных.
  * @param offset Байтовое смещение.
  * @return Указатель на T или nullptr.
@@ -839,8 +803,6 @@ template <typename T> inline const T* pam_pmm_resolve_const( uintptr_t offset )
 
 /**
  * @brief Преобразовать указатель в смещение.
- *
- * Аналог PersistentAddressSpace::PtrToOffset(p).
  *
  * @param p Указатель.
  * @return Байтовое смещение или 0 если указатель вне PMM.
@@ -866,8 +828,7 @@ inline uintptr_t pam_pmm_ptr_to_offset( const void* p )
 /**
  * @brief Перевыделить память (Realloc).
  *
- * Аналог PersistentAddressSpace::Realloc().
- * В PMM реализуется через аллокацию нового блока, копирование и деаллокацию старого.
+ * Реализуется через аллокацию нового блока, копирование и деаллокацию старого.
  *
  * @tparam T Тип элементов.
  * @param old_offset Байтовое смещение старого блока.
@@ -935,8 +896,8 @@ template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, ui
 /**
  * @brief Зарезервировать ёмкость (заглушка для совместимости).
  *
- * Аналог PersistentAddressSpace::ReserveSlots().
  * В PMM не требуется, так как карты расширяются автоматически.
+ * Сохранена для совместимости API.
  */
 inline void pam_pmm_reserve_slots( uintptr_t /*min_slots*/ )
 {
@@ -946,7 +907,7 @@ inline void pam_pmm_reserve_slots( uintptr_t /*min_slots*/ )
 /**
  * @brief Валидация хранилища (заглушка).
  *
- * Аналог PersistentAddressSpace::Validate().
+ * Проверяет базовую корректность состояния PMM.
  */
 inline bool pam_pmm_validate()
 {
@@ -1035,8 +996,7 @@ inline bool pstringview_pmm_hooks_registered = []()
 }();
 
 // ═══════════════════════════════════════════════════════════════════════════
-// API совместимости: pam_intern_string, pam_search_strings, pam_all_strings
-// (Задача 15.5 — перенесено из pstringview.h)
+// API словаря строк: pam_intern_string, pam_search_strings, pam_all_strings
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Результат поиска строки в словаре ПАП (совместимость с pstringview.h).

@@ -1,6 +1,6 @@
-// test_pjson_db_perf.cpp — Тесты производительности pjson_db (Задача 9.2).
+// test_pjson_db_pmm_perf.cpp — Тесты производительности pjson_db_pmm (Задача 9.2).
 //
-// Проверяют, что высокоуровневый API pjson_db справляется с 100k узлами
+// Проверяют, что высокоуровневый API pjson_db_pmm справляется с 100k узлами
 // за приемлемое время.
 //
 // Покрытие:
@@ -29,7 +29,7 @@
 #include <cstring>
 #include <string>
 
-#include "pjson_db.h"
+#include "pjson_db_pmm.h"
 
 using namespace pjson;
 
@@ -65,10 +65,10 @@ constexpr unsigned LARGE_N = 100'000u;
 // Задача 9.2: put() 10k целочисленных узлов, проверка корректности
 // ===========================================================================
 
-TEST_CASE( "pjson_db perf: put 10k integer nodes and verify", "[pjson_db][phase9][perf]" )
+TEST_CASE( "pjson_db_pmm perf: put 10k integer nodes and verify", "[pjson_db_pmm][phase9][perf]" )
 {
     reset_pam_perf();
-    pjson_db db;
+    pjson_db_pmm db;
 
     char path[64];
     auto t0 = perf_clk::now();
@@ -97,10 +97,10 @@ TEST_CASE( "pjson_db perf: put 10k integer nodes and verify", "[pjson_db][phase9
 // Задача 9.2: put() 10k строковых узлов, проверка корректности
 // ===========================================================================
 
-TEST_CASE( "pjson_db perf: put 10k string nodes and verify", "[pjson_db][phase9][perf]" )
+TEST_CASE( "pjson_db_pmm perf: put 10k string nodes and verify", "[pjson_db_pmm][phase9][perf]" )
 {
     reset_pam_perf();
-    pjson_db db;
+    pjson_db_pmm db;
 
     char path[64];
     char value[64];
@@ -131,10 +131,10 @@ TEST_CASE( "pjson_db perf: put 10k string nodes and verify", "[pjson_db][phase9]
 // Задача 9.2: get() 100k запросов по 10k ключам
 // ===========================================================================
 
-TEST_CASE( "pjson_db perf: get 100k requests", "[pjson_db][phase9][perf]" )
+TEST_CASE( "pjson_db_pmm perf: get 100k requests", "[pjson_db_pmm][phase9][perf]" )
 {
     reset_pam_perf();
-    pjson_db db;
+    pjson_db_pmm db;
 
     char path[64];
 
@@ -167,10 +167,10 @@ TEST_CASE( "pjson_db perf: get 100k requests", "[pjson_db][phase9][perf]" )
 // Задача 9.2: parse_into() 1k JSON-объектов (информационный)
 // ===========================================================================
 
-TEST_CASE( "pjson_db perf: parse_into 1k JSON objects", "[pjson_db][phase9][perf]" )
+TEST_CASE( "pjson_db_pmm perf: parse_into 1k JSON objects", "[pjson_db_pmm][phase9][perf]" )
 {
     reset_pam_perf();
-    pjson_db db;
+    pjson_db_pmm db;
 
     char path[64];
     // Небольшой JSON-объект для вставки.
@@ -201,10 +201,10 @@ TEST_CASE( "pjson_db perf: parse_into 1k JSON objects", "[pjson_db][phase9][perf
 // Задача 9.2: erase() 10k узлов (строковые ключи)
 // ===========================================================================
 
-TEST_CASE( "pjson_db perf: erase 10k nodes", "[pjson_db][phase9][perf]" )
+TEST_CASE( "pjson_db_pmm perf: erase 10k nodes", "[pjson_db_pmm][phase9][perf]" )
 {
     reset_pam_perf();
-    pjson_db db;
+    pjson_db_pmm db;
 
     char path[64];
 
@@ -238,10 +238,10 @@ TEST_CASE( "pjson_db perf: erase 10k nodes", "[pjson_db][phase9][perf]" )
 // Задача 9.2: полный жизненный цикл — put/get/erase с 10k узлами
 // ===========================================================================
 
-TEST_CASE( "pjson_db perf: full lifecycle with 10k nodes", "[pjson_db][phase9][perf]" )
+TEST_CASE( "pjson_db_pmm perf: full lifecycle with 10k nodes", "[pjson_db_pmm][phase9][perf]" )
 {
     reset_pam_perf();
-    pjson_db db;
+    pjson_db_pmm db;
 
     char path[64];
 
@@ -295,13 +295,13 @@ TEST_CASE( "pjson_db perf: full lifecycle with 10k nodes", "[pjson_db][phase9][p
 // Задача 9.2: ReserveSlots — предварительное резервирование ускоряет вставку
 // ===========================================================================
 
-TEST_CASE( "pjson_db perf: ReserveSlots before bulk insert", "[pjson_db][phase9][perf]" )
+TEST_CASE( "pjson_db_pmm perf: ReserveSlots before bulk insert", "[pjson_db_pmm][phase9][perf]" )
 {
     // Вставка БЕЗ резервирования.
     long long ms_without = 0;
     {
         reset_pam_perf();
-        pjson_db db;
+        pjson_db_pmm db;
         char     path[64];
 
         auto t0 = perf_clk::now();
@@ -317,7 +317,7 @@ TEST_CASE( "pjson_db perf: ReserveSlots before bulk insert", "[pjson_db][phase9]
     long long ms_with = 0;
     {
         reset_pam_perf();
-        pjson_db db;
+        pjson_db_pmm db;
         pam_pmm_reserve_slots( PERF_N + 64u );
 
         char path[64];

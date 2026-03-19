@@ -1,4 +1,4 @@
-// test_pjson_db.cpp — Тесты для менеджера персистной JSON-БД (Фаза 6).
+// test_pjson_db_pmm.cpp — Тесты для менеджера персистной JSON-БД (Фаза 6).
 //
 // Покрытие:
 //   - Открытие и инициализация БД
@@ -18,7 +18,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "pjson_db.h"
+#include "pjson_db_pmm.h"
 
 using namespace pjson;
 
@@ -38,29 +38,29 @@ static void reset_pam()
 // Открытие и инициализация БД
 // ===========================================================================
 
-TEST_CASE( "pjson_db: default constructor creates root object", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: default constructor creates root object", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db  db;
+    pjson_db_pmm  db;
     node_view root = db.root();
     REQUIRE( root.valid() );
     REQUIRE( root.is_object() );
 }
 
-TEST_CASE( "pjson_db: root_id returns valid node_id", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: root_id returns valid node_id", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.root_id() != 0u );
 }
 
-TEST_CASE( "pjson_db: second pjson_db reuses existing root", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: second pjson_db_pmm reuses existing root", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db1;
+    pjson_db_pmm db1;
     node_id  root1 = db1.root_id();
 
-    pjson_db db2;
+    pjson_db_pmm db2;
     node_id  root2 = db2.root_id();
 
     // Оба должны указывать на один корневой узел.
@@ -71,10 +71,10 @@ TEST_CASE( "pjson_db: second pjson_db reuses existing root", "[pjson_db]" )
 // put / get — базовые типы
 // ===========================================================================
 
-TEST_CASE( "pjson_db: put and get boolean true", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put and get boolean true", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/flag", true ) );
     node_view v = db.get( "/flag" );
     REQUIRE( v.valid() );
@@ -82,38 +82,38 @@ TEST_CASE( "pjson_db: put and get boolean true", "[pjson_db]" )
     REQUIRE( v.as_bool() == true );
 }
 
-TEST_CASE( "pjson_db: put and get boolean false", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put and get boolean false", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/flag", false ) );
     REQUIRE( db.get( "/flag" ).as_bool() == false );
 }
 
-TEST_CASE( "pjson_db: put and get integer", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put and get integer", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/count", static_cast<int64_t>( -42 ) ) );
     node_view v = db.get( "/count" );
     REQUIRE( v.is_integer() );
     REQUIRE( v.as_int() == -42 );
 }
 
-TEST_CASE( "pjson_db: put and get uinteger", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put and get uinteger", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/uid", static_cast<uint64_t>( 9999999999ULL ) ) );
     node_view v = db.get( "/uid" );
     REQUIRE( v.is_uinteger() );
     REQUIRE( v.as_uint() == 9999999999ULL );
 }
 
-TEST_CASE( "pjson_db: put and get real", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put and get real", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/pi", 3.14159 ) );
     node_view v = db.get( "/pi" );
     REQUIRE( v.is_real() );
@@ -121,30 +121,30 @@ TEST_CASE( "pjson_db: put and get real", "[pjson_db]" )
     REQUIRE( v.as_double() < 3.15 );
 }
 
-TEST_CASE( "pjson_db: put and get string", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put and get string", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/name", "Alice" ) );
     node_view v = db.get( "/name" );
     REQUIRE( v.is_string() );
     REQUIRE( v.as_string() == "Alice" );
 }
 
-TEST_CASE( "pjson_db: put and get empty string", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put and get empty string", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/empty", "" ) );
     node_view v = db.get( "/empty" );
     REQUIRE( v.is_string() );
     REQUIRE( v.as_string() == "" );
 }
 
-TEST_CASE( "pjson_db: put int convenience overload", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put int convenience overload", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/x", 10 ) );
     node_view v = db.get( "/x" );
     REQUIRE( v.as_int() == 10 );
@@ -154,20 +154,20 @@ TEST_CASE( "pjson_db: put int convenience overload", "[pjson_db]" )
 // put / get — вложенные пути
 // ===========================================================================
 
-TEST_CASE( "pjson_db: put creates intermediate objects", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put creates intermediate objects", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/users/alice/name", "Alice" ) );
     node_view v = db.get( "/users/alice/name" );
     REQUIRE( v.is_string() );
     REQUIRE( v.as_string() == "Alice" );
 }
 
-TEST_CASE( "pjson_db: put multiple nested keys", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put multiple nested keys", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put( "/users/alice/name", "Alice" ) );
     REQUIRE( db.put( "/users/alice/age", static_cast<int64_t>( 30 ) ) );
     REQUIRE( db.put( "/users/bob/name", "Bob" ) );
@@ -177,18 +177,18 @@ TEST_CASE( "pjson_db: put multiple nested keys", "[pjson_db]" )
     REQUIRE( db.get( "/users/bob/name" ).as_string() == "Bob" );
 }
 
-TEST_CASE( "pjson_db: get returns invalid view for missing path", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: get returns invalid view for missing path", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db  db;
+    pjson_db_pmm  db;
     node_view v = db.get( "/nonexistent/path" );
     REQUIRE( !v.valid() );
 }
 
-TEST_CASE( "pjson_db: get returns invalid view for path beyond scalar", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: get returns invalid view for path beyond scalar", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/x", static_cast<int64_t>( 5 ) );
     node_view v = db.get( "/x/y" );
     REQUIRE( !v.valid() );
@@ -198,25 +198,25 @@ TEST_CASE( "pjson_db: get returns invalid view for path beyond scalar", "[pjson_
 // exists()
 // ===========================================================================
 
-TEST_CASE( "pjson_db: exists returns true for existing path", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: exists returns true for existing path", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/a/b", "hello" );
     REQUIRE( db.exists( "/a/b" ) );
 }
 
-TEST_CASE( "pjson_db: exists returns false for missing path", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: exists returns false for missing path", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( !db.exists( "/missing" ) );
 }
 
-TEST_CASE( "pjson_db: exists returns true for metrics path", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: exists returns true for metrics path", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.exists( "/$metrics/node_count_total" ) );
 }
 
@@ -224,34 +224,34 @@ TEST_CASE( "pjson_db: exists returns true for metrics path", "[pjson_db]" )
 // erase()
 // ===========================================================================
 
-TEST_CASE( "pjson_db: erase removes existing key", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: erase removes existing key", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/key", "value" );
     REQUIRE( db.exists( "/key" ) );
     REQUIRE( db.erase( "/key" ) );
     REQUIRE( !db.exists( "/key" ) );
 }
 
-TEST_CASE( "pjson_db: erase returns false for missing key", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: erase returns false for missing key", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( !db.erase( "/nonexistent" ) );
 }
 
-TEST_CASE( "pjson_db: erase cannot remove metrics", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: erase cannot remove metrics", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( !db.erase( "/$metrics/node_count_total" ) );
 }
 
-TEST_CASE( "pjson_db: erase removes nested key", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: erase removes nested key", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/a/b/c", "deep" );
     REQUIRE( db.exists( "/a/b/c" ) );
     REQUIRE( db.erase( "/a/b/c" ) );
@@ -264,10 +264,10 @@ TEST_CASE( "pjson_db: erase removes nested key", "[pjson_db]" )
 // $ref — разыменование (Задача 6.4)
 // ===========================================================================
 
-TEST_CASE( "pjson_db: put_ref creates ref node", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put_ref creates ref node", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/target", "hello" );
     REQUIRE( db.put_ref( "/link", "/target" ) );
 
@@ -278,10 +278,10 @@ TEST_CASE( "pjson_db: put_ref creates ref node", "[pjson_db]" )
     REQUIRE( ref_v.ref_path() == "/target" );
 }
 
-TEST_CASE( "pjson_db: get with deref follows ref", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: get with deref follows ref", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/target", "hello" );
     db.put_ref( "/link", "/target" );
 
@@ -294,10 +294,10 @@ TEST_CASE( "pjson_db: get with deref follows ref", "[pjson_db]" )
     REQUIRE( v.as_string() == "hello" );
 }
 
-TEST_CASE( "pjson_db: resolve_all_refs sets targets", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: resolve_all_refs sets targets", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/data/value", static_cast<int64_t>( 42 ) );
     db.put_ref( "/alias", "/data/value" );
 
@@ -312,10 +312,10 @@ TEST_CASE( "pjson_db: resolve_all_refs sets targets", "[pjson_db]" )
     REQUIRE( resolved.as_int() == 42 );
 }
 
-TEST_CASE( "pjson_db: cyclic ref returns invalid node_view", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: cyclic ref returns invalid node_view", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     // Создаём два ref-узла, ссылающихся друг на друга.
     db.put_ref( "/a", "/b" );
@@ -332,10 +332,10 @@ TEST_CASE( "pjson_db: cyclic ref returns invalid node_view", "[pjson_db]" )
     REQUIRE( !resolved.valid() );
 }
 
-TEST_CASE( "pjson_db: resolve_ref returns invalid for unresolved ref", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: resolve_ref returns invalid for unresolved ref", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     // ref с несуществующим путём.
     db.put_ref( "/ghost", "/no/such/path" );
@@ -352,10 +352,10 @@ TEST_CASE( "pjson_db: resolve_ref returns invalid for unresolved ref", "[pjson_d
 // $ref через parse()
 // ===========================================================================
 
-TEST_CASE( "pjson_db: parse JSON with $ref creates ref node", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: parse JSON with $ref creates ref node", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     db.put( "/source", "value" );
     REQUIRE( db.parse_into( "/link", R"({"$ref":"/source"})" ) );
@@ -365,10 +365,10 @@ TEST_CASE( "pjson_db: parse JSON with $ref creates ref node", "[pjson_db]" )
     REQUIRE( link.ref_path() == "/source" );
 }
 
-TEST_CASE( "pjson_db: parse JSON with $base64 creates binary node", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: parse JSON with $base64 creates binary node", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     REQUIRE( db.parse_into( "/data", R"({"$base64":"AAEC"})" ) );
 
@@ -381,24 +381,24 @@ TEST_CASE( "pjson_db: parse JSON with $base64 creates binary node", "[pjson_db]"
 // Метрики (Задача 6.1, /$metrics)
 // ===========================================================================
 
-TEST_CASE( "pjson_db: metrics path is read-only for put", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: metrics path is read-only for put", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( !db.put( "/$metrics/node_count_total", static_cast<int64_t>( 0 ) ) );
 }
 
-TEST_CASE( "pjson_db: metrics path is read-only for erase", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: metrics path is read-only for erase", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( !db.erase( "/$metrics/node_count_total" ) );
 }
 
-TEST_CASE( "pjson_db: get metrics returns uinteger", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: get metrics returns uinteger", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/a", "hello" );
     db.put( "/b", "world" );
 
@@ -408,10 +408,10 @@ TEST_CASE( "pjson_db: get metrics returns uinteger", "[pjson_db]" )
     REQUIRE( ( v.is_uinteger() || v.is_integer() ) );
 }
 
-TEST_CASE( "pjson_db: metrics string_count returns non-zero after puts", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: metrics string_count returns non-zero after puts", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/hello", "world" );
 
     node_view v = db.get( "/$metrics/string_count" );
@@ -423,10 +423,10 @@ TEST_CASE( "pjson_db: metrics string_count returns non-zero after puts", "[pjson
 // Метрики — Фаза 7: персистная структура db_metrics
 // ===========================================================================
 
-TEST_CASE( "pjson_db: metrics string_count_total is alias for string_count", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics string_count_total is alias for string_count", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/key_a", "value_a" );
     db.put( "/key_b", "value_b" );
 
@@ -439,10 +439,10 @@ TEST_CASE( "pjson_db: metrics string_count_total is alias for string_count", "[p
     REQUIRE( v1.as_uint() > 0u );
 }
 
-TEST_CASE( "pjson_db: metrics pam_bump_offset is non-zero after db creation", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics pam_bump_offset is non-zero after db creation", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/data", "value" );
 
     node_view v = db.get( "/$metrics/pam_bump_offset" );
@@ -452,10 +452,10 @@ TEST_CASE( "pjson_db: metrics pam_bump_offset is non-zero after db creation", "[
     REQUIRE( v.as_uint() > 0u );
 }
 
-TEST_CASE( "pjson_db: metrics pam_total_size is non-zero", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics pam_total_size is non-zero", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v = db.get( "/$metrics/pam_total_size" );
     REQUIRE( v.valid() );
@@ -463,10 +463,10 @@ TEST_CASE( "pjson_db: metrics pam_total_size is non-zero", "[pjson_db][phase7]" 
     REQUIRE( v.as_uint() > 0u );
 }
 
-TEST_CASE( "pjson_db: metrics pam_slot_count increases after puts", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics pam_slot_count increases after puts", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v1 = db.get( "/$metrics/pam_slot_count" );
     REQUIRE( v1.valid() );
@@ -480,10 +480,10 @@ TEST_CASE( "pjson_db: metrics pam_slot_count increases after puts", "[pjson_db][
     REQUIRE( v2.as_uint() >= count_before );
 }
 
-TEST_CASE( "pjson_db: metrics pam_named_count is non-zero after db creation", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics pam_named_count is non-zero after db creation", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     // БД создаёт минимум 3 именованных объекта: pool, root, metrics.
     node_view v = db.get( "/$metrics/pam_named_count" );
@@ -492,10 +492,10 @@ TEST_CASE( "pjson_db: metrics pam_named_count is non-zero after db creation", "[
     REQUIRE( v.as_uint() >= 3u );
 }
 
-TEST_CASE( "pjson_db: metrics free_node_count and used_node_count are consistent", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics free_node_count and used_node_count are consistent", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/a", "x" );
     db.put( "/b", "y" );
 
@@ -511,10 +511,10 @@ TEST_CASE( "pjson_db: metrics free_node_count and used_node_count are consistent
     REQUIRE( total.as_uint() >= used_n.as_uint() );
 }
 
-TEST_CASE( "pjson_db: metrics ref_count increases after put_ref", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics ref_count increases after put_ref", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/target", "hello" );
 
     node_view v1 = db.get( "/$metrics/ref_count" );
@@ -529,10 +529,10 @@ TEST_CASE( "pjson_db: metrics ref_count increases after put_ref", "[pjson_db][ph
     REQUIRE( v2.as_uint() > ref_before );
 }
 
-TEST_CASE( "pjson_db: metrics array_count increases after parse_into array", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics array_count increases after parse_into array", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v1 = db.get( "/$metrics/array_count" );
     REQUIRE( v1.valid() );
@@ -545,10 +545,10 @@ TEST_CASE( "pjson_db: metrics array_count increases after parse_into array", "[p
     REQUIRE( v2.as_uint() > arr_before );
 }
 
-TEST_CASE( "pjson_db: metrics object_count is non-zero after db creation", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics object_count is non-zero after db creation", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     // Корневой узел — объект, поэтому object_count >= 1.
     node_view v = db.get( "/$metrics/object_count" );
@@ -557,10 +557,10 @@ TEST_CASE( "pjson_db: metrics object_count is non-zero after db creation", "[pjs
     REQUIRE( v.as_uint() >= 1u );
 }
 
-TEST_CASE( "pjson_db: metrics last_save_time is zero before save", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics last_save_time is zero before save", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/x", "y" );
 
     // До первого save() время должно быть 0 (или не обновлено).
@@ -571,16 +571,16 @@ TEST_CASE( "pjson_db: metrics last_save_time is zero before save", "[pjson_db][p
     REQUIRE( v.as_uint() == 0u );
 }
 
-TEST_CASE( "pjson_db: metrics last_save_time is updated after save", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics last_save_time is updated after save", "[pjson_db_pmm][phase7]" )
 {
-    const char* pam_file = "./test_pjson_db_metrics_save.pam";
+    const char* pam_file = "./test_pjson_db_pmm_metrics_save.pam";
 
     // Создаём БД и сохраняем.
     {
         pstringview_manager::reset();
         pam_pmm_reset();
         pam_pmm_init( pam_file );
-        pjson_db db;
+        pjson_db_pmm db;
         db.put( "/test", "data" );
         db.save();
 
@@ -593,10 +593,10 @@ TEST_CASE( "pjson_db: metrics last_save_time is updated after save", "[pjson_db]
     std::remove( pam_file );
 }
 
-TEST_CASE( "pjson_db: metrics pam_free_list_size is valid", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics pam_free_list_size is valid", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/a", "value1" );
     db.put( "/b", "value2" );
     db.erase( "/a" );
@@ -609,10 +609,10 @@ TEST_CASE( "pjson_db: metrics pam_free_list_size is valid", "[pjson_db][phase7]"
     (void)v.as_uint(); // метрика доступна (не null)
 }
 
-TEST_CASE( "pjson_db: update_metrics explicit call works", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: update_metrics explicit call works", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/key", "value" );
 
     // Явный вызов update_metrics() должен пройти без ошибок.
@@ -623,20 +623,20 @@ TEST_CASE( "pjson_db: update_metrics explicit call works", "[pjson_db][phase7]" 
     REQUIRE( v.as_uint() > 0u );
 }
 
-TEST_CASE( "pjson_db: metrics unknown key returns null node", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics unknown key returns null node", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v = db.get( "/$metrics/nonexistent_metric" );
     REQUIRE( v.valid() );
     REQUIRE( v.is_null() );
 }
 
-TEST_CASE( "pjson_db: metrics binary_bytes_total increases after parse_into binary", "[pjson_db][phase7]" )
+TEST_CASE( "pjson_db_pmm: metrics binary_bytes_total increases after parse_into binary", "[pjson_db_pmm][phase7]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v1 = db.get( "/$metrics/binary_bytes_total" );
     REQUIRE( v1.valid() );
@@ -654,20 +654,20 @@ TEST_CASE( "pjson_db: metrics binary_bytes_total increases after parse_into bina
 // dump() / parse()
 // ===========================================================================
 
-TEST_CASE( "pjson_db: dump returns JSON string", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: dump returns JSON string", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/x", static_cast<int64_t>( 1 ) );
     std::string json = db.dump();
     REQUIRE( json.find( "\"x\"" ) != std::string::npos );
     REQUIRE( json.find( "1" ) != std::string::npos );
 }
 
-TEST_CASE( "pjson_db: dump node_id returns JSON for specific node", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: dump node_id returns JSON for specific node", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/val", "test_val" );
     node_view v = db.get( "/val" );
     REQUIRE( v.valid() );
@@ -675,10 +675,10 @@ TEST_CASE( "pjson_db: dump node_id returns JSON for specific node", "[pjson_db]"
     REQUIRE( json == "\"test_val\"" );
 }
 
-TEST_CASE( "pjson_db: parse replaces root with parsed JSON", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: parse replaces root with parsed JSON", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.parse( R"({"greeting":"hello","count":42})" ) );
 
     node_view g = db.get( "/greeting" );
@@ -693,10 +693,10 @@ TEST_CASE( "pjson_db: parse replaces root with parsed JSON", "[pjson_db]" )
 // search_strings()
 // ===========================================================================
 
-TEST_CASE( "pjson_db: search_strings finds interned keys", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: search_strings finds interned keys", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/users/alice/name", "Alice" );
     db.put( "/users/bob/name", "Bob" );
 
@@ -708,10 +708,10 @@ TEST_CASE( "pjson_db: search_strings finds interned keys", "[pjson_db]" )
     REQUIRE( found );
 }
 
-TEST_CASE( "pjson_db: all_strings returns non-empty list after puts", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: all_strings returns non-empty list after puts", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/key1", "val1" );
     db.put( "/key2", "val2" );
 
@@ -723,16 +723,16 @@ TEST_CASE( "pjson_db: all_strings returns non-empty list after puts", "[pjson_db
 // Персистентность: save и reload
 // ===========================================================================
 
-TEST_CASE( "pjson_db: save and reload preserves data", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: save and reload preserves data", "[pjson_db_pmm]" )
 {
-    const char* pam_file = "./test_pjson_db_persist.pam";
+    const char* pam_file = "./test_pjson_db_pmm_persist.pam";
 
     // Создаём и заполняем БД.
     {
         pstringview_manager::reset();
         pam_pmm_reset();
         pam_pmm_init( pam_file );
-        pjson_db db;
+        pjson_db_pmm db;
         db.put( "/greeting", "hello" );
         db.put( "/count", static_cast<int64_t>( 99 ) );
         db.save();
@@ -743,7 +743,7 @@ TEST_CASE( "pjson_db: save and reload preserves data", "[pjson_db]" )
         pstringview_manager::reset();
         pam_pmm_reset();
         pam_pmm_init( pam_file );
-        pjson_db  db;
+        pjson_db_pmm  db;
         node_view greeting = db.get( "/greeting" );
         REQUIRE( greeting.is_string() );
         REQUIRE( greeting.as_string() == "hello" );
@@ -760,10 +760,10 @@ TEST_CASE( "pjson_db: save and reload preserves data", "[pjson_db]" )
 // Массивы через path-адресацию
 // ===========================================================================
 
-TEST_CASE( "pjson_db: parse_into with array JSON", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: parse_into with array JSON", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.parse_into( "/items", "[1,2,3]" ) );
 
     node_view items = db.get( "/items" );
@@ -774,10 +774,10 @@ TEST_CASE( "pjson_db: parse_into with array JSON", "[pjson_db]" )
     REQUIRE( items.at( static_cast<uintptr_t>( 2 ) ).as_uint() == 3u );
 }
 
-TEST_CASE( "pjson_db: get array element by index path", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: get array element by index path", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.parse_into( "/arr", "[10,20,30]" );
 
     node_view v = db.get( "/arr/1" );
@@ -785,10 +785,10 @@ TEST_CASE( "pjson_db: get array element by index path", "[pjson_db]" )
     REQUIRE( v.as_uint() == 20u );
 }
 
-TEST_CASE( "pjson_db: get returns invalid for out-of-bounds array index", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: get returns invalid for out-of-bounds array index", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.parse_into( "/arr", "[1,2]" );
 
     node_view v = db.get( "/arr/5" );
@@ -799,10 +799,10 @@ TEST_CASE( "pjson_db: get returns invalid for out-of-bounds array index", "[pjso
 // Перезапись значений
 // ===========================================================================
 
-TEST_CASE( "pjson_db: overwrite string value at existing path", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: overwrite string value at existing path", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/name", "Alice" );
     REQUIRE( db.get( "/name" ).as_string() == "Alice" );
 
@@ -810,10 +810,10 @@ TEST_CASE( "pjson_db: overwrite string value at existing path", "[pjson_db]" )
     REQUIRE( db.get( "/name" ).as_string() == "Bob" );
 }
 
-TEST_CASE( "pjson_db: overwrite with different type", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: overwrite with different type", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/val", "text" );
     db.put( "/val", static_cast<int64_t>( 42 ) );
     node_view v = db.get( "/val" );
@@ -825,10 +825,10 @@ TEST_CASE( "pjson_db: overwrite with different type", "[pjson_db]" )
 // put_null()
 // ===========================================================================
 
-TEST_CASE( "pjson_db: put_null creates null node", "[pjson_db]" )
+TEST_CASE( "pjson_db_pmm: put_null creates null node", "[pjson_db_pmm]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     REQUIRE( db.put_null( "/nothing" ) );
     node_view v = db.get( "/nothing" );
     REQUIRE( v.valid() );
@@ -843,10 +843,10 @@ TEST_CASE( "pjson_db: put_null creates null node", "[pjson_db]" )
 // Задача 8.1: оператор [] — доступ к узлу по пути
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "pjson_db: operator[] returns valid node_view for existing path", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: operator[] returns valid node_view for existing path", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/city", "Moscow" );
 
     node_view v = db["/city"];
@@ -855,10 +855,10 @@ TEST_CASE( "pjson_db: operator[] returns valid node_view for existing path", "[p
     REQUIRE( v.as_string() == "Moscow" );
 }
 
-TEST_CASE( "pjson_db: operator[] creates null node for non-existing path", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: operator[] creates null node for non-existing path", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     // Путь не существует — operator[] создаёт его как null-узел.
     node_view v = db["/newkey"];
@@ -866,10 +866,10 @@ TEST_CASE( "pjson_db: operator[] creates null node for non-existing path", "[pjs
     // Узел создан (null — начальное состояние нового слота).
 }
 
-TEST_CASE( "pjson_db: operator[] on metrics path returns metrics node", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: operator[] on metrics path returns metrics node", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/x", static_cast<int64_t>( 1 ) );
 
     node_view v = db["/$metrics/pam_bump_offset"];
@@ -882,10 +882,10 @@ TEST_CASE( "pjson_db: operator[] on metrics path returns metrics node", "[pjson_
 // Задача 8.1: find() — поиск без создания
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "pjson_db: find returns valid node_view for existing path", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: find returns valid node_view for existing path", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/name", "Alice" );
 
     node_view v = db.find( "/name" );
@@ -893,29 +893,29 @@ TEST_CASE( "pjson_db: find returns valid node_view for existing path", "[pjson_d
     REQUIRE( v.as_string() == "Alice" );
 }
 
-TEST_CASE( "pjson_db: find returns invalid for non-existing path", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: find returns invalid for non-existing path", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v = db.find( "/nonexistent" );
     REQUIRE( !v.valid() );
 }
 
-TEST_CASE( "pjson_db: find does not create nodes", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: find does not create nodes", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     // find не должен создавать новые узлы.
     db.find( "/missing/path/here" );
     REQUIRE( !db.exists( "/missing" ) );
 }
 
-TEST_CASE( "pjson_db: find does not dereference ref nodes", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: find does not dereference ref nodes", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/target", "hello" );
     db.put_ref( "/link", "/target" );
     db.resolve_all_refs();
@@ -930,10 +930,10 @@ TEST_CASE( "pjson_db: find does not dereference ref nodes", "[pjson_db][phase8]"
 // Задача 8.1: insert() — вставка JSON-значения по пути
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "pjson_db: insert creates node from JSON string", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: insert creates node from JSON string", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v = db.insert( "/data", "\"hello world\"" );
     REQUIRE( v.valid() );
@@ -941,20 +941,20 @@ TEST_CASE( "pjson_db: insert creates node from JSON string", "[pjson_db][phase8]
     REQUIRE( v.as_string() == "hello world" );
 }
 
-TEST_CASE( "pjson_db: insert creates node from JSON number", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: insert creates node from JSON number", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v = db.insert( "/count", "42" );
     REQUIRE( v.valid() );
     REQUIRE( v.as_int() == 42 );
 }
 
-TEST_CASE( "pjson_db: insert creates node from JSON object", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: insert creates node from JSON object", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v = db.insert( "/cfg", R"({"debug":true,"level":3})" );
     REQUIRE( v.valid() );
@@ -963,10 +963,10 @@ TEST_CASE( "pjson_db: insert creates node from JSON object", "[pjson_db][phase8]
     REQUIRE( v.at( "level" ).as_int() == 3 );
 }
 
-TEST_CASE( "pjson_db: insert overwrites existing value", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: insert overwrites existing value", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/val", "old" );
 
     node_view v = db.insert( "/val", "\"new\"" );
@@ -974,10 +974,10 @@ TEST_CASE( "pjson_db: insert overwrites existing value", "[pjson_db][phase8]" )
     REQUIRE( v.as_string() == "new" );
 }
 
-TEST_CASE( "pjson_db: insert into metrics path returns invalid", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: insert into metrics path returns invalid", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     node_view v = db.insert( "/$metrics/node_count_total", "999" );
     REQUIRE( !v.valid() );
@@ -987,10 +987,10 @@ TEST_CASE( "pjson_db: insert into metrics path returns invalid", "[pjson_db][pha
 // Задача 8.2: search_node_strings() — поиск по pstring значениям узлов
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "pjson_db: search_node_strings finds string nodes containing pattern", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: search_node_strings finds string nodes containing pattern", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/users/alice/name", "Alice Smith" );
     db.put( "/users/bob/name", "Bob Jones" );
     db.put( "/users/alice/city", "Springfield" );
@@ -1004,10 +1004,10 @@ TEST_CASE( "pjson_db: search_node_strings finds string nodes containing pattern"
     REQUIRE( results2.empty() );
 }
 
-TEST_CASE( "pjson_db: search_node_strings with empty pattern returns all string nodes", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: search_node_strings with empty pattern returns all string nodes", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/a", "hello" );
     db.put( "/b", "world" );
     db.put( "/c", static_cast<int64_t>( 42 ) ); // не строка
@@ -1017,10 +1017,10 @@ TEST_CASE( "pjson_db: search_node_strings with empty pattern returns all string 
     REQUIRE( results.size() >= 2u ); // как минимум /a и /b
 }
 
-TEST_CASE( "pjson_db: search_node_strings finds values in nested objects", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: search_node_strings finds values in nested objects", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.parse_into( "/config", R"({"host":"localhost","port":8080,"desc":"main server"})" );
 
     // Ищем строки, содержащие "server".
@@ -1031,10 +1031,10 @@ TEST_CASE( "pjson_db: search_node_strings finds values in nested objects", "[pjs
     REQUIRE( node_view{ results[0] }.as_string() == "main server" );
 }
 
-TEST_CASE( "pjson_db: search_node_strings finds values in arrays", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: search_node_strings finds values in arrays", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.parse_into( "/tags", R"(["persistent","json","database","persistent-db"])" );
 
     // Ищем строки, содержащие "persistent".
@@ -1042,10 +1042,10 @@ TEST_CASE( "pjson_db: search_node_strings finds values in arrays", "[pjson_db][p
     REQUIRE( results.size() == 2u ); // "persistent" и "persistent-db"
 }
 
-TEST_CASE( "pjson_db: search_node_strings returns empty for non-matching pattern", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: search_node_strings returns empty for non-matching pattern", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/greeting", "Hello" );
     db.put( "/farewell", "Goodbye" );
 
@@ -1053,11 +1053,11 @@ TEST_CASE( "pjson_db: search_node_strings returns empty for non-matching pattern
     REQUIRE( results.empty() );
 }
 
-TEST_CASE( "pjson_db: search_strings (pstringview) and search_node_strings (pstring) are complementary",
-           "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: search_strings (pstringview) and search_node_strings (pstring) are complementary",
+           "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     // Ключи объектов интернируются как pstringview.
     // Значения строк хранятся как pstring.
     db.put( "/user", "Alice" );
@@ -1077,10 +1077,10 @@ TEST_CASE( "pjson_db: search_strings (pstringview) and search_node_strings (pstr
 // Задача 8.3: интеграционные тесты (operator[] + find + insert + search)
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "pjson_db: phase8 integration - build DB with operator[] and query with find", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: phase8 integration - build DB with operator[] and query with find", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     // Строим базу данных через insert.
     db.insert( "/employees/1/name", "\"Ivan\"" );
@@ -1098,11 +1098,11 @@ TEST_CASE( "pjson_db: phase8 integration - build DB with operator[] and query wi
     REQUIRE( n2.as_string() == "Marketing" );
 }
 
-TEST_CASE( "pjson_db: phase8 integration - search_node_strings finds values across nested structure",
-           "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: phase8 integration - search_node_strings finds values across nested structure",
+           "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     db.put( "/product/name", "WidgetPro" );
     db.put( "/product/version", "2.0" );
@@ -1114,10 +1114,10 @@ TEST_CASE( "pjson_db: phase8 integration - search_node_strings finds values acro
     REQUIRE( results.size() == 2u );
 }
 
-TEST_CASE( "pjson_db: phase8 integration - operator[] creates path then insert populates it", "[pjson_db][phase8]" )
+TEST_CASE( "pjson_db_pmm: phase8 integration - operator[] creates path then insert populates it", "[pjson_db_pmm][phase8]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
 
     // Создаём путь через operator[].
     node_view slot = db["/settings/theme"];

@@ -3,8 +3,7 @@
  * @file pjson_pool_pmm.h
  * @brief Пул памяти для узлов pjson на базе PersistMemoryManager (Задача 14.5).
  *
- * Этот файл содержит PMM-версию пула узлов node, совместимую по API
- * с оригинальным pjson_pool.h.
+ * Пул узлов node для pjson на базе PersistMemoryManager (PMM).
  *
  * Принцип работы:
  *   - Пул хранит непрерывный массив узлов node в ПАП через PMM.
@@ -14,13 +13,6 @@
  *     Если free-list пуст — добавляем узел в конец массива (push_back), O(1) амортизированно.
  *   - При освобождении: узел помечается node_tag::_free и добавляется в голову free-list (O(1)).
  *
- * Ключевые отличия от оригинальной реализации (pjson_pool.h):
- *   - Использует PamManager::allocate_typed<T>() вместо fptr<T>::NewArray()
- *   - Использует pptr<T>::resolve() вместо PersistentAddressSpace::Resolve<T>()
- *   - Использует pjson::pptr_to_offset() / pjson::offset_to_pptr() для конверсии
- *   - Все смещения кратны размеру гранулы PMM (16 байт)
- *
- * @see plan.md Задача 14.5 — Миграция pjson_pool на PMM
  * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t
  * @see pjson_node.h — структура node и node_tag
  */

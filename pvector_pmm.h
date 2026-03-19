@@ -1,20 +1,16 @@
 #pragma once
 /**
  * @file pvector_pmm.h
- * @brief Реализация pvector на базе PersistMemoryManager (Задача 14.2).
+ * @brief Реализация pvector на базе PersistMemoryManager.
  *
- * Этот файл содержит PMM-версию персистного динамического массива,
- * совместимую по API с оригинальным pvector.h.
+ * pvector_pmm<T> — персистный динамический массив, тонкая обёртка
+ * над pmem_array_hdr_pmm. Все операции делегируются функциям из pmem_array_pmm.h.
  *
- * pvector_pmm<T> — тонкая обёртка над pmem_array_hdr_pmm.
- * Все операции делегируются функциям из pmem_array_pmm.h.
- *
- * Ключевые отличия от оригинальной реализации:
+ * Особенности:
  *   - Использует PMM для аллокации/деаллокации
  *   - Требует инициализации PamManager::create() перед использованием
  *   - Смещения кратны размеру гранулы PMM (16 байт)
  *
- * @see plan.md Задача 14.2 — Миграция pmem_array и pvector на PMM
  * @see pmem_array_pmm.h — примитив персистного массива на базе PMM
  */
 
