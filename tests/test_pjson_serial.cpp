@@ -1,11 +1,9 @@
-// test_pjson_serial.cpp — Тесты сериализации/десериализации через новый API pjson_codec (Задача 9.5).
+// test_pjson_serial.cpp — Тесты сериализации/десериализации через новый API pjson_codec.
 //
-// Мигрировано с pjson.h на pjson_codec.h в рамках Задачи 9.5.
 // Тестирует функции:
 //   node_to_string(node_id)          — сериализация узла в строку JSON
 //   node_from_string(json, node_off) — десериализация строки JSON в узел
 //
-// Все комментарии — на русском языке (Тр.6).
 
 #include <catch2/catch_test_macros.hpp>
 

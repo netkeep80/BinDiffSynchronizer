@@ -11,22 +11,15 @@ set(TEST_SOURCES
     test_pam.cpp
     test_pam_dynamic.cpp
     test_pam_metrics.cpp
-    test_pstring.cpp
     test_pvector.cpp
-    test_pmap.cpp
     test_pam_perf.cpp
-    test_pallocator.cpp
     test_pjson.cpp
     test_pjson_large.cpp
     test_pjson_serial.cpp
     test_pjson_opt.cpp
     test_pjson_bench.cpp
-    test_pstringview.cpp
-    test_pmem_array.cpp
     test_pjson_node.cpp
-    test_pjson_pool.cpp
     test_pjson_codec.cpp
-    test_pjson_db.cpp
     test_pjson_db_perf.cpp
     test_pjson_db_errors.cpp
     test_pjson_clone.cpp

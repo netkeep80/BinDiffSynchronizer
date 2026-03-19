@@ -1,16 +1,18 @@
 /**
  * @file test_pjson_pool_pmm.cpp
- * @brief Тесты для pjson_pool_pmm (Задача 14.5).
+ * @brief Тесты для pjson_pool_pmm.
  *
  * Проверяют корректность работы пула узлов node на базе PMM.
  */
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <filesystem>
 #include <type_traits>
 #include <vector>
 
 #include "pjson_pool_pmm.h"
+#include "pam_pmm.h"
 
 using namespace pjson;
 
@@ -18,12 +20,12 @@ using namespace pjson;
 // ТЕСТЫ pjson_pool_pmm — Layout
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm: is trivially copyable POD struct", "[pjson_pool_pmm][layout][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: is trivially copyable POD struct", "[pjson_pool_pmm][layout]" )
 {
     REQUIRE( std::is_trivially_copyable<pjson_pool_pmm>::value );
 }
 
-TEST_CASE( "pjson_pool_pmm: struct size is 5 * sizeof(uintptr_t)", "[pjson_pool_pmm][layout][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: struct size is 5 * sizeof(uintptr_t)", "[pjson_pool_pmm][layout]" )
 {
     REQUIRE( sizeof( pjson_pool_pmm ) == 5 * sizeof( uintptr_t ) );
 }
@@ -32,7 +34,7 @@ TEST_CASE( "pjson_pool_pmm: struct size is 5 * sizeof(uintptr_t)", "[pjson_pool_
 // ТЕСТЫ pjson_pool_pmm_init
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm_init: initialises pool to empty state", "[pjson_pool_pmm][init][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_init: initialises pool to empty state", "[pjson_pool_pmm][init]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -51,7 +53,7 @@ TEST_CASE( "pjson_pool_pmm_init: initialises pool to empty state", "[pjson_pool_
 // ТЕСТЫ pjson_pool_pmm_alloc — базовая аллокация
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm_alloc: returns nonzero node_id", "[pjson_pool_pmm][alloc][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_alloc: returns nonzero node_id", "[pjson_pool_pmm][alloc]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -66,7 +68,7 @@ TEST_CASE( "pjson_pool_pmm_alloc: returns nonzero node_id", "[pjson_pool_pmm][al
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm_alloc: increments used_count and total_count", "[pjson_pool_pmm][alloc][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_alloc: increments used_count and total_count", "[pjson_pool_pmm][alloc]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -90,7 +92,7 @@ TEST_CASE( "pjson_pool_pmm_alloc: increments used_count and total_count", "[pjso
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm_alloc: allocated node is initialized as null", "[pjson_pool_pmm][alloc][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_alloc: allocated node is initialized as null", "[pjson_pool_pmm][alloc]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -112,7 +114,7 @@ TEST_CASE( "pjson_pool_pmm_alloc: allocated node is initialized as null", "[pjso
 // ТЕСТЫ pjson_pool_pmm_free
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm_free: adds node to free-list (free_count increases)", "[pjson_pool_pmm][free][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_free: adds node to free-list (free_count increases)", "[pjson_pool_pmm][free]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -129,7 +131,7 @@ TEST_CASE( "pjson_pool_pmm_free: adds node to free-list (free_count increases)",
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm_free: freed node is tagged as _free", "[pjson_pool_pmm][free][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_free: freed node is tagged as _free", "[pjson_pool_pmm][free]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -146,7 +148,7 @@ TEST_CASE( "pjson_pool_pmm_free: freed node is tagged as _free", "[pjson_pool_pm
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm_free: free of null id is a no-op", "[pjson_pool_pmm][free][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_free: free of null id is a no-op", "[pjson_pool_pmm][free]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -164,7 +166,7 @@ TEST_CASE( "pjson_pool_pmm_free: free of null id is a no-op", "[pjson_pool_pmm][
 // ТЕСТЫ повторного использования из free-list
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm: realloc from free-list reuses freed slot", "[pjson_pool_pmm][reuse][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: realloc from free-list reuses freed slot", "[pjson_pool_pmm][reuse]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -187,7 +189,7 @@ TEST_CASE( "pjson_pool_pmm: realloc from free-list reuses freed slot", "[pjson_p
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm: reallocated node is reinitialized as null", "[pjson_pool_pmm][reuse][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: reallocated node is reinitialized as null", "[pjson_pool_pmm][reuse]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -216,7 +218,7 @@ TEST_CASE( "pjson_pool_pmm: reallocated node is reinitialized as null", "[pjson_
 // ТЕСТЫ pjson_pool_pmm_get
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm_get: returns pointer to writable node", "[pjson_pool_pmm][get][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_get: returns pointer to writable node", "[pjson_pool_pmm][get]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -236,7 +238,7 @@ TEST_CASE( "pjson_pool_pmm_get: returns pointer to writable node", "[pjson_pool_
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm_get_const: returns const pointer", "[pjson_pool_pmm][get][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_get_const: returns const pointer", "[pjson_pool_pmm][get]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -260,7 +262,7 @@ TEST_CASE( "pjson_pool_pmm_get_const: returns const pointer", "[pjson_pool_pmm][
 // ТЕСТЫ работы с различными типами узлов
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm: alloc and set boolean node", "[pjson_pool_pmm][node_types][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: alloc and set boolean node", "[pjson_pool_pmm][node_types]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -279,7 +281,7 @@ TEST_CASE( "pjson_pool_pmm: alloc and set boolean node", "[pjson_pool_pmm][node_
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm: alloc and set integer node", "[pjson_pool_pmm][node_types][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: alloc and set integer node", "[pjson_pool_pmm][node_types]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -298,7 +300,7 @@ TEST_CASE( "pjson_pool_pmm: alloc and set integer node", "[pjson_pool_pmm][node_
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm: alloc and set uinteger node", "[pjson_pool_pmm][node_types][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: alloc and set uinteger node", "[pjson_pool_pmm][node_types]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -317,7 +319,7 @@ TEST_CASE( "pjson_pool_pmm: alloc and set uinteger node", "[pjson_pool_pmm][node
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm: alloc and set real node", "[pjson_pool_pmm][node_types][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: alloc and set real node", "[pjson_pool_pmm][node_types]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -340,7 +342,7 @@ TEST_CASE( "pjson_pool_pmm: alloc and set real node", "[pjson_pool_pmm][node_typ
 // ТЕСТЫ стресс-аллокации (Task 4.3 эквивалент)
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm: allocate 1000 nodes", "[pjson_pool_pmm][stress][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: allocate 1000 nodes", "[pjson_pool_pmm][stress]" )
 {
     PamManager::create( 256 * 1024 );
 
@@ -381,8 +383,7 @@ TEST_CASE( "pjson_pool_pmm: allocate 1000 nodes", "[pjson_pool_pmm][stress][task
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm: free every second node and reallocate without growth",
-           "[pjson_pool_pmm][stress][reuse][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: free every second node and reallocate without growth", "[pjson_pool_pmm][stress][reuse]" )
 {
     PamManager::create( 256 * 1024 );
 
@@ -437,7 +438,7 @@ TEST_CASE( "pjson_pool_pmm: free every second node and reallocate without growth
 // ТЕСТЫ pjson_pool_pmm_free_pool
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm_free_pool: releases all nodes", "[pjson_pool_pmm][free_pool][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_free_pool: releases all nodes", "[pjson_pool_pmm][free_pool]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -466,8 +467,7 @@ TEST_CASE( "pjson_pool_pmm_free_pool: releases all nodes", "[pjson_pool_pmm][fre
 // ТЕСТЫ free-list chain корректности
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm: free-list chain is correct after multiple free/alloc cycles",
-           "[pjson_pool_pmm][reuse][task14.5]" )
+TEST_CASE( "pjson_pool_pmm: free-list chain is correct after multiple free/alloc cycles", "[pjson_pool_pmm][reuse]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -519,7 +519,7 @@ TEST_CASE( "pjson_pool_pmm: free-list chain is correct after multiple free/alloc
 // ТЕСТЫ создания/удаления пула
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm_create: returns nonzero offset", "[pjson_pool_pmm][create][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_create: returns nonzero offset", "[pjson_pool_pmm][create]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -530,7 +530,7 @@ TEST_CASE( "pjson_pool_pmm_create: returns nonzero offset", "[pjson_pool_pmm][cr
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm_destroy: cleans up properly", "[pjson_pool_pmm][destroy][task14.5]" )
+TEST_CASE( "pjson_pool_pmm_destroy: cleans up properly", "[pjson_pool_pmm][destroy]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -544,4 +544,69 @@ TEST_CASE( "pjson_pool_pmm_destroy: cleans up properly", "[pjson_pool_pmm][destr
     REQUIRE_NOTHROW( pjson_pool_pmm_destroy( pool_off ) );
 
     PamManager::destroy();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ персистности (PAM save/load)
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace
+{
+void rm_pool_file( const char* path )
+{
+    std::error_code ec;
+    std::filesystem::remove( path, ec );
+}
+} // anonymous namespace
+
+TEST_CASE( "pjson_pool_pmm: save and load PAM image with pool", "[pjson_pool_pmm][persistence]" )
+{
+    const char* fname = "./test_pjson_pool_pmm_save.pam";
+    rm_pool_file( fname );
+
+    uintptr_t pool_offset = 0;
+    node_id   saved_id    = 0;
+
+    // Сохраняем пул с одним узлом.
+    {
+        pstringview_pmm_reset();
+        pam_pmm_init( fname );
+
+        // Создаём именованный пул через pam_pmm_create для возможности поиска по имени.
+        uintptr_t pool_off = pam_pmm_create<pjson_pool_pmm>( "test_pool_pmm" );
+        REQUIRE( pool_off != 0u );
+        pjson_pool_pmm_init( pool_off );
+        pool_offset = pool_off;
+
+        node_id id = pjson_pool_pmm_alloc( pool_off );
+        ::node* n  = pjson_pool_pmm_get( id );
+        n->tag     = node_tag::integer;
+        n->int_val = 9999;
+        saved_id   = id;
+
+        pam_pmm_save();
+    }
+
+    // Загружаем образ и проверяем данные.
+    {
+        pstringview_pmm_reset();
+        pam_pmm_init( fname );
+
+        // Ищем пул по имени.
+        uintptr_t off = pam_pmm_find( "test_pool_pmm" );
+        REQUIRE( off != 0u );
+        REQUIRE( off == pool_offset );
+
+        REQUIRE( pjson_pool_pmm_total_count( off ) >= 1u );
+
+        // Узел должен быть восстановлен с правильным значением.
+        const ::node* n = pjson_pool_pmm_get_const( saved_id );
+        REQUIRE( n != nullptr );
+        REQUIRE( n->tag == node_tag::integer );
+        REQUIRE( n->int_val == 9999 );
+
+        pjson_pool_pmm_free_pool( off );
+    }
+
+    rm_pool_file( fname );
 }

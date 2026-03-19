@@ -1,6 +1,6 @@
-# BinDiffSynchronizer — pjson_db_pmm: персистная JSON-база данных
+# pjson_db_pmm — персистная JSON-база данных
 
-C++17 header-only библиотека для работы с JSON в персистном адресном пространстве (ПАП).
+C++20 header-only библиотека для работы с JSON в персистном адресном пространстве (ПАП).
 
 ---
 
@@ -22,18 +22,18 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Header-only** | Вся реализация — только `.h` файлы, без `.cpp` |
 | **C++20** | Требует C++20 (для PMM); без внешних зависимостей |
 | **Персистность** | Данные в ПАП переживают перезапуск без явной сериализации |
-| **Два типа строк** | readonly (`pstringview`): ключи объектов, пути `$ref`, интернированы, сравнение O(1); readwrite (`pstring`): строковые значения JSON, изменяемые на лету |
-| **Нет SSO** | Ни `pstringview`, ни `pstring` не используют SSO — все строки хранятся в ПАП (необходимо для сквозного поиска) |
-| **jsonRVM-совместимость** | `pstring`-узлы могут модифицироваться непосредственно в БД библиотекой [jsonRVM](https://github.com/netkeep80/jsonRVM) |
+| **Два типа строк** | readonly (`pstringview_pmm`): ключи объектов, пути `$ref`, интернированы, сравнение O(1); readwrite (`pstring_pmm`): строковые значения JSON, изменяемые на лету |
+| **Нет SSO** | Ни `pstringview_pmm`, ни `pstring_pmm` не используют SSO — все строки хранятся в ПАП (необходимо для сквозного поиска) |
+| **jsonRVM-совместимость** | `pstring_pmm`-узлы могут модифицироваться непосредственно в БД библиотекой [jsonRVM](https://github.com/netkeep80/jsonRVM) |
 | **Path-адресация** | Доступ к узлам через строковые пути вида `/a/b/0/c` |
 | **$ref как указатели** | `{ "$ref": "/path" }` при разборе становится прямым указателем в ПАП |
-| **Метрики** | Персистная структура `db_metrics` в ПАМ; обновляется при каждой мутации; доступ через `/$metrics/...` (Фаза 7) |
-| **pmap-интерфейс** | `operator[]`, `find`, `insert` для доступа по пути без явного указания типа (Фаза 8) |
-| **Поиск по строкам** | `search_strings` — по словарю ключей (pstringview); `search_node_strings` — по значениям узлов (pstring) (Фаза 8) |
-| **Итераторы** | `node_view` поддерживает range-based for: `begin()`/`end()` для массивов, `items()` для объектов (Фаза 10) |
-| **Коды ошибок** | `node_error` enum + `is_error()` / `error()` в `node_view`; `get()` возвращает типизированные ошибки (`not_found`, `wrong_type`, `index_out_of_range`, `ref_cycle`) вместо `node_view(0)` (Фаза 11) |
-| **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок (Фаза 12) |
-| **Глубокое копирование** | `node_clone()` + `pjson_db_pmm::clone()` — создание полных копий поддеревьев JSON в ПАП (Фаза 13) |
+| **Метрики** | Персистная структура `db_metrics_pmm` в ПАМ; обновляется при каждой мутации; доступ через `/$metrics/...` |
+| **pmap-интерфейс** | `operator[]`, `find`, `insert` для доступа по пути без явного указания типа |
+| **Поиск по строкам** | `search_strings` — по словарю ключей (pstringview_pmm); `search_node_strings` — по значениям узлов (pstring_pmm) |
+| **Итераторы** | `node_view` поддерживает range-based for: `begin()`/`end()` для массивов, `items()` для объектов |
+| **Коды ошибок** | `node_error` enum + `is_error()` / `error()` в `node_view`; `get()` возвращает типизированные ошибки (`not_found`, `wrong_type`, `index_out_of_range`, `ref_cycle`) |
+| **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок |
+| **Глубокое копирование** | `node_clone()` + `pjson_db_pmm::clone()` — создание полных копий поддеревьев JSON в ПАП |
 | **PMM** | Библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — единственный бэкенд ПАП |
 | **Метапрограммирование** | Шаблонные helpers для устранения дублирования кода: `node_resolve_and_set_tag()`, `node_set_container_empty()`, `node_object_find_key()`, `node_resolve_checked()`, реестр метрик |
 
@@ -111,7 +111,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pmap_pmm.h` | A | Персистная карта: `pmap_pmm<K,V>` — sorted array |
 | `pstring_pmm.h` | A | Персистная изменяемая строка: `pstring_pmm` — readwrite с `assign()`, `clear()` |
 | `pstringview_pmm.h` | A | Интернированная строка: `pstringview_pmm` — адаптер для `pmm::pstringview`, O(1) сравнение |
-| `pjson_pool_pmm.h` | A | Пул узлов: `pjson_pool_pmm` — аллокация O(1) через PMM + free-list |
+| `pjson_pool_pmm.h` | C | Пул узлов: `pjson_pool_pmm` — аллокация O(1) через PMM + free-list |
 | `pam_pmm.h` | A | Фасад ПАМ на PMM: `pam_pmm_init()`, `pam_pmm_create<T>()`, `pam_pmm_find()`, `pam_pmm_save()`, реестр именованных объектов |
 | `fptr_pmm.h` | A | Персистный указатель: `fptr_pmm<T>` — `New()`, `NewArray()`, `Delete()`, `find()` |
 | `pallocator_pmm.h` | A | STL-аллокатор: `pallocator_pmm<T>` — совместим с `std::vector<T, pallocator_pmm<T>>` |
@@ -135,17 +135,17 @@ enum class node_tag : uint32_t {
     integer,    // int64_t
     uinteger,   // uint64_t
     real,       // double
-    string,     // pstring (readwrite, изменяемое строковое значение)
-    binary,     // pvector<uint8_t> в ПАП ($base64 при сериализации)
-    array,      // pvector<node_id>
-    object,     // pmap<pstringview, node_id> — ключи readonly (pstringview)
-    ref,        // pstringview path (readonly) + node_id target ($ref при сериализации)
+    string,     // pstring_pmm (readwrite, изменяемое строковое значение)
+    binary,     // pvector_pmm<uint8_t> в ПАП ($base64 при сериализации)
+    array,      // pvector_pmm<node_id>
+    object,     // pmap_pmm<pstringview_pmm, node_id> — ключи readonly (pstringview_pmm)
+    ref,        // pstringview_pmm path (readonly) + node_id target ($ref при сериализации)
 };
 ```
 
 ---
 
-## API (целевой интерфейс)
+## API
 
 ### Открытие базы данных
 
@@ -212,9 +212,9 @@ std::string json = db.dump("/data");
 // json == {"$base64":"AAEC"}
 ```
 
-### Метрики (Фаза 7)
+### Метрики
 
-Метрики хранятся персистно в структуре `db_metrics` в ПАМ и обновляются при каждой мутации.
+Метрики хранятся персистно в структуре `db_metrics_pmm` в ПАМ и обновляются при каждой мутации.
 
 ```cpp
 // Метрики узлов
@@ -251,24 +251,24 @@ db.put("/$metrics/node_count_total", 0); // ошибка! возвращает f
 На уровне ПАМ доступны функции словаря строк (после `#include "pam_pmm.h"`):
 
 ```cpp
-// Интернировать строку через ПАМ (задача 2.2)
+// Интернировать строку через ПАМ
 auto r = pam_intern_string("user_name");
 // r.chars_offset != 0, r.length == 9
 
-// Найти все строки, содержащие подстроку (задача 2.5)
+// Найти все строки, содержащие подстроку
 auto results = pam_search_strings("user");
 for (const auto& r : results) {
     // r.value — std::string, r.chars_offset, r.length
 }
 
-// Перебрать весь словарь строк (задача 2.5)
+// Перебрать весь словарь строк
 auto all = pam_all_strings();
 for (const auto& r : all) {
     // r.value — интернированная строка
 }
 ```
 
-На уровне pjson_db_pmm (целевой API):
+На уровне pjson_db_pmm:
 
 ```cpp
 // Найти все строки, содержащие подстроку (поиск по словарю интернированных ключей)
@@ -276,25 +276,25 @@ auto results = db.search_strings("alice");
 
 // Перебрать весь словарь строк
 for (auto sv : db.all_strings()) {
-    // sv — pstringview
+    // sv — pstringview_pmm
 }
 ```
 
-### Иерархический доступ и поиск по значениям (Фаза 8)
+### Иерархический доступ и поиск по значениям
 
 ```cpp
-// Задача 8.1: operator[] — доступ по пути; создаёт null-узел если путь не существует
+// operator[] — доступ по пути; создаёт null-узел если путь не существует
 node_view v = db["/config/host"]; // как std::map::operator[]
 
-// Задача 8.1: find() — поиск без создания, без разыменования ref
+// find() — поиск без создания, без разыменования ref
 node_view found = db.find("/config/host"); // node_view(0) если не найдено
 
-// Задача 8.1: insert() — вставка JSON-значения по пути
+// insert() — вставка JSON-значения по пути
 node_view inserted = db.insert("/config/port", "8080");
 node_view obj      = db.insert("/config/auth", R"({"enabled":true,"method":"jwt"})");
 
-// Задача 8.2: search_node_strings() — поиск по pstring-ЗНАЧЕНИЯМ узлов (readwrite)
-// (в отличие от search_strings(), который ищет по словарю КЛЮЧЕЙ pstringview)
+// search_node_strings() — поиск по pstring_pmm-ЗНАЧЕНИЯМ узлов (readwrite)
+// (в отличие от search_strings(), который ищет по словарю КЛЮЧЕЙ pstringview_pmm)
 auto val_results = db.search_node_strings("Alice");
 for (node_id id : val_results) {
     std::string_view sv = node_view{id}.as_string(); // "Alice Smith" и т.п.
@@ -304,7 +304,7 @@ for (node_id id : val_results) {
 auto all_vals = db.search_node_strings("");
 ```
 
-### Итерация по дереву JSON (Фаза 10)
+### Итерация по дереву JSON
 
 ```cpp
 // Итерация по элементам массива (range-based for)
@@ -322,7 +322,7 @@ for (auto [key, val] : db.get("/config").items())
     std::cout << key << " = " << val.as_string() << "\n";
 ```
 
-### Обработка ошибок (Фаза 11)
+### Обработка ошибок
 
 ```cpp
 // Узел не найден по пути
@@ -352,7 +352,7 @@ node_view cycle = db.get("/a");
 // cycle.is_error() == true
 // cycle.error() == node_error::ref_cycle
 
-// Обратная совместимость: node_view{} — null, не ошибка
+// node_view{} — null, не ошибка
 node_view null_v{};
 // null_v.is_null() == true
 // null_v.is_error() == false
@@ -377,7 +377,7 @@ node_view err = node_view_error(node_error::not_found);
 | `node_error::ref_cycle` | Обнаружен цикл или превышена глубина при разыменовании `$ref` |
 | `node_error::parse_error` | Ошибка парсинга JSON |
 
-#### Сообщения об ошибках (Фаза 12)
+#### Сообщения об ошибках
 
 Функция `node_error_message()` и метод `node_view::error_message()` возвращают человекочитаемое описание ошибки:
 
@@ -408,7 +408,7 @@ node_view ok{};
 | `node_error::ref_cycle` | `"cyclic $ref detected or max depth exceeded"` |
 | `node_error::parse_error` | `"JSON parse error"` |
 
-### Глубокое копирование (Фаза 13)
+### Глубокое копирование
 
 Функция `node_clone()` и метод `pjson_db_pmm::clone()` создают полную глубокую копию узла со всеми вложенными структурами:
 
@@ -441,171 +441,9 @@ node_id copy_id = node_clone( src_id );
 
 **Особенности клонирования:**
 - `ref`-узлы копируются как ref: путь копируется, но `target = 0` (ссылка не разрешена в копии)
-- Строки (`pstring`) создаются как независимые копии
+- Строки (`pstring_pmm`) создаются как независимые копии
 - Массивы и объекты копируются рекурсивно
 - Нельзя клонировать из/в `/$metrics` (возвращает `false`)
-
----
-
-## Новая модель узлов JSON: `pjson_node.h` (Фаза 3)
-
-Фаза 3 вводит низкоуровневый API для работы с узлами JSON через `node_id`-адресацию.
-Все узлы хранятся в ПАП как POD-структуры; доступ — через смещения (`node_id`).
-
-### Типы узлов (`node_tag`)
-
-```cpp
-#include "pjson_node.h"
-
-// Создать узел в ПАП
-fptr<node> fn;
-fn.New();
-uintptr_t off = fn.addr();  // node_id — смещение узла в ПАП
-
-// Инициализировать как нужный тип
-node_set_bool( off, true );             // boolean
-node_set_int( off, -42 );              // integer (int64_t)
-node_set_uint( off, 100u );            // uinteger (uint64_t)
-node_set_real( off, 3.14 );            // real (double)
-node_set_string( off, "hello" );       // string (pstring, readwrite)
-node_set_ref( off, "/path/to/node" );  // ref (pstringview path, readonly)
-node_set_array( off );                 // array (pvector<node_id>)
-node_set_object( off );                // object (pmap<pstringview, node_id>)
-node_set_binary( off );                // binary (pvector<uint8_t>)
-```
-
-### `node_view` — безопасный accessor
-
-```cpp
-node_view v{ off };  // создать view по node_id
-
-// Запросы типа
-v.is_null();    v.is_boolean();  v.is_integer();
-v.is_string();  v.is_array();    v.is_object();
-v.is_ref();     v.is_binary();   v.is_number();
-
-// Получение значений
-bool     b = v.as_bool();
-int64_t  i = v.as_int();
-uint64_t u = v.as_uint();
-double   d = v.as_double();
-std::string_view s = v.as_string(); // вид на pstring (readwrite) в ПАП
-std::string_view p = v.ref_path();  // путь ref-узла (pstringview, readonly)
-
-// Навигация
-uintptr_t sz = v.size();            // для array/object/string/binary
-node_view elem = v.at( 0u );        // элемент массива по индексу
-node_view field = v.at( "key" );    // поле объекта по ключу (pstringview)
-std::string_view k = v.key_at( 0u );    // ключ i-го поля объекта (итерация)
-node_view val = v.value_at( 0u );        // значение i-го поля объекта (итерация)
-
-// Разыменование ref
-node_view deref_v = v.deref( true, 32 ); // рекурсивное разыменование (max_depth=32)
-node_view one_level = v.deref( false );   // только один уровень
-```
-
-### Работа с массивами
-
-```cpp
-node_set_array( arr_off );
-
-// push_back возвращает node_id нового слота (инициализирован как null)
-node_id slot = node_array_push_back( arr_off );
-node_set_int( slot, 42 );
-
-node_view arr_view{ arr_off };
-REQUIRE( arr_view.size() == 1u );
-REQUIRE( arr_view.at( 0u ).as_int() == 42 );
-```
-
-### Работа с объектами (ключи — `pstringview`, readonly)
-
-```cpp
-node_set_object( obj_off );
-
-// node_object_insert интернирует ключ через pstringview_table (readonly)
-node_id name_slot = node_object_insert( obj_off, "name" );
-node_set_string( name_slot, "Alice" );
-
-// Поиск по ключу (бинарный поиск по интернированному offset)
-node_view obj_view{ obj_off };
-REQUIRE( obj_view.at( "name" ).as_string() == "Alice" );
-```
-
-### Изменение строковых значений (`pstring`, readwrite)
-
-```cpp
-node_set_string( off, "original" );
-node_assign_string( off, "updated" );  // освобождает старые данные, выделяет новые
-// node_view{ off }.as_string() == "updated"
-```
-
----
-
-## Пул узлов JSON: `pjson_pool_pmm.h`
-
-`pjson_pool_pmm` обеспечивает быструю аллокацию узлов `node` — O(1) амортизированно.
-
-Вместо отдельного вызова `fptr<node>::New()` для каждого узла пул хранит непрерывный массив узлов в ПАП и управляет свободными слотами через free-list. Освобождённые слоты помечаются тегом `node_tag::_free` и повторно используются без обращения к аллокатору ПАМ.
-
-### Создание пула
-
-```cpp
-#include "pjson_pool_pmm.h"
-using namespace pjson;
-
-fptr<pjson_pool_pmm> pool;
-pool.New();  // создать пул в ПАП
-uintptr_t pool_off = pool.addr();
-```
-
-### API пула
-
-```cpp
-// Выделить новый узел (O(1) амортизированно)
-node_id id = pjson_pool_pmm_alloc( pool_off );
-
-// Работать с узлом через стандартные хелперы
-node_set_int( id, 42 );
-
-// Читать узел через node_view
-REQUIRE( node_view{ id }.as_int() == 42 );
-
-// Вернуть слот в free-list (O(1))
-pjson_pool_pmm_free( pool_off, id );
-
-// Прямой доступ по node_id
-node* n = pjson_pool_pmm_get( id );
-
-// Метрики
-uintptr_t total   = pjson_pool_pmm_total_count( pool_off );
-uintptr_t free_n  = pjson_pool_pmm_free_in_pool( pool_off );
-uintptr_t used_n  = pjson_pool_pmm_used_count( pool_off );
-
-// Освободить весь массив узлов (возвращает память в ПАМ)
-pjson_pool_pmm_free_pool( pool_off );
-
-pool.Delete();
-```
-
-### Персистентность
-
-Пул сохраняется вместе с образом ПАМ и восстанавливается без вызова конструкторов (Тр.10):
-
-```cpp
-// Сохранение
-fptr<pjson_pool_pmm> pool;
-pool.New( "my_pool" );
-uintptr_t pool_off = pool.addr();
-node_id id = pjson_pool_pmm_alloc( pool_off );
-node_set_string( id, "hello" );
-pam_pmm_save();
-
-// Загрузка
-pam_pmm_init( "data.pam" );
-uintptr_t off = pam_pmm_find( "my_pool" );
-REQUIRE( node_view{ id }.as_string() == "hello" );
-```
 
 ---
 
@@ -613,17 +451,17 @@ REQUIRE( node_view{ id }.as_string() == "hello" );
 
 В персистном адресном пространстве существуют ровно два типа строк с принципиально разными свойствами:
 
-### Readonly строки (`pstringview`) — словарь ключей
+### Readonly строки (`pstringview_pmm`) — словарь ключей
 
-Используются исключительно как **ключи `pmap`** (ключи объектов JSON, сегменты путей в `$ref`).
+Используются исключительно как **ключи `pmap_pmm`** (ключи объектов JSON, сегменты путей в `$ref`).
 
-- Хранятся в едином внутреннем словаре (`pstringview_table`).
+- Хранятся в едином внутреннем словаре.
 - **Никогда не удаляются** — только накапливаются.
 - Одинаковые строки → один `chars_offset` (дедупликация).
 - Сравнение ключей: **O(1)** через `chars_offset`.
 - **Нет SSO**: любая строка, даже однобуквенная, хранится в ПАП.
 
-### Readwrite строки (`pstring`) — строковые значения JSON
+### Readwrite строки (`pstring_pmm`) — строковые значения JSON
 
 Используются исключительно как **JSON string-value узлы** (`node_tag::string`).
 
@@ -634,8 +472,8 @@ REQUIRE( node_view{ id }.as_string() == "hello" );
 ### Полнотекстовый поиск
 
 `pjson_db_pmm::search_strings(pattern)` охватывает **оба** типа:
-- Словарь `pstringview` (ключи объектов и пути).
-- Все `pstring`-значения в пуле узлов.
+- Словарь `pstringview_pmm` (ключи объектов и пути).
+- Все `pstring_pmm`-значения в пуле узлов.
 
 ---
 
@@ -643,7 +481,7 @@ REQUIRE( node_view{ id }.as_string() == "hello" );
 
 ### Бэкенд: PersistMemoryManager (PMM)
 
-С Фазы 14 всё управление ПАП осуществляется через [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) (PMM). PMM предоставляет:
+Всё управление ПАП осуществляется через [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) (PMM). PMM предоставляет:
 
 - Типобезопасные персистные указатели (`pptr<T>`)
 - AVL-дерево свободных блоков (best-fit аллокатор)
@@ -656,7 +494,7 @@ REQUIRE( node_view{ id }.as_string() == "hello" );
   [name_registry]     — реестр именованных объектов (pmap_pmm)
   [string_table]      — словарь интернированных строк (pmm::pstringview)
   [node_pool]         — пул узлов JSON (pjson_pool_pmm)
-  [db_metrics]        — персистная структура метрик БД (db_metrics_pmm, фаза 7)
+  [db_metrics]        — персистная структура метрик БД (db_metrics_pmm)
   [пользовательские данные]
 ```
 
@@ -704,29 +542,26 @@ pam_pmm_reset(); // очистить всё ПАП и пересоздать м�
 | Требование | Описание |
 |---|---|
 | Тр.1 | Персистные объекты используют только персистные указатели (смещения) |
-| Тр.2 | Создание/удаление объектов — через методы аллокатора ПАМ |
+| Тр.2 | Создание/удаление объектов — через методы аллокатора PMM |
 | Тр.3 | При запуске аллокатор инициализируется именем файла-хранилища |
 | Тр.4 | Единое ПАП для объектов всех типов |
-| Тр.5 | `sizeof(fptr<T>) == sizeof(void*)` |
+| Тр.5 | `sizeof(fptr_pmm<T>) == sizeof(void*)` |
 | Тр.6 | Все комментарии в коде — на русском языке |
-| Тр.7 | (удалено — `persist<T>` больше не используется) |
-| Тр.8 | (удалено — `persist<T>` больше не используется) |
-| Тр.9 | Никакой логики с именами файлов в `fptr<T>` |
+| Тр.9 | Никакой логики с именами файлов в `fptr_pmm<T>` |
 | Тр.10 | При загрузке образа ПАП конструкторы/деструкторы не вызываются |
-| Тр.11 | (удалено — `persist<T>` больше не используется) |
-| Тр.12 | Доступ к персистным объектам — только через `fptr<T>` или `node_id` |
-| Тр.13 | `fptr<T>` может находиться как в обычной памяти, так и в ПАП |
+| Тр.12 | Доступ к персистным объектам — только через `fptr_pmm<T>` или `node_id` |
+| Тр.13 | `fptr_pmm<T>` может находиться как в обычной памяти, так и в ПАП |
 | Тр.14 | ПАМ — персистный объект, хранит имена объектов и словарь строк |
-| Тр.15 | `fptr<T>` инициализируется строковым именем объекта через ПАМ |
+| Тр.15 | `fptr_pmm<T>` инициализируется строковым именем объекта через ПАМ |
 | Тр.16 | ПАМ хранит карту объектов, их имена и словарь интернированных строк |
-| Тр.17 | Строки в ПАП не имеют SSO — `pstringview` и `pstring` хранятся через `chars_offset`, без inline-буферов |
+| Тр.17 | Строки в ПАП не имеют SSO — `pstringview_pmm` и `pstring_pmm` хранятся через `chars_offset`, без inline-буферов |
 | Тр.18 | `pjson_db_pmm.h` — единственный заголовок для конечного пользователя |
-| Тр.19 | В ПАП ровно два типа строк: readonly (`pstringview`, только ключи/пути) и readwrite (`pstring`, только строковые значения JSON) |
-| Тр.20 | `pstring`-узлы (`node_tag::string`) поддерживают изменение значения на месте для совместимости с [jsonRVM](https://github.com/netkeep80/jsonRVM) |
+| Тр.19 | В ПАП ровно два типа строк: readonly (`pstringview_pmm`, только ключи/пути) и readwrite (`pstring_pmm`, только строковые значения JSON) |
+| Тр.20 | `pstring_pmm`-узлы (`node_tag::string`) поддерживают изменение значения на месте для совместимости с [jsonRVM](https://github.com/netkeep80/jsonRVM) |
 
 ---
 
-## Производительность (Фаза 9)
+## Производительность
 
 Производительность `pjson_db_pmm` при работе с 10k–100k узлов (информационные тесты в `tests/test_pjson_db_perf.cpp`):
 

@@ -3,12 +3,10 @@
 //   F3 — интернирование строк (pstringview_table / pam_intern_string)
 //   F6 — прямая сериализация/десериализация (pjson_codec)
 //
-// Мигрировано с pjson.h на pjson_pool_pmm.h, pstringview.h, pjson_codec.h в рамках Задачи 9.5.
 //
 // Зависимости: Catch2, pjson_codec.h (включает pjson_node.h, pstringview.h),
 //              pjson_pool_pmm.h
 //
-// Все комментарии — на русском языке (Тр.6).
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,10 +1,9 @@
 /**
  * @file pam_pmm_config.h
- * @brief Конфигурация менеджера ПАП на основе PersistMemoryManager (Фаза 14).
+ * @brief Конфигурация менеджера ПАП на основе PersistMemoryManager.
  *
  * Этот файл определяет тип PamManager для использования в pjson_db.
  *
- * @see plan.md Задача 14.0 — Подготовка: подключение PMM
  * @see https://github.com/netkeep80/PersistMemoryManager
  */
 

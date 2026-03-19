@@ -1,5 +1,5 @@
 #pragma once
-// pjson_codec.h — Сериализация и десериализация для новой модели узлов (Фаза 5).
+// pjson_codec.h — Сериализация и десериализация для модели узлов.
 //
 // Реализует парсер и сериализатор, работающие с node_id-адресацией и pjson_pool_pmm.
 // Поддерживает расширения:
@@ -11,7 +11,7 @@
 //   - Строковые значения JSON создаются как pstring-узлы (readwrite)
 //   - Сегменты путей $ref интернируются как pstringview (readonly)
 //
-// Все комментарии — на русском языке (Тр.6).
+// Все комментарии — на русском языке.
 
 #include "pjson_node.h"
 #include "pjson_pool_pmm.h"
@@ -248,7 +248,7 @@ inline void append_double( std::string& out, double v )
 }
 
 // ===========================================================================
-// Парсер JSON -> node_id (Задача 5.1)
+// Парсер JSON -> node_id
 // ===========================================================================
 
 /// Внутреннее состояние парсера.
@@ -526,7 +526,7 @@ inline bool parse_array( ParseState& st, uintptr_t node_off )
 }
 
 /// Разобрать JSON-объект (позиция уже ПОСЛЕ '{').
-/// Распознаёт специальные объекты $ref и $base64 (Задачи 5.2, 5.3).
+/// Распознаёт специальные объекты $ref и $base64.
 inline bool parse_object( ParseState& st, uintptr_t node_off )
 {
     skip_ws( st );
@@ -591,14 +591,14 @@ inline bool parse_object( ParseState& st, uintptr_t node_off )
     // Проверяем на специальные объекты: ровно 1 ключ.
     if ( pairs.size() == 1 && pairs[0].is_string )
     {
-        // Задача 5.2: $ref
+        // $ref
         if ( pairs[0].key == "$ref" )
         {
             node_set_ref( node_off, pairs[0].value_str.c_str() );
             return true;
         }
 
-        // Задача 5.3: $base64
+        // $base64
         if ( pairs[0].key == "$base64" )
         {
             std::vector<uint8_t> bytes;
@@ -855,7 +855,7 @@ inline bool parse_value( ParseState& st, uintptr_t node_off )
 } // namespace pjson_codec_detail
 
 // ===========================================================================
-// Публичный API pjson_codec (Фаза 5)
+// Публичный API pjson_codec
 // ===========================================================================
 
 /// Сериализовать node в JSON-строку.
@@ -903,7 +903,7 @@ inline void node_serialize_to( node_id id, std::string& out )
 
     case node_tag::binary:
     {
-        // Задача 5.4: binary -> {"$base64": "..."}
+        // binary -> {"$base64": "..."}
         const node* n = pmm_resolve<node>( id );
         if ( n == nullptr || n->binary_val.size == 0 )
         {
@@ -953,7 +953,7 @@ inline void node_serialize_to( node_id id, std::string& out )
 
     case node_tag::ref:
     {
-        // Задача 5.4: ref -> {"$ref": "<path>"}
+        // ref -> {"$ref": "<path>"}
         std::string_view path = v.ref_path();
         out += "{\"$ref\":\"";
         if ( path.data() != nullptr )

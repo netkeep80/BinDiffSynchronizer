@@ -1,11 +1,9 @@
-// test_pjson_large.cpp — Тест загрузки большого JSON-файла в новые персистные структуры (Задача 9.5).
+// test_pjson_large.cpp — Тест загрузки большого JSON-файла в новые персистные структуры.
 //
-// Мигрировано с pjson.h на pjson_codec.h в рамках Задачи 9.5.
 // Использует: tests/test.json (большой файл ~11.7 МБ)
 // Загрузка JSON: node_from_string (pjson_codec.h)
 // Хранение: fptr<node> / node_id / node_view
 //
-// Все комментарии — на русском языке (Тр.6).
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,8 +1,8 @@
-// test_pjson_clone.cpp — Тесты для глубокого копирования узлов (Фаза 13).
+// test_pjson_clone.cpp — Тесты для глубокого копирования узлов.
 //
 // Покрытие:
 //
-// Задача 13.1: node_clone — низкоуровневая функция клонирования
+// node_clone — низкоуровневая функция клонирования
 //   - Клонирование null-узла
 //   - Клонирование boolean-узла
 //   - Клонирование integer-узла
@@ -14,12 +14,11 @@
 //   - Клонирование object-узла (рекурсивно)
 //   - Клонирование ref-узла (path копируется, target = 0)
 //
-// Задача 13.2: pjson_db_pmm::clone — высокоуровневый API
+// pjson_db_pmm::clone — высокоуровневый API
 //   - Клонирование по пути
 //   - Изменение копии не влияет на оригинал
 //   - Клонирование вложенных структур
 //
-// Все комментарии — на русском языке (Тр.6).
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -39,10 +38,10 @@ static void reset_pam()
 }
 
 // ===========================================================================
-// Задача 13.1: node_clone — низкоуровневая функция клонирования
+// node_clone — низкоуровневая функция клонирования
 // ===========================================================================
 
-TEST_CASE( "node_clone: cloning null node", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning null node", "[clone]" )
 {
     reset_pam();
 
@@ -58,7 +57,7 @@ TEST_CASE( "node_clone: cloning null node", "[phase13][clone]" )
     REQUIRE( cv.is_null() == true );
 }
 
-TEST_CASE( "node_clone: cloning boolean node", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning boolean node", "[clone]" )
 {
     reset_pam();
 
@@ -78,7 +77,7 @@ TEST_CASE( "node_clone: cloning boolean node", "[phase13][clone]" )
     REQUIRE( cv.as_bool() == true );
 }
 
-TEST_CASE( "node_clone: cloning integer node", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning integer node", "[clone]" )
 {
     reset_pam();
 
@@ -94,7 +93,7 @@ TEST_CASE( "node_clone: cloning integer node", "[phase13][clone]" )
     REQUIRE( cv.as_int() == -42 );
 }
 
-TEST_CASE( "node_clone: cloning uinteger node", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning uinteger node", "[clone]" )
 {
     reset_pam();
 
@@ -110,7 +109,7 @@ TEST_CASE( "node_clone: cloning uinteger node", "[phase13][clone]" )
     REQUIRE( cv.as_uint() == 12345u );
 }
 
-TEST_CASE( "node_clone: cloning real node", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning real node", "[clone]" )
 {
     reset_pam();
 
@@ -126,7 +125,7 @@ TEST_CASE( "node_clone: cloning real node", "[phase13][clone]" )
     REQUIRE( cv.as_double() == 3.14159 );
 }
 
-TEST_CASE( "node_clone: cloning string node", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning string node", "[clone]" )
 {
     reset_pam();
 
@@ -147,7 +146,7 @@ TEST_CASE( "node_clone: cloning string node", "[phase13][clone]" )
     REQUIRE( node_view{ src.addr() }.as_string() == "changed" );
 }
 
-TEST_CASE( "node_clone: cloning binary node", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning binary node", "[clone]" )
 {
     reset_pam();
 
@@ -166,7 +165,7 @@ TEST_CASE( "node_clone: cloning binary node", "[phase13][clone]" )
     REQUIRE( cv.size() == 3 );
 }
 
-TEST_CASE( "node_clone: cloning array node recursively", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning array node recursively", "[clone]" )
 {
     reset_pam();
 
@@ -197,7 +196,7 @@ TEST_CASE( "node_clone: cloning array node recursively", "[phase13][clone]" )
     REQUIRE( cv[uintptr_t( 0 )].as_int() == 1 );
 }
 
-TEST_CASE( "node_clone: cloning object node recursively", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning object node recursively", "[clone]" )
 {
     reset_pam();
 
@@ -224,7 +223,7 @@ TEST_CASE( "node_clone: cloning object node recursively", "[phase13][clone]" )
     REQUIRE( cv.at( "name" ).as_string() == "Alice" );
 }
 
-TEST_CASE( "node_clone: cloning ref node copies path, target is 0", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning ref node copies path, target is 0", "[clone]" )
 {
     reset_pam();
 
@@ -242,7 +241,7 @@ TEST_CASE( "node_clone: cloning ref node copies path, target is 0", "[phase13][c
     REQUIRE( cv.ref_target() == 0 ); // target не копируется
 }
 
-TEST_CASE( "node_clone: cloning nested structure", "[phase13][clone]" )
+TEST_CASE( "node_clone: cloning nested structure", "[clone]" )
 {
     reset_pam();
 
@@ -272,10 +271,10 @@ TEST_CASE( "node_clone: cloning nested structure", "[phase13][clone]" )
 }
 
 // ===========================================================================
-// Задача 13.2: pjson_db_pmm::clone — высокоуровневый API
+// pjson_db_pmm::clone — высокоуровневый API
 // ===========================================================================
 
-TEST_CASE( "pjson_db_pmm::clone: clone path to another path", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone path to another path", "[clone][db]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -290,7 +289,7 @@ TEST_CASE( "pjson_db_pmm::clone: clone path to another path", "[phase13][clone][
     REQUIRE( db.get( "/copy/age" ).as_int() == 30 );
 }
 
-TEST_CASE( "pjson_db_pmm::clone: modifying copy does not affect original", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: modifying copy does not affect original", "[clone][db]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -308,7 +307,7 @@ TEST_CASE( "pjson_db_pmm::clone: modifying copy does not affect original", "[pha
     REQUIRE( db.get( "/copy/value" ).as_string() == "modified_value" );
 }
 
-TEST_CASE( "pjson_db_pmm::clone: clone nested structure", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone nested structure", "[clone][db]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -323,7 +322,7 @@ TEST_CASE( "pjson_db_pmm::clone: clone nested structure", "[phase13][clone][db]"
     REQUIRE( db.get( "/backup/users/1/name" ).as_string() == "Bob" );
 }
 
-TEST_CASE( "pjson_db_pmm::clone: clone nonexistent path returns false", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone nonexistent path returns false", "[clone][db]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -332,7 +331,7 @@ TEST_CASE( "pjson_db_pmm::clone: clone nonexistent path returns false", "[phase1
     REQUIRE( ok == false );
 }
 
-TEST_CASE( "pjson_db_pmm::clone: clone to metrics path returns false", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone to metrics path returns false", "[clone][db]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -343,7 +342,7 @@ TEST_CASE( "pjson_db_pmm::clone: clone to metrics path returns false", "[phase13
     REQUIRE( ok == false );
 }
 
-TEST_CASE( "pjson_db_pmm::clone: clone from metrics path returns false", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone: clone from metrics path returns false", "[clone][db]" )
 {
     reset_pam();
     pjson_db_pmm db;
@@ -352,7 +351,7 @@ TEST_CASE( "pjson_db_pmm::clone: clone from metrics path returns false", "[phase
     REQUIRE( ok == false );
 }
 
-TEST_CASE( "pjson_db_pmm::clone(node_id): low-level clone by node_id", "[phase13][clone][db]" )
+TEST_CASE( "pjson_db_pmm::clone(node_id): low-level clone by node_id", "[clone][db]" )
 {
     reset_pam();
     pjson_db_pmm db;

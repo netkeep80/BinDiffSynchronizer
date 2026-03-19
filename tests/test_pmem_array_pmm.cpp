@@ -1,6 +1,6 @@
 /**
  * @file test_pmem_array_pmm.cpp
- * @brief Тесты для pmem_array_pmm (Задача 14.2).
+ * @brief Тесты для pmem_array_pmm.
  *
  * Проверяют корректность работы персистного массива на базе PMM.
  */
@@ -18,12 +18,12 @@ using namespace pjson;
 // ТЕСТЫ pmem_array_hdr_pmm — Layout
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_hdr_pmm: is trivially copyable", "[pmem_array_pmm][layout][task14.2]" )
+TEST_CASE( "pmem_array_hdr_pmm: is trivially copyable", "[pmem_array_pmm][layout]" )
 {
     REQUIRE( std::is_trivially_copyable<pmem_array_hdr_pmm>::value );
 }
 
-TEST_CASE( "pmem_array_hdr_pmm: struct size is 3 * sizeof(void*)", "[pmem_array_pmm][layout][task14.2]" )
+TEST_CASE( "pmem_array_hdr_pmm: struct size is 3 * sizeof(void*)", "[pmem_array_pmm][layout]" )
 {
     REQUIRE( sizeof( pmem_array_hdr_pmm ) == 3 * sizeof( void* ) );
     REQUIRE( sizeof( pmem_array_hdr_pmm::size ) == sizeof( void* ) );
@@ -35,7 +35,7 @@ TEST_CASE( "pmem_array_hdr_pmm: struct size is 3 * sizeof(void*)", "[pmem_array_
 // ТЕСТЫ pmem_array_pmm_init
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_init: initialises header to zeroes", "[pmem_array_pmm][init][task14.2]" )
+TEST_CASE( "pmem_array_pmm_init: initialises header to zeroes", "[pmem_array_pmm][init]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -59,7 +59,7 @@ TEST_CASE( "pmem_array_pmm_init: initialises header to zeroes", "[pmem_array_pmm
 // ТЕСТЫ pmem_array_pmm_push_back / pmem_array_pmm_at
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_push_back: appends elements and increases size", "[pmem_array_pmm][push_back][task14.2]" )
+TEST_CASE( "pmem_array_pmm_push_back: appends elements and increases size", "[pmem_array_pmm][push_back]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -88,7 +88,7 @@ TEST_CASE( "pmem_array_pmm_push_back: appends elements and increases size", "[pm
 // ТЕСТЫ pmem_array_pmm_reserve
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_reserve: capacity grows to accommodate elements", "[pmem_array_pmm][reserve][task14.2]" )
+TEST_CASE( "pmem_array_pmm_reserve: capacity grows to accommodate elements", "[pmem_array_pmm][reserve]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -109,7 +109,7 @@ TEST_CASE( "pmem_array_pmm_reserve: capacity grows to accommodate elements", "[p
     PamManager::destroy();
 }
 
-TEST_CASE( "pmem_array_pmm_reserve: doubling strategy", "[pmem_array_pmm][reserve][task14.2]" )
+TEST_CASE( "pmem_array_pmm_reserve: doubling strategy", "[pmem_array_pmm][reserve]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -142,7 +142,7 @@ TEST_CASE( "pmem_array_pmm_reserve: doubling strategy", "[pmem_array_pmm][reserv
 // ТЕСТЫ pmem_array_pmm_pop_back
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_pop_back: decreases size", "[pmem_array_pmm][pop_back][task14.2]" )
+TEST_CASE( "pmem_array_pmm_pop_back: decreases size", "[pmem_array_pmm][pop_back]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -177,7 +177,7 @@ TEST_CASE( "pmem_array_pmm_pop_back: decreases size", "[pmem_array_pmm][pop_back
 // ТЕСТЫ pmem_array_pmm_erase_at
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_erase_at: removes element and shifts left", "[pmem_array_pmm][erase][task14.2]" )
+TEST_CASE( "pmem_array_pmm_erase_at: removes element and shifts left", "[pmem_array_pmm][erase]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -208,7 +208,7 @@ TEST_CASE( "pmem_array_pmm_erase_at: removes element and shifts left", "[pmem_ar
 // ТЕСТЫ pmem_array_pmm_insert_sorted / pmem_array_pmm_find_sorted
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_insert_sorted: maintains sorted order", "[pmem_array_pmm][sorted][task14.2]" )
+TEST_CASE( "pmem_array_pmm_insert_sorted: maintains sorted order", "[pmem_array_pmm][sorted]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -236,7 +236,7 @@ TEST_CASE( "pmem_array_pmm_insert_sorted: maintains sorted order", "[pmem_array_
     PamManager::destroy();
 }
 
-TEST_CASE( "pmem_array_pmm_find_sorted: finds existing elements", "[pmem_array_pmm][sorted][task14.2]" )
+TEST_CASE( "pmem_array_pmm_find_sorted: finds existing elements", "[pmem_array_pmm][sorted]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -268,7 +268,7 @@ TEST_CASE( "pmem_array_pmm_find_sorted: finds existing elements", "[pmem_array_p
 // ТЕСТЫ pmem_array_pmm_free / pmem_array_pmm_clear
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm_free: deallocates buffer and resets header", "[pmem_array_pmm][free][task14.2]" )
+TEST_CASE( "pmem_array_pmm_free: deallocates buffer and resets header", "[pmem_array_pmm][free]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -295,7 +295,7 @@ TEST_CASE( "pmem_array_pmm_free: deallocates buffer and resets header", "[pmem_a
     PamManager::destroy();
 }
 
-TEST_CASE( "pmem_array_pmm_clear: resets size but keeps capacity", "[pmem_array_pmm][clear][task14.2]" )
+TEST_CASE( "pmem_array_pmm_clear: resets size but keeps capacity", "[pmem_array_pmm][clear]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -324,13 +324,13 @@ TEST_CASE( "pmem_array_pmm_clear: resets size but keeps capacity", "[pmem_array_
 // ТЕСТЫ pvector_pmm
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pvector_pmm: size is 3 * sizeof(void*)", "[pvector_pmm][layout][task14.2]" )
+TEST_CASE( "pvector_pmm: size is 3 * sizeof(void*)", "[pvector_pmm][layout]" )
 {
     REQUIRE( sizeof( pvector_pmm<int> ) == 3 * sizeof( void* ) );
     REQUIRE( sizeof( pvector_pmm<double> ) == 3 * sizeof( void* ) );
 }
 
-TEST_CASE( "pvector_pmm: push_back and element access", "[pvector_pmm][push_back][task14.2]" )
+TEST_CASE( "pvector_pmm: push_back and element access", "[pvector_pmm][push_back]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -358,7 +358,7 @@ TEST_CASE( "pvector_pmm: push_back and element access", "[pvector_pmm][push_back
     PamManager::destroy();
 }
 
-TEST_CASE( "pvector_pmm: front and back", "[pvector_pmm][access][task14.2]" )
+TEST_CASE( "pvector_pmm: front and back", "[pvector_pmm][access]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -377,7 +377,7 @@ TEST_CASE( "pvector_pmm: front and back", "[pvector_pmm][access][task14.2]" )
     PamManager::destroy();
 }
 
-TEST_CASE( "pvector_pmm: pop_back", "[pvector_pmm][pop_back][task14.2]" )
+TEST_CASE( "pvector_pmm: pop_back", "[pvector_pmm][pop_back]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -403,7 +403,7 @@ TEST_CASE( "pvector_pmm: pop_back", "[pvector_pmm][pop_back][task14.2]" )
     PamManager::destroy();
 }
 
-TEST_CASE( "pvector_pmm: clear", "[pvector_pmm][clear][task14.2]" )
+TEST_CASE( "pvector_pmm: clear", "[pvector_pmm][clear]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -426,7 +426,7 @@ TEST_CASE( "pvector_pmm: clear", "[pvector_pmm][clear][task14.2]" )
     PamManager::destroy();
 }
 
-TEST_CASE( "pvector_pmm: iterators", "[pvector_pmm][iterator][task14.2]" )
+TEST_CASE( "pvector_pmm: iterators", "[pvector_pmm][iterator]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -449,7 +449,7 @@ TEST_CASE( "pvector_pmm: iterators", "[pvector_pmm][iterator][task14.2]" )
     PamManager::destroy();
 }
 
-TEST_CASE( "pvector_pmm: capacity grows with elements", "[pvector_pmm][capacity][task14.2]" )
+TEST_CASE( "pvector_pmm: capacity grows with elements", "[pvector_pmm][capacity]" )
 {
     PamManager::create( 64 * 1024 );
 
@@ -478,7 +478,7 @@ TEST_CASE( "pvector_pmm: capacity grows with elements", "[pvector_pmm][capacity]
 // ТЕСТЫ ИНТЕГРАЦИИ: Большой массив
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm: handles large arrays (1000 elements)", "[pmem_array_pmm][large][task14.2]" )
+TEST_CASE( "pmem_array_pmm: handles large arrays (1000 elements)", "[pmem_array_pmm][large]" )
 {
     PamManager::create( 256 * 1024 );
 
@@ -510,7 +510,7 @@ TEST_CASE( "pmem_array_pmm: handles large arrays (1000 elements)", "[pmem_array_
 // ТЕСТ: смещения кратны размеру гранулы
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmem_array_pmm: data_off is aligned to granule size", "[pmem_array_pmm][alignment][task14.2]" )
+TEST_CASE( "pmem_array_pmm: data_off is aligned to granule size", "[pmem_array_pmm][alignment]" )
 {
     PamManager::create( 64 * 1024 );
 

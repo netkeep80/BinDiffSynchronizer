@@ -1,8 +1,8 @@
 /**
  * @file test_pam_pmm.cpp
- * @brief Тесты фасада pam_pmm.h (Задача 14.6).
+ * @brief Тесты фасада pam_pmm.h.
  *
- * Тесты проверяют совместимость API pam_pmm с PersistentAddressSpace:
+ * Тесты проверяют API pam_pmm:
  *   - Инициализация и уничтожение
  *   - Создание именованных и безымянных объектов
  *   - Поиск объектов по имени
@@ -20,10 +20,10 @@
 using namespace pjson;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ ИНИЦИАЛИЗАЦИИ И УНИЧТОЖЕНИЯ (Задача 14.6)
+// ТЕСТЫ ИНИЦИАЛИЗАЦИИ И УНИЧТОЖЕНИЯ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: init and destroy (in-memory)", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: init and destroy (in-memory)", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -35,7 +35,7 @@ TEST_CASE( "pam_pmm: init and destroy (in-memory)", "[pam_pmm][task14.6]" )
     REQUIRE_FALSE( pam_pmm_is_initialized() );
 }
 
-TEST_CASE( "pam_pmm: reset", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: reset", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -54,10 +54,10 @@ TEST_CASE( "pam_pmm: reset", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ СОЗДАНИЯ ОБЪЕКТОВ (Задача 14.6)
+// ТЕСТЫ СОЗДАНИЯ ОБЪЕКТОВ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: create unnamed object", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: create unnamed object", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -79,7 +79,7 @@ TEST_CASE( "pam_pmm: create unnamed object", "[pam_pmm][task14.6]" )
     pam_pmm_destroy();
 }
 
-TEST_CASE( "pam_pmm: create named object", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: create named object", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -108,7 +108,7 @@ TEST_CASE( "pam_pmm: create named object", "[pam_pmm][task14.6]" )
     pam_pmm_destroy();
 }
 
-TEST_CASE( "pam_pmm: create named object - duplicate name fails", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: create named object - duplicate name fails", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -122,7 +122,7 @@ TEST_CASE( "pam_pmm: create named object - duplicate name fails", "[pam_pmm][tas
     pam_pmm_destroy();
 }
 
-TEST_CASE( "pam_pmm: create array", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: create array", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -147,10 +147,10 @@ TEST_CASE( "pam_pmm: create array", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ УДАЛЕНИЯ ОБЪЕКТОВ (Задача 14.6)
+// ТЕСТЫ УДАЛЕНИЯ ОБЪЕКТОВ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: delete unnamed object", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: delete unnamed object", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -167,7 +167,7 @@ TEST_CASE( "pam_pmm: delete unnamed object", "[pam_pmm][task14.6]" )
     pam_pmm_destroy();
 }
 
-TEST_CASE( "pam_pmm: delete named object", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: delete named object", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -184,10 +184,10 @@ TEST_CASE( "pam_pmm: delete named object", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ СОХРАНЕНИЯ И ЗАГРУЗКИ (Задача 14.6)
+// ТЕСТЫ СОХРАНЕНИЯ И ЗАГРУЗКИ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: save and load", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: save and load", "[pam_pmm]" )
 {
     const char* filename = "test_pam_pmm_saveload.dat";
 
@@ -223,7 +223,7 @@ TEST_CASE( "pam_pmm: save and load", "[pam_pmm][task14.6]" )
     std::remove( filename );
 }
 
-TEST_CASE( "pam_pmm: save and load array", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: save and load array", "[pam_pmm]" )
 {
     const char* filename = "test_pam_pmm_array.dat";
 
@@ -262,10 +262,10 @@ TEST_CASE( "pam_pmm: save and load array", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ МЕТРИК (Задача 14.6)
+// ТЕСТЫ МЕТРИК
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: metrics", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: metrics", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -286,10 +286,10 @@ TEST_CASE( "pam_pmm: metrics", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ РАЗЫМЕНОВАНИЯ (Задача 14.6)
+// ТЕСТЫ РАЗЫМЕНОВАНИЯ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: resolve and ptr_to_offset", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: resolve and ptr_to_offset", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -314,10 +314,10 @@ TEST_CASE( "pam_pmm: resolve and ptr_to_offset", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ REALLOC (Задача 14.6)
+// ТЕСТЫ REALLOC
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: realloc", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: realloc", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -347,10 +347,10 @@ TEST_CASE( "pam_pmm: realloc", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ СТРУКТУР (Задача 14.6)
+// ТЕСТЫ СТРУКТУР
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: create custom struct", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: create custom struct", "[pam_pmm]" )
 {
     struct TestStruct
     {
@@ -385,10 +385,10 @@ TEST_CASE( "pam_pmm: create custom struct", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ МНОЖЕСТВЕННЫХ ОБЪЕКТОВ (Задача 14.6)
+// ТЕСТЫ МНОЖЕСТВЕННЫХ ОБЪЕКТОВ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: multiple objects", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: multiple objects", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -427,10 +427,10 @@ TEST_CASE( "pam_pmm: multiple objects", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ ГРАНИЧНЫХ СЛУЧАЕВ (Задача 14.6)
+// ТЕСТЫ ГРАНИЧНЫХ СЛУЧАЕВ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: edge cases", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: edge cases", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
 
@@ -454,7 +454,7 @@ TEST_CASE( "pam_pmm: edge cases", "[pam_pmm][task14.6]" )
     pam_pmm_destroy();
 }
 
-TEST_CASE( "pam_pmm: validate", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: validate", "[pam_pmm]" )
 {
     pam_pmm_init( nullptr );
     REQUIRE( pam_pmm_validate() );
@@ -462,10 +462,10 @@ TEST_CASE( "pam_pmm: validate", "[pam_pmm][task14.6]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТ СОВМЕСТИМОСТИ ТИПОВ (Задача 14.6)
+// ТЕСТ СОВМЕСТИМОСТИ ТИПОВ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_pmm: trivial copyable check", "[pam_pmm][task14.6]" )
+TEST_CASE( "pam_pmm: trivial copyable check", "[pam_pmm]" )
 {
     REQUIRE( std::is_trivially_copyable<pam_pmm_name_key>::value );
     REQUIRE( std::is_trivially_copyable<pam_pmm_slot_info>::value );
