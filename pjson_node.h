@@ -244,7 +244,7 @@ struct array_range;        ///< Диапазон для range-based for по м�
 struct object_find_result
 {
     uintptr_t index; ///< Индекс найденного элемента (== size при отсутствии ключа)
-    bool      found; ///< true если ключ найден
+    bool found;      ///< true если ключ найден
 };
 
 /// Бинарный поиск ключа в отсортированном массиве object_entry (Задача 16.2).
@@ -679,7 +679,7 @@ inline object_find_result node_object_find_key( uintptr_t data_off, uintptr_t sz
     uintptr_t lo = 0, hi = sz;
     while ( lo < hi )
     {
-        uintptr_t            mid     = ( lo + hi ) / 2;
+        uintptr_t           mid     = ( lo + hi ) / 2;
         const object_entry* entries = pmm_resolve<object_entry>( data_off );
         if ( entries == nullptr )
             return { sz, false };

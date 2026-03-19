@@ -745,72 +745,71 @@ class pjson_db_pmm
         };
 
         // Функции-геттеры определены как статические лямбды для компактности.
-        static constexpr auto get_free_node_count = []( uintptr_t p, node_id, subtree_counts& ) -> uint64_t {
-            return pjson_pool_pmm_free_in_pool( p );
-        };
-        static constexpr auto get_used_node_count = []( uintptr_t p, node_id, subtree_counts& ) -> uint64_t {
-            return pjson_pool_pmm_used_count( p );
-        };
-        static constexpr auto get_string_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t {
-            return static_cast<uint64_t>( pam_all_strings().size() );
-        };
-        static constexpr auto get_pam_bump = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t {
-            return static_cast<uint64_t>( pam_pmm_get_bump() );
-        };
-        static constexpr auto get_pam_free_list = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t {
+        static constexpr auto get_free_node_count = []( uintptr_t p, node_id, subtree_counts& ) -> uint64_t
+        { return pjson_pool_pmm_free_in_pool( p ); };
+        static constexpr auto get_used_node_count = []( uintptr_t p, node_id, subtree_counts& ) -> uint64_t
+        { return pjson_pool_pmm_used_count( p ); };
+        static constexpr auto get_string_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_all_strings().size() ); };
+        static constexpr auto get_pam_bump = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_pmm_get_bump() ); };
+        static constexpr auto get_pam_free_list = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        {
             return 0u; // PMM не имеет прямого эквивалента free_list_size
         };
-        static constexpr auto get_pam_total_size = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t {
-            return static_cast<uint64_t>( pam_pmm_get_data_size() );
-        };
-        static constexpr auto get_pam_slot_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t {
-            return static_cast<uint64_t>( pam_pmm_slot_count() );
-        };
-        static constexpr auto get_pam_named_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t {
-            return static_cast<uint64_t>( pam_pmm_named_count() );
-        };
-        static constexpr auto get_node_count_total = []( uintptr_t p, node_id r, subtree_counts& sc ) -> uint64_t {
+        static constexpr auto get_pam_total_size = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_pmm_get_data_size() ); };
+        static constexpr auto get_pam_slot_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_pmm_slot_count() ); };
+        static constexpr auto get_pam_named_count = []( uintptr_t, node_id, subtree_counts& ) -> uint64_t
+        { return static_cast<uint64_t>( pam_pmm_named_count() ); };
+        static constexpr auto get_node_count_total = []( uintptr_t p, node_id r, subtree_counts& sc ) -> uint64_t
+        {
             sc.ensure( r );
             uint64_t pool_total = pjson_pool_pmm_total_count( p );
             return pool_total > 0 ? pool_total : sc.node_cnt;
         };
-        static constexpr auto get_ref_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t {
+        static constexpr auto get_ref_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t
+        {
             sc.ensure( r );
             return sc.ref_cnt;
         };
-        static constexpr auto get_array_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t {
+        static constexpr auto get_array_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t
+        {
             sc.ensure( r );
             return sc.array_cnt;
         };
-        static constexpr auto get_object_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t {
+        static constexpr auto get_object_count = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t
+        {
             sc.ensure( r );
             return sc.object_cnt;
         };
-        static constexpr auto get_binary_bytes = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t {
+        static constexpr auto get_binary_bytes = []( uintptr_t, node_id r, subtree_counts& sc ) -> uint64_t
+        {
             sc.ensure( r );
             return sc.binary_bytes;
         };
 
         // Реестр метрик.
         static const metric_entry registry[] = {
-            { "free_node_count",   get_free_node_count   },
-            { "used_node_count",   get_used_node_count   },
-            { "string_count_total", get_string_count     },
-            { "string_count",      get_string_count      },
-            { "pam_bump_offset",   get_pam_bump          },
-            { "pam_free_list_size", get_pam_free_list    },
-            { "pam_total_size",    get_pam_total_size    },
-            { "pam_slot_count",    get_pam_slot_count    },
-            { "pam_named_count",   get_pam_named_count   },
-            { "node_count_total",  get_node_count_total  },
-            { "ref_count",         get_ref_count         },
-            { "array_count",       get_array_count       },
-            { "object_count",      get_object_count      },
-            { "binary_bytes_total", get_binary_bytes     },
+            { "free_node_count", get_free_node_count },
+            { "used_node_count", get_used_node_count },
+            { "string_count_total", get_string_count },
+            { "string_count", get_string_count },
+            { "pam_bump_offset", get_pam_bump },
+            { "pam_free_list_size", get_pam_free_list },
+            { "pam_total_size", get_pam_total_size },
+            { "pam_slot_count", get_pam_slot_count },
+            { "pam_named_count", get_pam_named_count },
+            { "node_count_total", get_node_count_total },
+            { "ref_count", get_ref_count },
+            { "array_count", get_array_count },
+            { "object_count", get_object_count },
+            { "binary_bytes_total", get_binary_bytes },
         };
 
-        node_id         root = _find_root();
-        subtree_counts  sc;
+        node_id        root = _find_root();
+        subtree_counts sc;
 
         // Поиск метрики в реестре.
         for ( const auto& entry : registry )
