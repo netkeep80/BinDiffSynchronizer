@@ -21,6 +21,7 @@ set(TEST_SOURCES
     test_pjson_node.cpp
     test_pjson_codec.cpp
     test_pjson_db_perf.cpp
+    test_pjson_db_perf_large.cpp
     test_pjson_db_errors.cpp
     test_pjson_clone.cpp
     test_pmm_basic.cpp
