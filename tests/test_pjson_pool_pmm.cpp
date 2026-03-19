@@ -383,8 +383,7 @@ TEST_CASE( "pjson_pool_pmm: allocate 1000 nodes", "[pjson_pool_pmm][stress]" )
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm: free every second node and reallocate without growth",
-           "[pjson_pool_pmm][stress][reuse]" )
+TEST_CASE( "pjson_pool_pmm: free every second node and reallocate without growth", "[pjson_pool_pmm][stress][reuse]" )
 {
     PamManager::create( 256 * 1024 );
 
@@ -468,8 +467,7 @@ TEST_CASE( "pjson_pool_pmm_free_pool: releases all nodes", "[pjson_pool_pmm][fre
 // ТЕСТЫ free-list chain корректности
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pjson_pool_pmm: free-list chain is correct after multiple free/alloc cycles",
-           "[pjson_pool_pmm][reuse]" )
+TEST_CASE( "pjson_pool_pmm: free-list chain is correct after multiple free/alloc cycles", "[pjson_pool_pmm][reuse]" )
 {
     PamManager::create( 64 * 1024 );
 

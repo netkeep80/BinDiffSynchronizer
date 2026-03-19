@@ -66,8 +66,7 @@ TEST_CASE( "pallocator_pmm: cross-type copy constructor compiles", "[pallocator_
 // ---------------------------------------------------------------------------
 // pallocator_pmm — allocate возвращает ненулевой указатель
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: allocate(n) returns non-null pointer for n > 0",
-           "[pallocator_pmm][allocate]" )
+TEST_CASE( "pallocator_pmm<int>: allocate(n) returns non-null pointer for n > 0", "[pallocator_pmm][allocate]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -96,8 +95,7 @@ TEST_CASE( "pallocator_pmm<int>: allocate(0) returns nullptr", "[pallocator_pmm]
 // ---------------------------------------------------------------------------
 // pallocator_pmm — выделенная память доступна для чтения и записи
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: allocated memory is readable and writable",
-           "[pallocator_pmm][allocate][readwrite]" )
+TEST_CASE( "pallocator_pmm<int>: allocated memory is readable and writable", "[pallocator_pmm][allocate][readwrite]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -119,8 +117,7 @@ TEST_CASE( "pallocator_pmm<int>: allocated memory is readable and writable",
 // ---------------------------------------------------------------------------
 // pallocator_pmm — construct и destroy
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: construct places value and destroy cleans up",
-           "[pallocator_pmm][construct_destroy]" )
+TEST_CASE( "pallocator_pmm<int>: construct places value and destroy cleans up", "[pallocator_pmm][construct_destroy]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );

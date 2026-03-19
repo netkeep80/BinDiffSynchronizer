@@ -191,7 +191,6 @@ TEST_CASE( "pjson_db_pmm: cyclic ref detection", "[pjson_db_pmm]" )
 // erase
 // ===========================================================================
 
-
 TEST_CASE( "pjson_db_pmm: erase removes node - pending PMM node integration", "[pjson_db_pmm][.pending]" )
 {
     reset_pmm();
@@ -362,8 +361,7 @@ TEST_CASE( "pjson_db_pmm: insert parses JSON value", "[pjson_db_pmm]" )
 // clone
 // ===========================================================================
 
-TEST_CASE( "pjson_db_pmm: clone creates independent copy - pending PMM node integration",
-           "[pjson_db_pmm][.pending]" )
+TEST_CASE( "pjson_db_pmm: clone creates independent copy - pending PMM node integration", "[pjson_db_pmm][.pending]" )
 {
     reset_pmm();
     pjson_db_pmm db;

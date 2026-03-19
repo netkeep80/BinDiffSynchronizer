@@ -198,8 +198,7 @@ TEST_CASE( "pmap_pmm<int,int>: erase missing key returns false", "[pmap_pmm][era
 // ТЕСТЫ pmap_pmm — operator[]
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: operator[] inserts default value for missing key",
-           "[pmap_pmm][operator_index]" )
+TEST_CASE( "pmap_pmm<int,int>: operator[] inserts default value for missing key", "[pmap_pmm][operator_index]" )
 {
     PamManager::create( 64 * 1024 );
 

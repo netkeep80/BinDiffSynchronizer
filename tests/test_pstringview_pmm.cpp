@@ -65,8 +65,7 @@ TEST_CASE( "pstringview_pmm: intern stores correct content", "[pstringview_pmm][
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstringview_pmm: same string always yields same chars_offset (interning)",
-           "[pstringview_pmm][intern]" )
+TEST_CASE( "pstringview_pmm: same string always yields same chars_offset (interning)", "[pstringview_pmm][intern]" )
 {
     pjson::PamManager::create( 64 * 1024 );
     pjson::pstringview_pmm_reset();
@@ -181,8 +180,7 @@ TEST_CASE( "pstringview_pmm: intern nullptr treated as empty string", "[pstringv
 // ТЕСТЫ СОСТОЯНИЯ ДАННЫХ
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pstringview_pmm: chars_offset is non-zero after intern non-empty string",
-           "[pstringview_pmm][intern]" )
+TEST_CASE( "pstringview_pmm: chars_offset is non-zero after intern non-empty string", "[pstringview_pmm][intern]" )
 {
     pjson::PamManager::create( 64 * 1024 );
     pjson::pstringview_pmm_reset();
@@ -258,8 +256,7 @@ TEST_CASE( "pstringview_pmm_intern: returns InternResult with correct values", "
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstringview_pmm_intern: different strings have different chars_offset",
-           "[pstringview_pmm][helper]" )
+TEST_CASE( "pstringview_pmm_intern: different strings have different chars_offset", "[pstringview_pmm][helper]" )
 {
     pjson::PamManager::create( 64 * 1024 );
     pjson::pstringview_pmm_reset();
