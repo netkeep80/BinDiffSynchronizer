@@ -4,40 +4,37 @@
 #include <type_traits>
 #include <vector>
 #include <cstddef>
+#include <new>
 
 #include "pallocator_pmm.h"
+#include "pam_pmm.h"
 
 // =============================================================================
-// Тесты для pallocator_pmm<T>
+// Тесты для pallocator_pmm<T> (делегирует к pmm::pallocator<T, PamManager>)
 //
 // Эти тесты проверяют PMM-версию STL-совместимого аллокатора.
-// Тесты аналогичны test_pallocator.cpp, но используют pjson::pallocator_pmm<T>.
 // =============================================================================
 
 using namespace pjson;
 
 // ---------------------------------------------------------------------------
-// pallocator_pmm — типы соответствуют требованиям STL
+// pallocator_pmm — типы соответствуют требованиям STL (через allocator_traits)
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator_pmm<int>: satisfies STL allocator type requirements", "[pallocator_pmm][layout]" )
 {
     using A = pallocator_pmm<int>;
 
     REQUIRE( ( std::is_same<A::value_type, int>::value ) );
-    REQUIRE( ( std::is_same<A::pointer, int*>::value ) );
-    REQUIRE( ( std::is_same<A::const_pointer, const int*>::value ) );
-    REQUIRE( ( std::is_same<A::reference, int&>::value ) );
-    REQUIRE( ( std::is_same<A::const_reference, const int&>::value ) );
     REQUIRE( ( std::is_same<A::size_type, std::size_t>::value ) );
     REQUIRE( ( std::is_same<A::difference_type, std::ptrdiff_t>::value ) );
 }
 
 // ---------------------------------------------------------------------------
-// pallocator_pmm — rebind производит корректный тип
+// pallocator_pmm — rebind через allocator_traits
 // ---------------------------------------------------------------------------
 TEST_CASE( "pallocator_pmm<int>: rebind<double> gives pallocator_pmm<double>", "[pallocator_pmm][rebind]" )
 {
-    using Rebind = pallocator_pmm<int>::rebind<double>::other;
+    using Rebind = std::allocator_traits<pallocator_pmm<int>>::rebind_alloc<double>;
     REQUIRE( ( std::is_same<Rebind, pallocator_pmm<double>>::value ) );
 }
 
@@ -75,21 +72,19 @@ TEST_CASE( "pallocator_pmm<int>: allocate(n) returns non-null pointer for n > 0"
     int*                p = a.allocate( 4 );
     REQUIRE( p != nullptr );
 
-    // Деаллоцируем, чтобы не утекала память.
     a.deallocate( p, 4 );
 }
 
 // ---------------------------------------------------------------------------
-// pallocator_pmm — allocate(0) возвращает nullptr
+// pallocator_pmm — allocate(0) бросает std::bad_alloc
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: allocate(0) returns nullptr", "[pallocator_pmm][allocate]" )
+TEST_CASE( "pallocator_pmm<int>: allocate(0) throws std::bad_alloc", "[pallocator_pmm][allocate]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
 
     pallocator_pmm<int> a;
-    int*                p = a.allocate( 0 );
-    REQUIRE( p == nullptr );
+    REQUIRE_THROWS_AS( a.allocate( 0 ), std::bad_alloc );
 }
 
 // ---------------------------------------------------------------------------
@@ -115,9 +110,9 @@ TEST_CASE( "pallocator_pmm<int>: allocated memory is readable and writable", "[p
 }
 
 // ---------------------------------------------------------------------------
-// pallocator_pmm — construct и destroy
+// pallocator_pmm — construct и destroy через allocator_traits
 // ---------------------------------------------------------------------------
-TEST_CASE( "pallocator_pmm<int>: construct places value and destroy cleans up", "[pallocator_pmm][construct_destroy]" )
+TEST_CASE( "pallocator_pmm<int>: construct/destroy via allocator_traits", "[pallocator_pmm][construct_destroy]" )
 {
     if ( !pam_pmm_is_initialized() )
         pam_pmm_init( nullptr );
@@ -126,10 +121,10 @@ TEST_CASE( "pallocator_pmm<int>: construct places value and destroy cleans up", 
     int*                p = a.allocate( 1 );
     REQUIRE( p != nullptr );
 
-    a.construct( p, 42 );
+    std::allocator_traits<pallocator_pmm<int>>::construct( a, p, 42 );
     REQUIRE( *p == 42 );
 
-    a.destroy( p );
+    std::allocator_traits<pallocator_pmm<int>>::destroy( a, p );
     a.deallocate( p, 1 );
 }
 
@@ -228,7 +223,6 @@ TEST_CASE( "pallocator_pmm<double>: multiple independent allocations do not alia
 TEST_CASE( "pallocator_pmm<int>: deallocate(nullptr) is safe", "[pallocator_pmm][deallocate]" )
 {
     pallocator_pmm<int> a;
-    // Не должен крашиться.
     a.deallocate( nullptr, 0 );
 }
 
