@@ -1,12 +1,14 @@
 #pragma once
 /**
  * @file pstringview_pmm.h
- * @brief Реализация pstringview на базе PersistMemoryManager (Задача 14.4.1).
+ * @brief Каноническая реализация pstringview на базе PersistMemoryManager (Задача 14.4.1, 15.5).
  *
- * Этот файл содержит PMM-версию персистной интернированной read-only строки,
- * совместимую по API с оригинальным pstringview.h.
+ * Содержит PMM-версию персистной интернированной read-only строки,
+ * а также полный API интернирования и поиска строк в словаре ПАП.
  *
- * Используется Вариант A из плана: делегирование в pmm::pstringview<PamManager>.
+ * После консолидации (Фаза 15, Задача 15.5) этот файл является
+ * единственной каноническей реализацией. Файл pstringview.h —
+ * тонкая обёртка-алиас.
  *
  * PMM v0.21.0 уже содержит оптимизированный pstringview:
  *   - Single-block хранение (длина + строка в одном блоке)
@@ -18,14 +20,15 @@
  *   - Интернирование: одинаковые строки → один pptr
  *   - Сравнение O(1): через сравнение pptr (гранульных индексов)
  *
- * @see plan.md Задача 14.4.1 — Миграция pstringview на PMM
- * @see pstringview.h — оригинальная реализация
+ * @see plan.md Задача 15.5 — Консолидация pstringview.h и pstringview_pmm.h
+ * @see pstringview.h — обёртка-алиас для обратной совместимости
  * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t
  */
 
 #include "pam_pmm_config.h"
 #include "pam_adapter.h"
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -43,7 +46,45 @@ using pmm_pstringview = typename PamManager::pstringview;
 using pmm_pstringview_pptr = typename PamManager::template pptr<pmm_pstringview>;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// pstringview_pmm — адаптер для совместимости с текущим API
+// Сброс словаря PMM pstringview
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Опциональный callback для ленивого восстановления корня AVL-дерева из ПАП.
+/// Устанавливается в pam_pmm.h после определения pstringview_pmm_restore_root().
+inline void ( *& pstringview_pmm_pre_intern_hook() )()
+{
+    static void ( *hook )() = nullptr;
+    return hook;
+}
+
+/// Опциональный callback для сохранения корня AVL-дерева в ПАП после интернирования.
+/// Устанавливается в pam_pmm.h после определения pstringview_pmm_save_root().
+inline void ( *& pstringview_pmm_post_intern_hook() )()
+{
+    static void ( *hook )() = nullptr;
+    return hook;
+}
+
+/// Опциональный callback для сброса флагов персистентности при reset().
+/// Устанавливается в pam_pmm.h.
+inline void ( *& pstringview_pmm_reset_hook() )()
+{
+    static void ( *hook )() = nullptr;
+    return hook;
+}
+
+/**
+ * @brief Сбросить синглтон словаря PMM (для тестов).
+ */
+inline void pstringview_pmm_reset()
+{
+    pmm_pstringview::reset();
+    if ( pstringview_pmm_reset_hook() != nullptr )
+        pstringview_pmm_reset_hook()();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// pstringview_pmm — каноническая реализация (Задача 15.5)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -54,15 +95,12 @@ using pmm_pstringview_pptr = typename PamManager::template pptr<pmm_pstringview>
  *
  * Для полной совместимости с существующим кодом поддерживает поля:
  *   - length: длина строки (кэшируется)
- *   - chars_offset: байтовое смещение (вычисляется из pptr)
- *
- * Примечание: pstringview_pmm можно создавать на стеке для временного хранения
- * результатов интернирования.
+ *   - chars_offset: байтовое смещение символьных данных в ПАП
  */
 struct pstringview_pmm
 {
     uintptr_t length; ///< Длина строки (без нулевого терминатора)
-    uintptr_t chars_offset; ///< Байтовое смещение pstringview в ПАП (не символов, а блока!)
+    uintptr_t chars_offset; ///< Байтовое смещение строковых данных в ПАП
 
     /**
      * @brief Интернировать строку s.
@@ -77,6 +115,10 @@ struct pstringview_pmm
         if ( s == nullptr )
             s = "";
 
+        // Ленивое восстановление корня AVL-дерева из ПАП (через callback из pam_pmm.h).
+        if ( pstringview_pmm_pre_intern_hook() != nullptr )
+            pstringview_pmm_pre_intern_hook()();
+
         // Используем PMM pstringview::intern()
         pmm_pstringview_pptr p = pmm_pstringview::intern( s );
 
@@ -87,16 +129,33 @@ struct pstringview_pmm
             return;
         }
 
-        // Сохраняем байтовое смещение блока pstringview
-        chars_offset = pptr_to_offset( p );
+        // Получаем указатель на строковые данные внутри блока.
+        pmm_pstringview* sv = p.resolve();
+        if ( sv == nullptr )
+        {
+            length       = 0;
+            chars_offset = 0;
+            return;
+        }
+
+        // chars_offset указывает на str[] внутри блока pmm_pstringview,
+        // обеспечивая совместимость с pmm_resolve<char>(chars_offset).
+        const std::uint8_t* base = PamManager::backend().base_ptr();
+        chars_offset = static_cast<uintptr_t>(
+            reinterpret_cast<const std::uint8_t*>( sv->c_str() ) - base );
 
         // Кэшируем длину
-        pmm_pstringview* sv = p.resolve();
-        length              = ( sv != nullptr ) ? static_cast<uintptr_t>( sv->size() ) : 0;
+        length = static_cast<uintptr_t>( sv->size() );
+
+        // Сохраняем корень AVL-дерева в ПАП (через callback из pam_pmm.h).
+        if ( pstringview_pmm_post_intern_hook() != nullptr )
+            pstringview_pmm_post_intern_hook()();
     }
 
     /**
      * @brief Получить C-строку (нуль-терминированную).
+     *
+     * chars_offset указывает на символьные данные внутри блока pmm_pstringview.
      *
      * @return Указатель на символьные данные или "" для пустой строки.
      */
@@ -104,9 +163,8 @@ struct pstringview_pmm
     {
         if ( chars_offset == 0 )
             return "";
-        auto                   p  = offset_to_pptr<pmm_pstringview>( chars_offset );
-        const pmm_pstringview* sv = p.resolve();
-        return ( sv != nullptr ) ? sv->c_str() : "";
+        const char* s = pmm_resolve<char>( chars_offset );
+        return ( s != nullptr ) ? s : "";
     }
 
     /**
@@ -152,7 +210,7 @@ static_assert( std::is_trivially_copyable<pstringview_pmm>::value,
                "pstringview_pmm должен быть тривиально копируемым" );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Вспомогательные функции (аналоги pam_intern_string, pam_search_strings)
+// Вспомогательные функции для интернирования и поиска строк
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -198,44 +256,68 @@ struct pstringview_pmm_search_result
     uintptr_t   length;       ///< Длина строки
 };
 
-// Forward declaration для обхода дерева
+// ═══════════════════════════════════════════════════════════════════════════
+// Обход AVL-дерева интернированных строк PMM (Задача 15.5)
+// ═══════════════════════════════════════════════════════════════════════════
+
 namespace detail
 {
-inline void pstringview_pmm_collect_all( pmm_pstringview_pptr                        node,
-                                         std::vector<pstringview_pmm_search_result>& results )
+
+/// Рекурсивный in-order обход AVL-дерева pmm::pstringview.
+/// Использует PamManager::get_tree_left_offset() / get_tree_right_offset()
+/// для навигации по AVL-дереву.
+inline void pstringview_pmm_inorder( pmm_pstringview_pptr                        node,
+                                      const char*                                  pattern,
+                                      std::vector<pstringview_pmm_search_result>& results )
 {
     if ( node.is_null() )
         return;
 
+    // Тип гранульного индекса PMM.
+    using index_type = typename PamManager::index_type;
+    constexpr auto no_block = std::numeric_limits<index_type>::max();
+
+    // Обход левого поддерева.
+    auto left_idx = PamManager::get_tree_left_offset( node );
+    if ( left_idx != static_cast<index_type>( 0 ) && left_idx != no_block )
+    {
+        pmm_pstringview_pptr left_node( left_idx );
+        pstringview_pmm_inorder( left_node, pattern, results );
+    }
+
+    // Обработка текущего узла.
     pmm_pstringview* sv = node.resolve();
-    if ( sv == nullptr )
-        return;
+    if ( sv != nullptr )
+    {
+        const char* str = sv->c_str();
+        if ( str != nullptr && std::strstr( str, pattern ) != nullptr )
+        {
+            pstringview_pmm_search_result r;
+            r.value        = str;
+            r.chars_offset = pptr_to_offset( node );
+            r.length       = static_cast<uintptr_t>( sv->size() );
+            results.push_back( std::move( r ) );
+        }
+    }
 
-    // Получаем дочерние узлы через TreeNode API PMM (left_offset, right_offset)
-    // Примечание: для простоты используем линейный обход — PMM pstringview хранит
-    // AVL-ссылки во встроенных полях блока (Block<AT>::TreeNode).
-    // Для полного обхода дерева требуется доступ к внутренним полям PMM,
-    // что выходит за рамки текущей задачи.
-    //
-    // Текущая реализация: добавляем только корневой узел и полагаемся на
-    // последовательный перебор (для поиска по подстроке достаточно).
-
-    pstringview_pmm_search_result r;
-    r.value        = sv->c_str();
-    r.chars_offset = pptr_to_offset( node );
-    r.length       = static_cast<uintptr_t>( sv->size() );
-    results.push_back( std::move( r ) );
+    // Обход правого поддерева.
+    auto right_idx = PamManager::get_tree_right_offset( node );
+    if ( right_idx != static_cast<index_type>( 0 ) && right_idx != no_block )
+    {
+        pmm_pstringview_pptr right_node( right_idx );
+        pstringview_pmm_inorder( right_node, pattern, results );
+    }
 }
+
 } // namespace detail
 
 /**
  * @brief Найти все интернированные строки, содержащие подстроку pattern.
  *
- * @warning Текущая реализация не поддерживает полный обход AVL-дерева PMM.
- *          Для полнотекстового поиска рекомендуется сохранять отдельный индекс.
+ * Выполняет in-order обход AVL-дерева интернированных строк PMM.
  *
- * @param pattern Подстрока для поиска.
- * @return Вектор результатов поиска (может быть неполным).
+ * @param pattern Подстрока для поиска. nullptr трактуется как "".
+ * @return Вектор результатов поиска.
  */
 inline std::vector<pstringview_pmm_search_result> pstringview_pmm_search( const char* pattern )
 {
@@ -243,32 +325,44 @@ inline std::vector<pstringview_pmm_search_result> pstringview_pmm_search( const 
     if ( pattern == nullptr )
         pattern = "";
 
-    // PMM не предоставляет публичный API для обхода AVL-дерева pstringview.
-    // Возвращаем пустой результат — полнотекстовый поиск требует отдельного индекса.
-    // Для задачи 14.4 это допустимо: основной функционал — интернирование.
+    // Корень AVL-дерева интернированных строк.
+    auto root_idx = pmm_pstringview::_root_idx;
 
-    (void)pattern;
+    using index_type = typename PamManager::index_type;
+    if ( root_idx == static_cast<index_type>( 0 ) )
+        return results;
+
+    pmm_pstringview_pptr root( root_idx );
+    detail::pstringview_pmm_inorder( root, pattern, results );
+
     return results;
 }
 
 /**
  * @brief Вернуть все интернированные строки из словаря PMM.
  *
- * @warning Текущая реализация не поддерживает полный обход AVL-дерева PMM.
- *
- * @return Вектор всех строк (может быть неполным).
+ * @return Вектор всех строк.
  */
 inline std::vector<pstringview_pmm_search_result> pstringview_pmm_all()
 {
     return pstringview_pmm_search( "" );
 }
 
-/**
- * @brief Сбросить синглтон словаря PMM (для тестов).
- */
-inline void pstringview_pmm_reset()
+// ═══════════════════════════════════════════════════════════════════════════
+// Менеджер словаря строк: pstringview_manager (совместимость)
+// (Задача 15.5 — перенесено из pstringview.h)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Менеджер таблицы интернирования — обёртка совместимости.
+/// После консолидации делегирует в PMM напрямую (AVL-дерево).
+struct pstringview_manager
 {
-    pmm_pstringview::reset();
-}
+    /// Сбросить синглтон (для тестов). Делегирует в pstringview_pmm_reset().
+    static void reset() { pstringview_pmm_reset(); }
+
+    /// Смещение таблицы интернирования — для совместимости.
+    /// После консолидации не используется (PMM хранит дерево внутри).
+    static inline uintptr_t _table_offset = 0;
+};
 
 } // namespace pjson

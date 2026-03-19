@@ -953,4 +953,199 @@ inline bool pam_pmm_validate()
     return pam_pmm_is_initialized() && PamManager::is_initialized();
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Персистентность корня AVL-дерева pstringview (Задача 15.5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Именованный слот в ПАП для хранения корневого индекса AVL-дерева интернирования.
+static constexpr const char* PSTRINGVIEW_ROOT_SLOT_NAME = "pstringview_root";
+
+/// Структура для хранения корневого индекса AVL-дерева pstringview в ПАП.
+struct pstringview_root_slot
+{
+    uintptr_t root_idx; ///< Гранульный индекс корня AVL-дерева
+};
+
+static_assert( std::is_trivially_copyable<pstringview_root_slot>::value,
+               "pstringview_root_slot должен быть тривиально копируемым" );
+
+/// Сохранить текущий _root_idx в именованный слот ПАП.
+inline void pstringview_pmm_save_root()
+{
+    if ( !pam_pmm_is_initialized() )
+        return;
+
+    uintptr_t slot_off = pam_pmm_find( PSTRINGVIEW_ROOT_SLOT_NAME );
+    if ( slot_off == 0 )
+    {
+        slot_off = pam_pmm_create<pstringview_root_slot>( PSTRINGVIEW_ROOT_SLOT_NAME );
+    }
+    if ( slot_off != 0 )
+    {
+        pstringview_root_slot* slot = pmm_resolve<pstringview_root_slot>( slot_off );
+        if ( slot != nullptr )
+            slot->root_idx = static_cast<uintptr_t>( pmm_pstringview::_root_idx );
+    }
+}
+
+/// Флаг: было ли выполнено восстановление _root_idx.
+inline bool& pstringview_pmm_root_restored_flag()
+{
+    static bool restored = false;
+    return restored;
+}
+
+/// Восстановить _root_idx из именованного слота ПАП (после загрузки).
+/// Вызывается лениво, один раз после каждого reset()+init().
+inline void pstringview_pmm_restore_root()
+{
+    if ( pstringview_pmm_root_restored_flag() )
+        return;
+    pstringview_pmm_root_restored_flag() = true;
+
+    if ( !pam_pmm_is_initialized() )
+        return;
+
+    uintptr_t slot_off = pam_pmm_find( PSTRINGVIEW_ROOT_SLOT_NAME );
+    if ( slot_off != 0 )
+    {
+        const pstringview_root_slot* slot = pmm_resolve_const<pstringview_root_slot>( slot_off );
+        if ( slot != nullptr && slot->root_idx != 0 )
+        {
+            using index_type            = typename PamManager::index_type;
+            pmm_pstringview::_root_idx = static_cast<index_type>( slot->root_idx );
+        }
+    }
+}
+
+/// Сбросить флаг восстановления при reset().
+inline void pstringview_pmm_reset_restored_flag()
+{
+    pstringview_pmm_root_restored_flag() = false;
+}
+
+/// Регистрация callbacks для персистентности корня AVL-дерева pstringview.
+/// Используется inline-переменной для гарантии однократного выполнения.
+inline bool pstringview_pmm_hooks_registered = []()
+{
+    pstringview_pmm_pre_intern_hook()  = pstringview_pmm_restore_root;
+    pstringview_pmm_post_intern_hook() = pstringview_pmm_save_root;
+    pstringview_pmm_reset_hook()       = pstringview_pmm_reset_restored_flag;
+    return true;
+}();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// API совместимости: pam_intern_string, pam_search_strings, pam_all_strings
+// (Задача 15.5 — перенесено из pstringview.h)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Результат поиска строки в словаре ПАП (совместимость с pstringview.h).
+struct pstringview_search_result
+{
+    std::string value;        ///< Найденная строка
+    uintptr_t   chars_offset; ///< Смещение символьных данных в ПАП
+    uintptr_t   length;       ///< Длина строки
+};
+
+/// Результат интернирования строки через ПАМ (совместимость с pstringview.h).
+struct pam_intern_result
+{
+    uintptr_t chars_offset;
+    uintptr_t length;
+};
+
+/// Интернировать строку s через ПАМ: вернуть {chars_offset, length}.
+///
+/// Задача 2.2, 15.5: метод уровня ПАМ для интернирования строк.
+///
+/// chars_offset указывает на символьные данные (нуль-терминированную строку)
+/// внутри блока pmm::pstringview в ПАП. Это обеспечивает обратную совместимость
+/// с кодом, использующим pmm_resolve<char>(chars_offset) для доступа к строке.
+inline pam_intern_result pam_intern_string( const char* s )
+{
+    if ( s == nullptr )
+        s = "";
+
+    // Восстанавливаем корень AVL-дерева из ПАП при первом использовании.
+    pstringview_pmm_restore_root();
+
+    pmm_pstringview_pptr p = pmm_pstringview::intern( s );
+
+    pam_intern_result result{};
+    if ( p.is_null() )
+        return result;
+
+    // Получаем указатель на pmm_pstringview для доступа к строковым данным.
+    pmm_pstringview* sv = p.resolve();
+    if ( sv == nullptr )
+        return result;
+
+    // chars_offset указывает на str[] внутри блока pmm_pstringview,
+    // а не на начало блока. Это обеспечивает совместимость с pmm_resolve<char>().
+    const char*         str_ptr = sv->c_str();
+    const std::uint8_t* base    = PamManager::backend().base_ptr();
+    result.chars_offset         = static_cast<uintptr_t>(
+        reinterpret_cast<const std::uint8_t*>( str_ptr ) - base );
+    result.length = static_cast<uintptr_t>( sv->size() );
+
+    // Сохраняем корень AVL-дерева в ПАП (персистентность).
+    pstringview_pmm_save_root();
+
+    return result;
+}
+
+/// Найти все интернированные строки, содержащие подстроку pattern.
+///
+/// Задача 2.5, 15.5: обход AVL-дерева PMM для полнотекстового поиска.
+/// chars_offset в результатах указывает на символьные данные (совместимость с pmm_resolve<char>()).
+inline std::vector<pstringview_search_result> pam_search_strings( const char* pattern )
+{
+    // Восстанавливаем корень AVL-дерева из ПАП при первом использовании.
+    pstringview_pmm_restore_root();
+
+    auto pmm_results = pstringview_pmm_search( pattern );
+
+    const std::uint8_t* base = PamManager::backend().base_ptr();
+
+    std::vector<pstringview_search_result> results;
+    results.reserve( pmm_results.size() );
+    for ( auto& r : pmm_results )
+    {
+        pstringview_search_result sr;
+        sr.value  = std::move( r.value );
+        sr.length = r.length;
+
+        // Пересчитываем chars_offset для указания на str[] внутри блока.
+        if ( r.chars_offset != 0 && base != nullptr )
+        {
+            auto                   p  = offset_to_pptr<pmm_pstringview>( r.chars_offset );
+            const pmm_pstringview* sv = p.resolve();
+            if ( sv != nullptr )
+            {
+                sr.chars_offset = static_cast<uintptr_t>(
+                    reinterpret_cast<const std::uint8_t*>( sv->c_str() ) - base );
+            }
+            else
+            {
+                sr.chars_offset = r.chars_offset;
+            }
+        }
+        else
+        {
+            sr.chars_offset = r.chars_offset;
+        }
+
+        results.push_back( std::move( sr ) );
+    }
+    return results;
+}
+
+/// Вернуть все интернированные строки из словаря ПАП.
+///
+/// Задача 2.5: pam_all_strings() — перебор всех pstringview в словаре.
+inline std::vector<pstringview_search_result> pam_all_strings()
+{
+    return pam_search_strings( "" );
+}
+
 } // namespace pjson

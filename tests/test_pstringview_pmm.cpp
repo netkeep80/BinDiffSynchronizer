@@ -353,7 +353,7 @@ TEST_CASE( "pstringview_pmm: can be used as map keys (comparison)", "[pstringvie
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pstringview_pmm: offset aligned to granule size", "[pstringview_pmm][alignment][task14.4]" )
+TEST_CASE( "pstringview_pmm: chars_offset resolves to string data", "[pstringview_pmm][alignment][task14.4][task15.5]" )
 {
     pjson::PamManager::create( 64 * 1024 );
     pjson::pstringview_pmm_reset();
@@ -361,8 +361,13 @@ TEST_CASE( "pstringview_pmm: offset aligned to granule size", "[pstringview_pmm]
     pjson::pstringview_pmm sv{};
     sv.intern( "aligned_test" );
 
-    // chars_offset должен быть выровнен по размеру гранулы PMM
-    REQUIRE( pjson::is_aligned_offset( sv.chars_offset ) );
+    // chars_offset указывает на str[] внутри блока pmm_pstringview (Задача 15.5).
+    // Это НЕ гранульно выровненное смещение — оно указывает на символьные данные,
+    // которые можно разрешить через pmm_resolve<char>(chars_offset).
+    REQUIRE( sv.chars_offset != 0 );
+    const char* resolved = pjson::pmm_resolve<char>( sv.chars_offset );
+    REQUIRE( resolved != nullptr );
+    REQUIRE( std::strcmp( resolved, "aligned_test" ) == 0 );
 
     pjson::PamManager::destroy();
 }
