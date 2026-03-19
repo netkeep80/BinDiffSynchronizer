@@ -1,9 +1,12 @@
 #pragma once
-#include "pstringview.h"
-#include "pstring.h"
-#include "pvector.h"
-#include "pmap.h"
-#include "pmem_array.h"
+#include "pstringview_pmm.h"
+#include "pstring_pmm.h"
+#include "pvector_pmm.h"
+#include "pmap_pmm.h"
+#include "pmem_array_pmm.h"
+#include "fptr_pmm.h"
+
+using namespace pjson;
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -641,13 +644,13 @@ inline void node_set_container_empty( uintptr_t node_off, node_tag tag )
 // Вспомогательные функторы для сортированного массива object_entry (Фаза 16, Задача 16.2)
 // ---------------------------------------------------------------------------
 
-/// Извлечение ключа (chars_offset) из object_entry для pmem_array_insert_sorted.
+/// Извлечение ключа (chars_offset) из object_entry для pmem_array_pmm_insert_sorted.
 struct object_entry_key_of
 {
     uintptr_t operator()( const object_entry& e ) const { return e.key_chars_offset; }
 };
 
-/// Лексикографическое сравнение ключей по chars_offset для pmem_array_insert_sorted.
+/// Лексикографическое сравнение ключей по chars_offset для pmem_array_pmm_insert_sorted.
 struct object_entry_less
 {
     bool operator()( uintptr_t a_offset, uintptr_t b_offset ) const
@@ -1029,13 +1032,13 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     new_entry.key_chars_offset = key_result.chars_offset;
     new_entry.value            = slot_off;
 
-    // Получаем смещение заголовка pmem_array_hdr внутри object_val.
-    // object_val.{size, capacity, data_off} имеют ту же раскладку что pmem_array_hdr,
+    // Получаем смещение заголовка pmem_array_hdr_pmm внутри object_val.
+    // object_val.{size, capacity, data_off} имеют ту же раскладку что pmem_array_hdr_pmm,
     // поэтому reinterpret_cast допустим (только для POD-структур).
     uintptr_t hdr_off = pam_pmm_ptr_to_offset(
-        reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->object_val.size ) ) );
+        reinterpret_cast<pmem_array_hdr_pmm*>( &( pmm_resolve<node>( node_off )->object_val.size ) ) );
 
-    pmem_array_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
+    pmem_array_pmm_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
         hdr_off, new_entry, object_entry_key_of{}, object_entry_less{} );
 
     return slot_off;
@@ -1048,9 +1051,9 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
         return;
     // Получаем заголовок массива binary_val.
     uintptr_t hdr_off = pam_pmm_ptr_to_offset(
-        reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->binary_val.size ) ) );
+        reinterpret_cast<pmem_array_hdr_pmm*>( &( pmm_resolve<node>( node_off )->binary_val.size ) ) );
 
-    uint8_t& slot = pmem_array_push_back<uint8_t>( hdr_off );
+    uint8_t& slot = pmem_array_pmm_push_back<uint8_t>( hdr_off );
     slot          = byte;
 }
 

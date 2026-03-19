@@ -4,28 +4,14 @@
 #include <type_traits>
 
 #include "fptr_pmm.h"
-#include "persist_pmm.h"
 
 // =============================================================================
-// Тесты для fptr_pmm<T> и persist_pmm<T> (Задача 14.7)
+// Тесты для fptr_pmm<T> (Задача 14.7)
 //
-// Эти тесты проверяют PMM-версии персистного указателя и обёртки для
-// тривиально копируемых типов. Тесты аналогичны test_persist.cpp,
-// но используют pjson::fptr_pmm<T> и pjson::persist_pmm<T>.
+// Эти тесты проверяют PMM-версию персистного указателя.
 // =============================================================================
 
 using namespace pjson;
-
-// ---------------------------------------------------------------------------
-// persist_pmm<T> — статические проверки размера (Тр.8)
-// ---------------------------------------------------------------------------
-TEST_CASE( "persist_pmm<T>: sizeof(persist_pmm<T>) == sizeof(T) (Tr.8)", "[task14.7][persist_pmm][layout]" )
-{
-    REQUIRE( sizeof( persist_pmm<int> ) == sizeof( int ) );
-    REQUIRE( sizeof( persist_pmm<double> ) == sizeof( double ) );
-    REQUIRE( sizeof( persist_pmm<char> ) == sizeof( char ) );
-    REQUIRE( sizeof( persist_pmm<float> ) == sizeof( float ) );
-}
 
 // ---------------------------------------------------------------------------
 // fptr_pmm<T> — статические проверки размера (Тр.5)
@@ -296,16 +282,6 @@ TEST_CASE( "fptr_pmm: int and double objects in unified PAP (Tr.4)", "[task14.7]
 }
 
 // ---------------------------------------------------------------------------
-// persist_pmm<T> — тривиально копируем
-// ---------------------------------------------------------------------------
-TEST_CASE( "persist_pmm<T>: is trivially copyable", "[task14.7][persist_pmm][layout]" )
-{
-    REQUIRE( std::is_trivially_copyable<persist_pmm<int>>::value );
-    REQUIRE( std::is_trivially_copyable<persist_pmm<double>>::value );
-    REQUIRE( std::is_trivially_copyable<persist_pmm<char>>::value );
-}
-
-// ---------------------------------------------------------------------------
 // pjson::fptr алиас = fptr_pmm
 // ---------------------------------------------------------------------------
 TEST_CASE( "pjson::fptr<T> alias works as fptr_pmm<T>", "[task14.7][fptr_pmm][alias]" )
@@ -322,13 +298,4 @@ TEST_CASE( "pjson::fptr<T> alias works as fptr_pmm<T>", "[task14.7][fptr_pmm][al
     REQUIRE( *p == 123 );
 
     p.Delete();
-}
-
-// ---------------------------------------------------------------------------
-// pjson::persist алиас = persist_pmm
-// ---------------------------------------------------------------------------
-TEST_CASE( "pjson::persist<T> alias size equals sizeof(T)", "[task14.7][persist_pmm][alias]" )
-{
-    REQUIRE( sizeof( pjson::persist<int> ) == sizeof( int ) );
-    REQUIRE( sizeof( pjson::persist<double> ) == sizeof( double ) );
 }

@@ -3,7 +3,8 @@
 #include <cstring>
 #include <type_traits>
 
-#include "pstring.h"
+#include "pstring_pmm.h"
+#include "fptr_pmm.h"
 #include "pam_pmm.h"
 
 using namespace pjson;
@@ -16,29 +17,29 @@ static void ensure_pmm()
 }
 
 // =============================================================================
-// Tests for pstring (persistent string)
+// Tests for pstring_pmm (persistent string)
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// pstring — layout checks
+// pstring_pmm — layout checks
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: length field is uintptr_t (Phase 3)", "[pstring][layout][phase3]" )
+TEST_CASE( "pstring_pmm: length field is uintptr_t (Phase 3)", "[pstring_pmm][layout][phase3]" )
 {
     // sizeof(uintptr_t) == sizeof(void*) на любой платформе.
-    REQUIRE( sizeof( pstring::length ) == sizeof( void* ) );
+    REQUIRE( sizeof( pstring_pmm::length ) == sizeof( void* ) );
     // Поле chars_off (uintptr_t) — смещение массива char в ПАП.
-    REQUIRE( sizeof( pstring::chars_off ) == sizeof( void* ) );
-    // Phase 3: pstring должен занимать 2 * sizeof(void*) байт.
-    REQUIRE( sizeof( pstring ) == 2 * sizeof( void* ) );
+    REQUIRE( sizeof( pstring_pmm::chars_off ) == sizeof( void* ) );
+    // Phase 3: pstring_pmm должен занимать 2 * sizeof(void*) байт.
+    REQUIRE( sizeof( pstring_pmm ) == 2 * sizeof( void* ) );
 }
 
 // ---------------------------------------------------------------------------
-// pstring — default PAP allocation (null/empty)
+// pstring_pmm — default PAP allocation (null/empty)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: zero-initialised pstring (via fptr) gives empty string", "[pstring][construct]" )
+TEST_CASE( "pstring_pmm: zero-initialised pstring_pmm (via fptr) gives empty string", "[pstring_pmm][construct]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
 
     REQUIRE( fps->empty() );
@@ -49,12 +50,12 @@ TEST_CASE( "pstring: zero-initialised pstring (via fptr) gives empty string", "[
 }
 
 // ---------------------------------------------------------------------------
-// pstring — assign short string
+// pstring_pmm — assign short string
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: assign short string stores correct content", "[pstring][assign]" )
+TEST_CASE( "pstring_pmm: assign short string stores correct content", "[pstring_pmm][assign]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
 
     fps->assign( "hello" );
@@ -67,12 +68,12 @@ TEST_CASE( "pstring: assign short string stores correct content", "[pstring][ass
 }
 
 // ---------------------------------------------------------------------------
-// pstring — assign longer string
+// pstring_pmm — assign longer string
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: assign longer string stores correct content", "[pstring][assign]" )
+TEST_CASE( "pstring_pmm: assign longer string stores correct content", "[pstring_pmm][assign]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
 
     const char* long_str = "The quick brown fox jumps over the lazy dog";
@@ -85,12 +86,12 @@ TEST_CASE( "pstring: assign longer string stores correct content", "[pstring][as
 }
 
 // ---------------------------------------------------------------------------
-// pstring — reassign to different string
+// pstring_pmm — reassign to different string
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: reassigning frees old allocation and stores new content", "[pstring][reassign]" )
+TEST_CASE( "pstring_pmm: reassigning frees old allocation and stores new content", "[pstring_pmm][reassign]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
 
     fps->assign( "first" );
@@ -105,12 +106,12 @@ TEST_CASE( "pstring: reassigning frees old allocation and stores new content", "
 }
 
 // ---------------------------------------------------------------------------
-// pstring — assign empty string
+// pstring_pmm — assign empty string
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: assign empty string clears content", "[pstring][assign]" )
+TEST_CASE( "pstring_pmm: assign empty string clears content", "[pstring_pmm][assign]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
 
     fps->assign( "nonempty" );
@@ -124,12 +125,12 @@ TEST_CASE( "pstring: assign empty string clears content", "[pstring][assign]" )
 }
 
 // ---------------------------------------------------------------------------
-// pstring — assign nullptr
+// pstring_pmm — assign nullptr
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: assign nullptr gives empty string", "[pstring][assign]" )
+TEST_CASE( "pstring_pmm: assign nullptr gives empty string", "[pstring_pmm][assign]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
 
     fps->assign( nullptr );
@@ -141,12 +142,12 @@ TEST_CASE( "pstring: assign nullptr gives empty string", "[pstring][assign]" )
 }
 
 // ---------------------------------------------------------------------------
-// pstring — clear
+// pstring_pmm — clear
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: clear resets to empty", "[pstring][clear]" )
+TEST_CASE( "pstring_pmm: clear resets to empty", "[pstring_pmm][clear]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
 
     fps->assign( "hello world" );
@@ -161,20 +162,20 @@ TEST_CASE( "pstring: clear resets to empty", "[pstring][clear]" )
 }
 
 // ---------------------------------------------------------------------------
-// pstring — operator==
+// pstring_pmm — operator==
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: operator== compares correctly", "[pstring][compare]" )
+TEST_CASE( "pstring_pmm: operator== compares correctly", "[pstring_pmm][compare]" )
 {
     ensure_pmm();
-    fptr<pstring> fps1;
+    fptr<pstring_pmm> fps1;
     fps1.New();
     fps1->assign( "hello" );
 
-    fptr<pstring> fps2;
+    fptr<pstring_pmm> fps2;
     fps2.New();
     fps2->assign( "hello" );
 
-    fptr<pstring> fps3;
+    fptr<pstring_pmm> fps3;
     fps3.New();
     fps3->assign( "world" );
 
@@ -192,12 +193,12 @@ TEST_CASE( "pstring: operator== compares correctly", "[pstring][compare]" )
 }
 
 // ---------------------------------------------------------------------------
-// pstring — operator[] character access
+// pstring_pmm — operator[] character access
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: operator[] accesses individual characters", "[pstring][index]" )
+TEST_CASE( "pstring_pmm: operator[] accesses individual characters", "[pstring_pmm][index]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
     fps->assign( "abc" );
 
@@ -210,16 +211,16 @@ TEST_CASE( "pstring: operator[] accesses individual characters", "[pstring][inde
 }
 
 // ---------------------------------------------------------------------------
-// pstring — operator< (lexicographic order)
+// pstring_pmm — operator< (lexicographic order)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: operator< gives lexicographic order", "[pstring][compare]" )
+TEST_CASE( "pstring_pmm: operator< gives lexicographic order", "[pstring_pmm][compare]" )
 {
     ensure_pmm();
-    fptr<pstring> fps_a;
+    fptr<pstring_pmm> fps_a;
     fps_a.New();
     fps_a->assign( "apple" );
 
-    fptr<pstring> fps_b;
+    fptr<pstring_pmm> fps_b;
     fps_b.New();
     fps_b->assign( "banana" );
 
@@ -233,12 +234,12 @@ TEST_CASE( "pstring: operator< gives lexicographic order", "[pstring][compare]" 
 }
 
 // ---------------------------------------------------------------------------
-// pstring — chars_off reflects allocation state
+// pstring_pmm — chars_off reflects allocation state
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstring: chars_off is non-zero after assign, zero after clear", "[pstring][data]" )
+TEST_CASE( "pstring_pmm: chars_off is non-zero after assign, zero after clear", "[pstring_pmm][data]" )
 {
     ensure_pmm();
-    fptr<pstring> fps;
+    fptr<pstring_pmm> fps;
     fps.New();
 
     REQUIRE( fps->chars_off == 0u );

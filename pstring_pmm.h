@@ -1,22 +1,16 @@
 #pragma once
 /**
  * @file pstring_pmm.h
- * @brief Реализация pstring на базе PersistMemoryManager (Задача 14.4.2).
- *
- * Этот файл содержит PMM-версию персистной изменяемой строки,
- * совместимую по API с оригинальным pstring.h.
+ * @brief Реализация pstring на базе PersistMemoryManager.
  *
  * pstring_pmm — персистная readwrite строка для JSON string-value узлов.
  * Поддерживает изменение значения на месте через метод assign().
  *
- * Ключевые отличия от оригинальной реализации:
- *   - Использует PamManager::allocate_typed<char>() вместо fptr<char>::NewArray()
- *   - Использует pjson::pmm_resolve<char>() вместо PersistentAddressSpace::Resolve<char>()
+ * Особенности:
+ *   - Использует PamManager::allocate_typed<char>() для выделения символьных данных
  *   - Все смещения кратны размеру гранулы PMM (16 байт)
  *   - Нет SSO: все строки хранятся в ПАП через смещение
  *
- * @see plan.md Задача 14.4.2 — Миграция pstring на PMM
- * @see pstring.h — оригинальная реализация
  * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t
  */
 

@@ -1,7 +1,7 @@
 #pragma once
 // pjson_codec.h — Сериализация и десериализация для новой модели узлов (Фаза 5).
 //
-// Реализует парсер и сериализатор, работающие с node_id-адресацией и pjson_pool.
+// Реализует парсер и сериализатор, работающие с node_id-адресацией и pjson_pool_pmm.
 // Поддерживает расширения:
 //   - $ref: объект вида {"$ref": "<path>"} -> node_tag::ref
 //   - $base64: объект вида {"$base64": "<base64>"} -> node_tag::binary
@@ -14,7 +14,7 @@
 // Все комментарии — на русском языке (Тр.6).
 
 #include "pjson_node.h"
-#include "pjson_pool.h"
+#include "pjson_pool_pmm.h"
 #include <cstdint>
 #include <cstring>
 #include <cstdio>

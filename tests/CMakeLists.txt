@@ -11,7 +11,6 @@ set(TEST_SOURCES
     test_pam.cpp
     test_pam_dynamic.cpp
     test_pam_metrics.cpp
-    test_persist.cpp
     test_pstring.cpp
     test_pvector.cpp
     test_pmap.cpp
@@ -41,7 +40,6 @@ set(TEST_SOURCES
     test_fptr_pmm.cpp
     test_pallocator_pmm.cpp
     test_pjson_db_pmm.cpp
-    test_pam_migrate.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})

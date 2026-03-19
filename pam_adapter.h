@@ -1,18 +1,14 @@
 /**
  * @file pam_adapter.h
- * @brief Адаптер pptr<T> <-> uintptr_t для совместимости с node_id (Задача 14.1).
+ * @brief Адаптер pptr<T> <-> uintptr_t для совместимости с node_id.
  *
- * Этот файл обеспечивает плавный переход между текущей моделью node_id (uintptr_t байтовые
- * смещения) и новой моделью PMM pptr<T> (гранульные индексы).
+ * Этот файл обеспечивает конверсию между node_id (uintptr_t байтовые смещения)
+ * и PMM pptr<T> (гранульные индексы).
  *
- * Стратегия миграции:
- *   - На этапе миграции сохраняем node_id = uintptr_t для минимизации изменений в
- *     pjson_node.h, pjson_db.h, pjson_codec.h.
- *   - Функции pptr_to_offset() и offset_to_pptr() обеспечивают конверсию между форматами.
- *   - В будущем (фаза 15+) возможен переход на node_id = pptr<node>.
+ * Функции pptr_to_offset() и offset_to_pptr() обеспечивают конверсию между форматами.
  *
- * Ключевые отличия форматов:
- *   - Текущий ПАМ: node_id = байтовое смещение в ПАП (uintptr_t).
+ * Форматы:
+ *   - node_id = байтовое смещение в ПАП (uintptr_t).
  *   - PMM: pptr<T> хранит гранульный индекс (index_type), где байтовое смещение =
  *          granule_index * granule_size.
  *
@@ -21,7 +17,6 @@
  *   - байтовое смещение = pptr.offset() * 16
  *   - гранульный индекс = байтовое смещение / 16 (должно быть кратно 16)
  *
- * @see plan.md Задача 14.1 — Адаптер pptr<T> <-> uintptr_t
  * @see pam_pmm_config.h — определение PamManager
  * @see https://github.com/netkeep80/PersistMemoryManager
  */

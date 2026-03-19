@@ -26,10 +26,6 @@ endif()
 add_executable(demo main.cpp)
 target_link_libraries(demo PRIVATE bindiff)
 
-# Migration utility (Task 14.9)
-add_executable(pam_migrate pam_migrate.cpp)
-target_link_libraries(pam_migrate PRIVATE bindiff)
-
 # Tests
 enable_testing()
 add_subdirectory(tests)

@@ -4,15 +4,16 @@
 #include <filesystem>
 #include <type_traits>
 
-#include "pstringview.h"
+#include "pstringview_pmm.h"
 #include "pam_pmm.h"
+#include "fptr_pmm.h"
 
 using namespace pjson;
 
 // Вспомогательная функция: удалить временный файл.
 namespace
 {
-void rm_pstringview_file( const char* path )
+void rm_pstringview_pmm_file( const char* path )
 {
     std::error_code ec;
     std::filesystem::remove( path, ec );
@@ -20,7 +21,7 @@ void rm_pstringview_file( const char* path )
 
 /// Вспомогательная функция: получить C-строку из chars_offset (формат PMM).
 /// После консолидации (Задача 15.5) chars_offset указывает на блок pmm::pstringview,
-/// а не на raw char[]. Для получения строки нужно разрешить pstringview и вызвать c_str().
+/// а не на raw char[]. Для получения строки нужно разрешить pstringview_pmm и вызвать c_str().
 const char* resolve_interned_string( uintptr_t chars_offset )
 {
     if ( chars_offset == 0 )
@@ -33,36 +34,36 @@ const char* resolve_interned_string( uintptr_t chars_offset )
 } // anonymous namespace
 
 // =============================================================================
-// Tests for pstringview (persistent read-only interned string)
+// Tests for pstringview_pmm (persistent read-only interned string)
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// pstringview — layout checks
+// pstringview_pmm — layout checks
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: struct size is 2 * sizeof(void*)", "[pstringview][layout]" )
+TEST_CASE( "pstringview_pmm: struct size is 2 * sizeof(void*)", "[pstringview_pmm][layout]" )
 {
-    REQUIRE( sizeof( pstringview ) == 2 * sizeof( void* ) );
-    REQUIRE( sizeof( pstringview::length ) == sizeof( void* ) );
-    REQUIRE( sizeof( pstringview::chars_offset ) == sizeof( void* ) );
+    REQUIRE( sizeof( pstringview_pmm ) == 2 * sizeof( void* ) );
+    REQUIRE( sizeof( pstringview_pmm::length ) == sizeof( void* ) );
+    REQUIRE( sizeof( pstringview_pmm::chars_offset ) == sizeof( void* ) );
 }
 
 // ---------------------------------------------------------------------------
 // pstringview_pmm — тривиально копируемый (Задача 15.5)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview_pmm: is trivially copyable", "[pstringview][layout]" )
+TEST_CASE( "pstringview_pmm: is trivially copyable", "[pstringview_pmm][layout]" )
 {
     REQUIRE( std::is_trivially_copyable<pstringview_pmm>::value );
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — default allocation gives empty string
+// pstringview_pmm — default allocation gives empty string
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: zero-initialised pstringview gives empty string", "[pstringview][construct]" )
+TEST_CASE( "pstringview_pmm: zero-initialised pstringview_pmm gives empty string", "[pstringview_pmm][construct]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps;
+    fptr<pstringview_pmm> fps;
     fps.New();
 
     REQUIRE( fps->empty() );
@@ -73,14 +74,14 @@ TEST_CASE( "pstringview: zero-initialised pstringview gives empty string", "[pst
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — intern short string
+// pstringview_pmm — intern short string
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: intern stores correct content", "[pstringview][intern]" )
+TEST_CASE( "pstringview_pmm: intern stores correct content", "[pstringview_pmm][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps;
+    fptr<pstringview_pmm> fps;
     fps.New();
 
     fps->intern( "hello" );
@@ -92,18 +93,18 @@ TEST_CASE( "pstringview: intern stores correct content", "[pstringview][intern]"
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — intern returns same chars_offset for duplicate strings
+// pstringview_pmm — intern returns same chars_offset for duplicate strings
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: same string always yields same chars_offset (interning)", "[pstringview][intern]" )
+TEST_CASE( "pstringview_pmm: same string always yields same chars_offset (interning)", "[pstringview_pmm][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps1;
+    fptr<pstringview_pmm> fps1;
     fps1.New();
     fps1->intern( "key" );
 
-    fptr<pstringview> fps2;
+    fptr<pstringview_pmm> fps2;
     fps2.New();
     fps2->intern( "key" );
 
@@ -117,18 +118,18 @@ TEST_CASE( "pstringview: same string always yields same chars_offset (interning)
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — different strings have different chars_offset
+// pstringview_pmm — different strings have different chars_offset
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: different strings have different chars_offset", "[pstringview][intern]" )
+TEST_CASE( "pstringview_pmm: different strings have different chars_offset", "[pstringview_pmm][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps1;
+    fptr<pstringview_pmm> fps1;
     fps1.New();
     fps1->intern( "foo" );
 
-    fptr<pstringview> fps2;
+    fptr<pstringview_pmm> fps2;
     fps2.New();
     fps2->intern( "bar" );
 
@@ -139,22 +140,22 @@ TEST_CASE( "pstringview: different strings have different chars_offset", "[pstri
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — operator== uses chars_offset comparison (O(1))
+// pstringview_pmm — operator== uses chars_offset comparison (O(1))
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: operator== compares by chars_offset", "[pstringview][compare]" )
+TEST_CASE( "pstringview_pmm: operator== compares by chars_offset", "[pstringview_pmm][compare]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps1;
+    fptr<pstringview_pmm> fps1;
     fps1.New();
     fps1->intern( "hello" );
 
-    fptr<pstringview> fps2;
+    fptr<pstringview_pmm> fps2;
     fps2.New();
     fps2->intern( "hello" );
 
-    fptr<pstringview> fps3;
+    fptr<pstringview_pmm> fps3;
     fps3.New();
     fps3->intern( "world" );
 
@@ -169,18 +170,18 @@ TEST_CASE( "pstringview: operator== compares by chars_offset", "[pstringview][co
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — operator< gives lexicographic order
+// pstringview_pmm — operator< gives lexicographic order
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: operator< gives lexicographic order", "[pstringview][compare]" )
+TEST_CASE( "pstringview_pmm: operator< gives lexicographic order", "[pstringview_pmm][compare]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps_a;
+    fptr<pstringview_pmm> fps_a;
     fps_a.New();
     fps_a->intern( "apple" );
 
-    fptr<pstringview> fps_b;
+    fptr<pstringview_pmm> fps_b;
     fps_b.New();
     fps_b->intern( "banana" );
 
@@ -192,14 +193,14 @@ TEST_CASE( "pstringview: operator< gives lexicographic order", "[pstringview][co
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — intern empty string
+// pstringview_pmm — intern empty string
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: intern empty string gives empty result", "[pstringview][intern]" )
+TEST_CASE( "pstringview_pmm: intern empty string gives empty result", "[pstringview_pmm][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps;
+    fptr<pstringview_pmm> fps;
     fps.New();
 
     fps->intern( "" );
@@ -211,14 +212,14 @@ TEST_CASE( "pstringview: intern empty string gives empty result", "[pstringview]
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — intern nullptr treated as empty
+// pstringview_pmm — intern nullptr treated as empty
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: intern nullptr treated as empty string", "[pstringview][intern]" )
+TEST_CASE( "pstringview_pmm: intern nullptr treated as empty string", "[pstringview_pmm][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps;
+    fptr<pstringview_pmm> fps;
     fps.New();
 
     fps->intern( nullptr );
@@ -229,14 +230,14 @@ TEST_CASE( "pstringview: intern nullptr treated as empty string", "[pstringview]
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — chars_offset is non-zero after intern (non-empty)
+// pstringview_pmm — chars_offset is non-zero after intern (non-empty)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: chars_offset is non-zero after intern non-empty string", "[pstringview][intern]" )
+TEST_CASE( "pstringview_pmm: chars_offset is non-zero after intern non-empty string", "[pstringview_pmm][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps;
+    fptr<pstringview_pmm> fps;
     fps.New();
 
     REQUIRE( fps->chars_offset == 0u );
@@ -249,9 +250,9 @@ TEST_CASE( "pstringview: chars_offset is non-zero after intern non-empty string"
 }
 
 // ---------------------------------------------------------------------------
-// pstringview — many distinct strings all interned correctly
+// pstringview_pmm — many distinct strings all interned correctly
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: many distinct strings are all interned correctly", "[pstringview][intern]" )
+TEST_CASE( "pstringview_pmm: many distinct strings are all interned correctly", "[pstringview_pmm][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -260,7 +261,7 @@ TEST_CASE( "pstringview: many distinct strings are all interned correctly", "[ps
                                    "zeta",  "eta",  "theta", "iota",  "kappa" };
     constexpr int      N       = 10;
 
-    fptr<pstringview> fps[N];
+    fptr<pstringview_pmm> fps[N];
     for ( int i = 0; i < N; i++ )
     {
         fps[i].New();
@@ -271,11 +272,11 @@ TEST_CASE( "pstringview: many distinct strings are all interned correctly", "[ps
     // Повторное интернирование — должны вернуться те же смещения.
     for ( int i = 0; i < N; i++ )
     {
-        fptr<pstringview> dup;
-        dup.New();
-        dup->intern( words[i] );
-        REQUIRE( dup->chars_offset == fps[i]->chars_offset );
-        dup.Delete();
+        fptr<pstringview_pmm> dup_sv;
+        dup_sv.New();
+        dup_sv->intern( words[i] );
+        REQUIRE( dup_sv->chars_offset == fps[i]->chars_offset );
+        dup_sv.Delete();
     }
 
     for ( int i = 0; i < N; i++ )
@@ -290,10 +291,10 @@ TEST_CASE( "pstringview: many distinct strings are all interned correctly", "[ps
 // Задача 2.1: словарь строк сохраняется и восстанавливается при Load
 // (Обновлено Задача 15.5: PMM хранит AVL-дерево строк внутри)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: survives PAM Save and Load (persistence)", "[pstringview][phase2][persist]" )
+TEST_CASE( "pstringview_pmm: survives PAM Save and Load (persistence)", "[pstringview_pmm][phase2][persist]" )
 {
-    const char* fname = "./test_pstringview_persist.pam";
-    rm_pstringview_file( fname );
+    const char* fname = "./test_pstringview_pmm_persist.pam";
+    rm_pstringview_pmm_file( fname );
 
     uintptr_t saved_offset = 0;
 
@@ -302,7 +303,7 @@ TEST_CASE( "pstringview: survives PAM Save and Load (persistence)", "[pstringvie
         pstringview_manager::reset();
         pam_pmm_init( fname );
 
-        fptr<pstringview> fps;
+        fptr<pstringview_pmm> fps;
         fps.New();
         fps->intern( "persistent_key" );
         REQUIRE( std::strcmp( fps->c_str(), "persistent_key" ) == 0 );
@@ -319,7 +320,7 @@ TEST_CASE( "pstringview: survives PAM Save and Load (persistence)", "[pstringvie
 
     {
         // Повторное интернирование той же строки должно вернуть тот же chars_offset.
-        fptr<pstringview> fps;
+        fptr<pstringview_pmm> fps;
         fps.New();
         fps->intern( "persistent_key" );
         REQUIRE( fps->chars_offset == saved_offset );
@@ -329,22 +330,22 @@ TEST_CASE( "pstringview: survives PAM Save and Load (persistence)", "[pstringvie
     }
 
     pstringview_manager::reset();
-    rm_pstringview_file( fname );
+    rm_pstringview_pmm_file( fname );
 }
 
 // ---------------------------------------------------------------------------
 // Задача 2.1: два одинаковых intern("hello") дают одинаковый chars_offset
 // ---------------------------------------------------------------------------
-TEST_CASE( "pstringview: two intern(same) calls give identical chars_offset", "[pstringview][phase2]" )
+TEST_CASE( "pstringview_pmm: two intern(same) calls give identical chars_offset", "[pstringview_pmm][phase2]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
 
-    fptr<pstringview> fps1;
+    fptr<pstringview_pmm> fps1;
     fps1.New();
     fps1->intern( "hello" );
 
-    fptr<pstringview> fps2;
+    fptr<pstringview_pmm> fps2;
     fps2.New();
     fps2->intern( "hello" );
 
@@ -360,7 +361,8 @@ TEST_CASE( "pstringview: two intern(same) calls give identical chars_offset", "[
 // Задача 2.2: pam_intern_string — интернирование строки через уровень ПАМ
 // (Обновлено Задача 15.5: chars_offset указывает на блок pmm::pstringview)
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_intern_string: returns result with correct chars_offset and length", "[pstringview][phase2][intern]" )
+TEST_CASE( "pam_intern_string: returns result with correct chars_offset and length",
+           "[pstringview_pmm][phase2][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -382,7 +384,7 @@ TEST_CASE( "pam_intern_string: returns result with correct chars_offset and leng
 // ---------------------------------------------------------------------------
 // Задача 2.2: pam_intern_string — разные строки имеют разные chars_offset
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_intern_string: different strings have different chars_offset", "[pstringview][phase2][intern]" )
+TEST_CASE( "pam_intern_string: different strings have different chars_offset", "[pstringview_pmm][phase2][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -396,7 +398,8 @@ TEST_CASE( "pam_intern_string: different strings have different chars_offset", "
 // ---------------------------------------------------------------------------
 // Задача 2.2: pam_intern_string — пустая строка
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_intern_string: empty string gives length zero and valid chars_offset", "[pstringview][phase2][intern]" )
+TEST_CASE( "pam_intern_string: empty string gives length zero and valid chars_offset",
+           "[pstringview_pmm][phase2][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -420,7 +423,7 @@ TEST_CASE( "pam_intern_string: empty string gives length zero and valid chars_of
 // ---------------------------------------------------------------------------
 // Задача 2.2: pam_intern_string — nullptr трактуется как пустая строка
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_intern_string: nullptr treated as empty string", "[pstringview][phase2][intern]" )
+TEST_CASE( "pam_intern_string: nullptr treated as empty string", "[pstringview_pmm][phase2][intern]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -435,7 +438,7 @@ TEST_CASE( "pam_intern_string: nullptr treated as empty string", "[pstringview][
 // ---------------------------------------------------------------------------
 // Задача 2.5: pam_search_strings — поиск строк, содержащих подстроку
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_search_strings: finds strings containing pattern", "[pstringview][phase2][search]" )
+TEST_CASE( "pam_search_strings: finds strings containing pattern", "[pstringview_pmm][phase2][search]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -470,7 +473,7 @@ TEST_CASE( "pam_search_strings: finds strings containing pattern", "[pstringview
 // ---------------------------------------------------------------------------
 // Задача 2.5: pam_all_strings — возвращает все интернированные строки
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_all_strings: returns all interned strings", "[pstringview][phase2][search]" )
+TEST_CASE( "pam_all_strings: returns all interned strings", "[pstringview_pmm][phase2][search]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -499,7 +502,7 @@ TEST_CASE( "pam_all_strings: returns all interned strings", "[pstringview][phase
 // ---------------------------------------------------------------------------
 // Задача 2.5: pam_search_strings — пустой паттерн эквивалентен pam_all_strings
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_search_strings: empty pattern returns all strings", "[pstringview][phase2][search]" )
+TEST_CASE( "pam_search_strings: empty pattern returns all strings", "[pstringview_pmm][phase2][search]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();
@@ -517,7 +520,7 @@ TEST_CASE( "pam_search_strings: empty pattern returns all strings", "[pstringvie
 // ---------------------------------------------------------------------------
 // Задача 2.5: pam_search_results содержат корректные chars_offset и length
 // ---------------------------------------------------------------------------
-TEST_CASE( "pam_search_strings: results contain correct chars_offset and length", "[pstringview][phase2][search]" )
+TEST_CASE( "pam_search_strings: results contain correct chars_offset and length", "[pstringview_pmm][phase2][search]" )
 {
     pstringview_manager::reset();
     pam_pmm_reset();

@@ -1,12 +1,12 @@
 // test_pjson_bench.cpp — Бенчмарки для новых оптимизаций pjson_db (Задача 9.5).
 //
-// Мигрировано с pjson.h на pjson_codec.h и pjson_pool.h в рамках Задачи 9.5.
+// Мигрировано с pjson.h на pjson_codec.h и pjson_pool_pmm.h в рамках Задачи 9.5.
 //
 // Измеряет производительность:
 //   - node_to_string — сериализация узла в строку (pjson_codec)
 //   - node_from_string — десериализация строки в узел (pjson_codec)
 //   - pam_intern_string — интернирование строк (pstringview_table)
-//   - pjson_pool::alloc vs fptr<node>::New
+//   - pjson_pool_pmm_alloc vs fptr<node>::New
 //
 // Все бенчмарки выводят измеренное время.
 // Тест ПРОХОДИТ всегда — бенчмарки информационные, не требования.
@@ -23,7 +23,8 @@
 #include <fstream>
 
 #include "pjson_codec.h"
-#include "pjson_pool.h"
+#include "pjson_pool_pmm.h"
+#include "fptr_pmm.h"
 
 using namespace pjson;
 
@@ -174,7 +175,7 @@ TEST_CASE( "pjson bench: pam_intern_string vs plain node_set_string", "[pjson][b
 }
 
 // ============================================================================
-// Бенчмарк: pjson_pool::alloc vs fptr<node>::New
+// Бенчмарк: pjson_pool_pmm_alloc vs fptr<node>::New
 // ============================================================================
 
 TEST_CASE( "pjson bench: pool alloc vs fptr New", "[pjson][bench][pool]" )
@@ -204,10 +205,10 @@ TEST_CASE( "pjson bench: pool alloc vs fptr New", "[pjson][bench][pool]" )
         std::printf( "[bench] fptr<node>::New %d allocs: %lld ms\n", N, alloc_ms );
     }
 
-    // Бенчмарк pjson_pool::alloc (пул узлов).
+    // Бенчмарк pjson_pool_pmm_alloc (пул узлов).
     {
         reset_pam();
-        fptr<pjson_pool> pool;
+        fptr<pjson_pool_pmm> pool;
         pool.New();
 
         auto                 t2 = bench_clk::now();
@@ -215,16 +216,16 @@ TEST_CASE( "pjson bench: pool alloc vs fptr New", "[pjson][bench][pool]" )
         offsets.reserve( N );
         for ( int i = 0; i < N; i++ )
         {
-            node_id off = pool->alloc();
+            node_id off = pjson_pool_pmm_alloc( pool.addr() );
             offsets.push_back( off );
         }
         long long pool_alloc_ms = bench_elapsed_ms( t2 );
 
         for ( node_id off : offsets )
-            pool->free( off );
+            pjson_pool_pmm_free( pool.addr(), off );
         pool.Delete();
 
-        std::printf( "[bench] pjson_pool::alloc %d allocs: %lld ms\n", N, pool_alloc_ms );
+        std::printf( "[bench] pjson_pool_pmm_alloc %d allocs: %lld ms\n", N, pool_alloc_ms );
     }
 
     REQUIRE( true );

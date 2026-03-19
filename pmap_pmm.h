@@ -133,7 +133,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         insert( k, v, self_off );
     }
 
-    /// Псевдоним для insert(k, v) — обратная совместимость.
+    /// Псевдоним для insert(k, v).
     void insert_direct( const K& k, const V& v ) { insert( k, v ); }
 
     /**

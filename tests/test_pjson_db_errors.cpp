@@ -1,4 +1,4 @@
-// test_pjson_db_errors.cpp — Тесты для кодов ошибок node_view (Фазы 11–12).
+// test_pjson_db_pmm_errors.cpp — Тесты для кодов ошибок node_view (Фазы 11–12).
 //
 // Покрытие:
 //
@@ -7,7 +7,7 @@
 //   - node_view::is_error() / node_view::error()
 //   - node_view_error(): фабричная функция
 //   - Обратная совместимость: node_view{} (id==0) не является ошибкой
-//   - pjson_db::get() возвращает типизированные ошибки:
+//   - pjson_db_pmm::get() возвращает типизированные ошибки:
 //     - not_found при отсутствующем пути
 //     - wrong_type при навигации через скалярный узел
 //     - index_out_of_range при выходе индекса массива за границы
@@ -21,7 +21,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "pjson_db.h"
+#include "pjson_db_pmm.h"
 
 using namespace pjson;
 
@@ -84,7 +84,7 @@ TEST_CASE( "node_error: all error views have is_error true", "[phase11][error]" 
 TEST_CASE( "node_error: valid node_view is not an error", "[phase11][error]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/x", int64_t( 42 ) );
     node_view v = db.get( "/x" );
     REQUIRE( v.valid() );
@@ -93,14 +93,14 @@ TEST_CASE( "node_error: valid node_view is not an error", "[phase11][error]" )
 }
 
 // ===========================================================================
-// Задача 11.3: pjson_db::get() с типизированными ошибками
+// Задача 11.3: pjson_db_pmm::get() с типизированными ошибками
 // ===========================================================================
 
 TEST_CASE( "node_error: get nonexistent path returns not_found", "[phase11][error]" )
 {
     reset_pam();
-    pjson_db  db;
-    node_view v = db.get( "/nonexistent/path" );
+    pjson_db_pmm db;
+    node_view    v = db.get( "/nonexistent/path" );
     REQUIRE( v.is_error() );
     REQUIRE( v.error() == node_error::not_found );
 }
@@ -108,7 +108,7 @@ TEST_CASE( "node_error: get nonexistent path returns not_found", "[phase11][erro
 TEST_CASE( "node_error: get through scalar returns wrong_type", "[phase11][error]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     // Записываем скалярное значение по пути /flag.
     REQUIRE( db.put( "/flag", true ) );
     // Попытка перейти в /flag/sub через булевый узел — неверный тип.
@@ -120,7 +120,7 @@ TEST_CASE( "node_error: get through scalar returns wrong_type", "[phase11][error
 TEST_CASE( "node_error: get array index out of range returns index_out_of_range", "[phase11][error]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     // Создаём массив из одного элемента.
     db.parse_into( "/arr", "[10]" );
     // Запрашиваем несуществующий индекс 99.
@@ -132,7 +132,7 @@ TEST_CASE( "node_error: get array index out of range returns index_out_of_range"
 TEST_CASE( "node_error: get ref cycle returns ref_cycle", "[phase11][error]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     // Создаём два ref-узла, образующих цикл: a -> b -> a.
     db.put_ref( "/cycleA", "/cycleB" );
     db.put_ref( "/cycleB", "/cycleA" );
@@ -146,7 +146,7 @@ TEST_CASE( "node_error: get ref cycle returns ref_cycle", "[phase11][error]" )
 TEST_CASE( "node_error: get existing path returns valid node without error", "[phase11][error]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/config/host", "localhost" );
     node_view v = db.get( "/config/host" );
     REQUIRE( v.valid() );
@@ -204,7 +204,7 @@ TEST_CASE( "node_view::error_message: null node_view returns no error", "[phase1
 TEST_CASE( "node_view::error_message: valid node_view returns no error", "[phase12][error]" )
 {
     reset_pam();
-    pjson_db db;
+    pjson_db_pmm db;
     db.put( "/val", int64_t( 123 ) );
     node_view v = db.get( "/val" );
     REQUIRE( v.valid() );
@@ -214,8 +214,8 @@ TEST_CASE( "node_view::error_message: valid node_view returns no error", "[phase
 TEST_CASE( "node_view::error_message: db.get error has correct message", "[phase12][error]" )
 {
     reset_pam();
-    pjson_db  db;
-    node_view v = db.get( "/nonexistent" );
+    pjson_db_pmm db;
+    node_view    v = db.get( "/nonexistent" );
     REQUIRE( v.is_error() );
     REQUIRE( std::string( v.error_message() ) == "node not found" );
 }
