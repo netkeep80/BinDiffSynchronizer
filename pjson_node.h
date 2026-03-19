@@ -135,40 +135,23 @@ struct node
 
         double real_val; ///< real: double
 
-        /// string: pstring (readwrite, length + chars_off).
-        /// Раскладка идентична pstring_pmm: { uintptr_t length; uintptr_t chars_off; }.
+        /// string: pstring (readwrite).
+        /// Используем pstring_pmm напрямую: { uintptr_t length; uintptr_t chars_off; }.
         /// Строковые значения JSON — изменяемые на лету (необходимо для jsonRVM).
-        struct
-        {
-            uintptr_t length;       ///< Число символов (без нулевого терминатора)
-            uintptr_t chars_offset; ///< Смещение массива char в ПАП; 0 = пустая строка
-        } string_val;
+        pstring_pmm string_val;
 
-        /// binary: pvector<uint8_t>-совместимая раскладка в ПАП.
-        /// ($base64 при сериализации)
-        struct
-        {
-            uintptr_t size;     ///< Текущее число байт
-            uintptr_t capacity; ///< Выделенная ёмкость
-            uintptr_t data_off; ///< Смещение массива uint8_t в ПАП; 0 = пусто
-        } binary_val;
+        /// binary: массив uint8_t в ПАП ($base64 при сериализации).
+        /// Используем pmem_array_hdr_pmm: { uintptr_t size; uintptr_t capacity; uintptr_t data_off; }.
+        pmem_array_hdr_pmm binary_val;
 
-        /// array: pvector<node_id>-совместимая раскладка.
-        struct
-        {
-            uintptr_t size;     ///< Текущее число элементов
-            uintptr_t capacity; ///< Выделенная ёмкость
-            uintptr_t data_off; ///< Смещение массива node_id в ПАП; 0 = пусто
-        } array_val;
+        /// array: массив node_id в ПАП.
+        /// Используем pmem_array_hdr_pmm: { uintptr_t size; uintptr_t capacity; uintptr_t data_off; }.
+        pmem_array_hdr_pmm array_val;
 
-        /// object: pmap<pstringview, node_id>-совместимая раскладка.
+        /// object: сортированный массив object_entry в ПАП.
         /// Ключи — readonly pstringview (интернированные), значения — node_id.
-        struct
-        {
-            uintptr_t size;     ///< Текущее число пар
-            uintptr_t capacity; ///< Выделенная ёмкость
-            uintptr_t data_off; ///< Смещение массива object_entry в ПАП; 0 = пусто
-        } object_val;
+        /// Используем pmem_array_hdr_pmm: { uintptr_t size; uintptr_t capacity; uintptr_t data_off; }.
+        pmem_array_hdr_pmm object_val;
 
         /// ref: путь ($ref) + целевой node_id.
         /// path_* — pstringview-совместимые поля (readonly, интернированные).
@@ -187,14 +170,10 @@ struct node
 
 // Проверяем размеры раскладки.
 static_assert( std::is_trivially_copyable<node>::value, "node должен быть тривиально копируемым" );
-static_assert( sizeof( node::string_val ) == 2 * sizeof( void* ),
-               "node::string_val должен занимать 2 * sizeof(void*) байт (совместимость с pstring)" );
-static_assert( sizeof( node::binary_val ) == 3 * sizeof( void* ),
-               "node::binary_val должен занимать 3 * sizeof(void*) байт (совместимость с pvector)" );
-static_assert( sizeof( node::array_val ) == 3 * sizeof( void* ),
-               "node::array_val должен занимать 3 * sizeof(void*) байт (совместимость с pvector)" );
-static_assert( sizeof( node::object_val ) == 3 * sizeof( void* ),
-               "node::object_val должен занимать 3 * sizeof(void*) байт (совместимость с pmap)" );
+static_assert( sizeof( pstring_pmm ) == 2 * sizeof( void* ),
+               "pstring_pmm (node::string_val) должен занимать 2 * sizeof(void*) байт" );
+static_assert( sizeof( pmem_array_hdr_pmm ) == 3 * sizeof( void* ),
+               "pmem_array_hdr_pmm (node::array_val и др.) должен занимать 3 * sizeof(void*) байт" );
 static_assert( sizeof( node::ref_val ) == 3 * sizeof( void* ), "node::ref_val должен занимать 3 * sizeof(void*) байт" );
 
 // ---------------------------------------------------------------------------
@@ -395,9 +374,9 @@ struct node_view
         const node* n = _resolve();
         if ( n == nullptr || n->tag != node_tag::string )
             return std::string_view{};
-        if ( n->string_val.chars_offset == 0 )
+        if ( n->string_val.chars_off == 0 )
             return std::string_view{};
-        const char* s = pmm_resolve<char>( n->string_val.chars_offset );
+        const char* s = pmm_resolve<char>( n->string_val.chars_off );
         if ( s == nullptr )
             return std::string_view{};
         return std::string_view{ s, static_cast<std::size_t>( n->string_val.length ) };
@@ -780,19 +759,19 @@ inline void node_set_string( uintptr_t node_off, const char* s )
         node* n = pmm_resolve<node>( node_off );
         if ( n == nullptr )
             return;
-        if ( n->tag == node_tag::string && n->string_val.chars_offset != 0 )
+        if ( n->tag == node_tag::string && n->string_val.chars_off != 0 )
         {
-            uintptr_t old_chars = n->string_val.chars_offset;
+            uintptr_t old_chars = n->string_val.chars_off;
             pam_pmm_delete( old_chars );
             // После Delete — re-resolve.
             n = pmm_resolve<node>( node_off );
             if ( n == nullptr )
                 return;
         }
-        n->tag                     = node_tag::string;
-        n->_pad                    = 0;
-        n->string_val.length       = 0;
-        n->string_val.chars_offset = 0;
+        n->tag                  = node_tag::string;
+        n->_pad                 = 0;
+        n->string_val.length    = 0;
+        n->string_val.chars_off = 0;
     }
 
     if ( s == nullptr || s[0] == '\0' )
@@ -809,8 +788,8 @@ inline void node_set_string( uintptr_t node_off, const char* s )
     node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr )
         return;
-    n->string_val.length       = len;
-    n->string_val.chars_offset = chars_off;
+    n->string_val.length    = len;
+    n->string_val.chars_off = chars_off;
 
     // Копируем строку.
     char* dst = pmm_resolve<char>( chars_off );
@@ -1032,11 +1011,8 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     new_entry.key_chars_offset = key_result.chars_offset;
     new_entry.value            = slot_off;
 
-    // Получаем смещение заголовка pmem_array_hdr_pmm внутри object_val.
-    // object_val.{size, capacity, data_off} имеют ту же раскладку что pmem_array_hdr_pmm,
-    // поэтому reinterpret_cast допустим (только для POD-структур).
-    uintptr_t hdr_off = pam_pmm_ptr_to_offset(
-        reinterpret_cast<pmem_array_hdr_pmm*>( &( pmm_resolve<node>( node_off )->object_val.size ) ) );
+    // object_val — это pmem_array_hdr_pmm напрямую, берём его адрес.
+    uintptr_t hdr_off = pam_pmm_ptr_to_offset( &( pmm_resolve<node>( node_off )->object_val ) );
 
     pmem_array_pmm_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
         hdr_off, new_entry, object_entry_key_of{}, object_entry_less{} );
@@ -1049,9 +1025,8 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
 {
     if ( node_off == 0 )
         return;
-    // Получаем заголовок массива binary_val.
-    uintptr_t hdr_off = pam_pmm_ptr_to_offset(
-        reinterpret_cast<pmem_array_hdr_pmm*>( &( pmm_resolve<node>( node_off )->binary_val.size ) ) );
+    // binary_val — это pmem_array_hdr_pmm напрямую, берём его адрес.
+    uintptr_t hdr_off = pam_pmm_ptr_to_offset( &( pmm_resolve<node>( node_off )->binary_val ) );
 
     uint8_t& slot = pmem_array_pmm_push_back<uint8_t>( hdr_off );
     slot          = byte;

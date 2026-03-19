@@ -1037,9 +1037,9 @@ class pjson_db_pmm
         case node_tag::string:
         {
             node* n = pmm_resolve<node>( id );
-            if ( n != nullptr && n->string_val.chars_offset != 0 )
+            if ( n != nullptr && n->string_val.chars_off != 0 )
             {
-                auto str_pptr = offset_to_pptr<char>( n->string_val.chars_offset );
+                auto str_pptr = offset_to_pptr<char>( n->string_val.chars_off );
                 PamManager::template deallocate_typed<char>( str_pptr );
             }
             break;
@@ -1145,7 +1145,8 @@ class pjson_db_pmm
         if ( n == nullptr )
             return false;
 
-        uintptr_t hdr_off = pam_pmm_ptr_to_offset( reinterpret_cast<pmem_array_hdr_pmm*>( &( n->object_val.size ) ) );
+        // object_val — это pmem_array_hdr_pmm напрямую, берём его адрес.
+        uintptr_t hdr_off = pam_pmm_ptr_to_offset( &( n->object_val ) );
         if ( hdr_off == 0 )
             return false;
 
