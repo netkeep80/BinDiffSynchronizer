@@ -1,12 +1,12 @@
 // test_pjson_db_perf_large.cpp — Большой тест производительности pjson_db_pmm.
 //
-// Объективная оценка скорости БД на масштабах 50k–100k узлов.
+// Объективная оценка скорости БД на масштабах 20k–100k узлов.
 // Покрывает все основные операции высокоуровневого API:
 //
-//   - put() 50k узлов разных типов (int, string, double, bool)
+//   - put() 20k узлов разных типов (int, string, double, bool)
 //   - get() 100k запросов чтения
-//   - exists() 100k проверок существования
-//   - erase() 50k узлов
+//   - exists() 40k проверок существования
+//   - erase() 20k узлов
 //   - parse_into() 5k JSON-объектов (многоуровневые)
 //   - dump() сериализация большого дерева
 //   - clone() глубокое копирование поддерева
@@ -14,7 +14,7 @@
 //   - search_strings() / search_node_strings() — полнотекстовый поиск
 //   - update_metrics() — пересчёт статистики
 //   - save() — персистентность в файл
-//   - Полный жизненный цикл: put/get/update/erase 50k узлов
+//   - Полный жизненный цикл: put/get/update/erase 20k узлов
 //
 // Все тесты информационные: не падают по времени,
 // но распечатывают измеренное время в [perf_large] формате.
@@ -61,9 +61,9 @@ static long long elapsed_us( const perf_clk::time_point& start )
 }
 
 // Масштабы для разных операций.
-// put/erase — O(N*depth), поэтому 50k (баланс скорости и объёма).
+// put/erase — O(N*depth), поэтому 20k (баланс скорости CI и объёма).
 // get/exists — O(depth), поэтому 100k запросов.
-constexpr unsigned LARGE_PUT_N   = 50'000u;
+constexpr unsigned LARGE_PUT_N   = 20'000u;
 constexpr unsigned LARGE_GET_N   = 100'000u;
 constexpr unsigned LARGE_PARSE_N = 5'000u;
 constexpr unsigned LARGE_REF_N   = 10'000u;
@@ -71,10 +71,10 @@ constexpr unsigned LARGE_CLONE_N = 5'000u;
 } // anonymous namespace
 
 // ===========================================================================
-// 1. put() 50k узлов разных типов (int, string, double, bool)
+// 1. put() 20k узлов разных типов (int, string, double, bool)
 // ===========================================================================
 
-TEST_CASE( "perf_large: put 50k mixed-type nodes", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: put 20k mixed-type nodes", "[pjson_db_pmm][perf_large]" )
 {
     reset_pam_large();
     pjson_db_pmm db;
@@ -123,10 +123,10 @@ TEST_CASE( "perf_large: put 50k mixed-type nodes", "[pjson_db_pmm][perf_large]" 
 }
 
 // ===========================================================================
-// 2. get() 100k запросов по 50k ключам
+// 2. get() 100k запросов по 20k ключам
 // ===========================================================================
 
-TEST_CASE( "perf_large: get 100k requests over 50k keys", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: get 100k requests over 20k keys", "[pjson_db_pmm][perf_large]" )
 {
     reset_pam_large();
     pjson_db_pmm db;
@@ -157,10 +157,10 @@ TEST_CASE( "perf_large: get 100k requests over 50k keys", "[pjson_db_pmm][perf_l
 }
 
 // ===========================================================================
-// 3. exists() 100k проверок (50k существующих + 50k несуществующих)
+// 3. exists() 40k проверок (20k существующих + 20k несуществующих)
 // ===========================================================================
 
-TEST_CASE( "perf_large: exists 100k checks (hit + miss)", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: exists 40k checks (hit + miss)", "[pjson_db_pmm][perf_large]" )
 {
     reset_pam_large();
     pjson_db_pmm db;
@@ -201,10 +201,10 @@ TEST_CASE( "perf_large: exists 100k checks (hit + miss)", "[pjson_db_pmm][perf_l
 }
 
 // ===========================================================================
-// 4. erase() 50k узлов
+// 4. erase() 20k узлов
 // ===========================================================================
 
-TEST_CASE( "perf_large: erase 50k nodes", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: erase 20k nodes", "[pjson_db_pmm][perf_large]" )
 {
     reset_pam_large();
     pjson_db_pmm db;
@@ -229,7 +229,7 @@ TEST_CASE( "perf_large: erase 50k nodes", "[pjson_db_pmm][perf_large]" )
     std::printf( "[perf_large] erase %u nodes: %lld ms\n", LARGE_PUT_N, ms );
 
     REQUIRE( !db.exists( "/todel/k_000000" ) );
-    REQUIRE( !db.exists( "/todel/k_049999" ) );
+    REQUIRE( !db.exists( "/todel/k_019999" ) );
 }
 
 // ===========================================================================
@@ -381,10 +381,10 @@ TEST_CASE( "perf_large: put_ref and resolve_all_refs with 10k refs", "[pjson_db_
 }
 
 // ===========================================================================
-// 9. search_strings() — полнотекстовый поиск по ключам
+// 9. search_strings() — полнотекстовый поиск по 20k ключам
 // ===========================================================================
 
-TEST_CASE( "perf_large: search_strings over 50k keys", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: search_strings over 20k keys", "[pjson_db_pmm][perf_large]" )
 {
     reset_pam_large();
     pjson_db_pmm db;
@@ -399,10 +399,10 @@ TEST_CASE( "perf_large: search_strings over 50k keys", "[pjson_db_pmm][perf_larg
 
     // Поиск подстроки в интернированных ключах.
     auto                                   t0      = perf_clk::now();
-    std::vector<pstringview_search_result> result1 = db.search_strings( "k_025" );
+    std::vector<pstringview_search_result> result1 = db.search_strings( "k_010" );
     long long                              ms1     = elapsed_ms( t0 );
 
-    std::printf( "[perf_large] search_strings \"k_025\" over %u keys: %lld ms (%zu matches)\n", LARGE_PUT_N, ms1,
+    std::printf( "[perf_large] search_strings \"k_010\" over %u keys: %lld ms (%zu matches)\n", LARGE_PUT_N, ms1,
                  result1.size() );
 
     REQUIRE( result1.size() > 0 );
@@ -440,10 +440,10 @@ TEST_CASE( "perf_large: search_node_strings over 10k string nodes", "[pjson_db_p
 }
 
 // ===========================================================================
-// 11. update_metrics() — пересчёт статистики после 50k узлов
+// 11. update_metrics() — пересчёт статистики после 20k узлов
 // ===========================================================================
 
-TEST_CASE( "perf_large: update_metrics after 50k nodes", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: update_metrics after 20k nodes", "[pjson_db_pmm][perf_large]" )
 {
     reset_pam_large();
     pjson_db_pmm db;
@@ -503,10 +503,10 @@ TEST_CASE( "perf_large: save to file after 10k nodes", "[pjson_db_pmm][perf_larg
 }
 
 // ===========================================================================
-// 13. put() с обновлением существующих значений (overwrite)
+// 13. put() с обновлением существующих значений (overwrite, 20k)
 // ===========================================================================
 
-TEST_CASE( "perf_large: overwrite 50k existing nodes", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: overwrite 20k existing nodes", "[pjson_db_pmm][perf_large]" )
 {
     reset_pam_large();
     pjson_db_pmm db;
@@ -539,10 +539,10 @@ TEST_CASE( "perf_large: overwrite 50k existing nodes", "[pjson_db_pmm][perf_larg
 }
 
 // ===========================================================================
-// 14. Массовая вставка: без ReserveSlots vs с ReserveSlots
+// 14. Массовая вставка 20k: без ReserveSlots vs с ReserveSlots
 // ===========================================================================
 
-TEST_CASE( "perf_large: ReserveSlots impact on 50k insert", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: ReserveSlots impact on 20k insert", "[pjson_db_pmm][perf_large]" )
 {
     // Вставка БЕЗ резервирования.
     long long ms_without = 0;
@@ -625,10 +625,10 @@ TEST_CASE( "perf_large: deep path addressing (depth=10)", "[pjson_db_pmm][perf_l
 }
 
 // ===========================================================================
-// 16. Полный жизненный цикл — put/get/update/erase 50k узлов
+// 16. Полный жизненный цикл — put/get/update/erase 20k узлов
 // ===========================================================================
 
-TEST_CASE( "perf_large: full lifecycle with 50k nodes", "[pjson_db_pmm][perf_large]" )
+TEST_CASE( "perf_large: full lifecycle with 20k nodes", "[pjson_db_pmm][perf_large]" )
 {
     reset_pam_large();
     pjson_db_pmm db;
@@ -719,5 +719,5 @@ TEST_CASE( "perf_large: full lifecycle with 50k nodes", "[pjson_db_pmm][perf_lar
 
     // Проверка: все узлы удалены.
     REQUIRE( !db.exists( "/lifecycle/k_000000" ) );
-    REQUIRE( !db.exists( "/lifecycle/k_049999" ) );
+    REQUIRE( !db.exists( "/lifecycle/k_019999" ) );
 }
