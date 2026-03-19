@@ -763,8 +763,8 @@ inline void node_set_string( uintptr_t node_off, const char* s )
             n->string_val.free_data();
             // free_data() может вызвать deallocate, но не allocate — re-resolve не нужен.
         }
-        n->tag  = node_tag::string;
-        n->_pad = 0;
+        n->tag        = node_tag::string;
+        n->_pad       = 0;
         n->string_val = PamManager::pstring{};
     }
 
