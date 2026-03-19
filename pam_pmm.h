@@ -422,10 +422,10 @@ template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullpt
 
     uintptr_t obj_off = pptr_to_offset( obj_pptr );
 
-    // Инициализируем объект нулями.
+    // Инициализируем объект нулями (T гарантированно trivially copyable по static_assert).
     T* obj = obj_pptr.resolve();
     if ( obj != nullptr )
-        std::memset( obj, 0, sizeof( T ) );
+        std::memset( static_cast<void*>( obj ), 0, sizeof( T ) );
 
     // Перезапрашиваем указатель на реестр после аллокации.
     reg = pam_pmm_get_registry();
@@ -493,10 +493,10 @@ template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, con
 
     uintptr_t arr_off = pptr_to_offset( arr_pptr );
 
-    // Инициализируем массив нулями.
+    // Инициализируем массив нулями (T гарантированно trivially copyable по static_assert).
     T* arr = arr_pptr.resolve();
     if ( arr != nullptr )
-        std::memset( arr, 0, sizeof( T ) * count );
+        std::memset( static_cast<void*>( arr ), 0, sizeof( T ) * count );
 
     // Перезапрашиваем указатель на реестр после аллокации.
     reg = pam_pmm_get_registry();
