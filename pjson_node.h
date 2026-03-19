@@ -235,6 +235,22 @@ struct object_items_range; ///< Диапазон для items()
 struct array_range;        ///< Диапазон для range-based for по массиву
 
 // ---------------------------------------------------------------------------
+// Предварительные объявления helpers для бинарного поиска (Фаза 16, Задача 16.2)
+// ---------------------------------------------------------------------------
+// Необходимы до объявления node_view, чтобы node_view::at(const char*)
+// мог вызывать node_object_find_key.
+
+/// Результат бинарного поиска по объектному ключу.
+struct object_find_result
+{
+    uintptr_t index; ///< Индекс найденного элемента (== size при отсутствии ключа)
+    bool      found; ///< true если ключ найден
+};
+
+/// Бинарный поиск ключа в отсортированном массиве object_entry (Задача 16.2).
+inline object_find_result node_object_find_key( uintptr_t data_off, uintptr_t sz, const char* key );
+
+// ---------------------------------------------------------------------------
 // node_view — безопасный accessor для чтения узлов (Задача 3.4)
 // ---------------------------------------------------------------------------
 //
@@ -460,35 +476,14 @@ struct node_view
         if ( n->object_val.size == 0 || n->object_val.data_off == 0 )
             return node_view{};
 
-        uintptr_t           sz       = n->object_val.size;
-        uintptr_t           data_off = n->object_val.data_off;
-        const object_entry* entries  = pmm_resolve<object_entry>( data_off );
+        // Делегируем бинарный поиск в node_object_find_key (Задача 16.2).
+        auto result = node_object_find_key( n->object_val.data_off, n->object_val.size, key );
+        if ( !result.found )
+            return node_view{};
+        const object_entry* entries = pmm_resolve<object_entry>( n->object_val.data_off );
         if ( entries == nullptr )
             return node_view{};
-
-        // Бинарный поиск по ключу (лексикографический порядок).
-        uintptr_t lo = 0, hi = sz;
-        while ( lo < hi )
-        {
-            uintptr_t mid         = ( lo + hi ) / 2;
-            entries               = pmm_resolve<object_entry>( data_off );
-            const object_entry& e = entries[mid];
-            int                 cmp;
-            if ( e.key_chars_offset == 0 )
-                cmp = ( key[0] == '\0' ) ? 0 : 1;
-            else
-            {
-                const char* ks = pmm_resolve<char>( e.key_chars_offset );
-                cmp            = ( ks != nullptr ) ? std::strcmp( ks, key ) : -1;
-            }
-            if ( cmp < 0 )
-                lo = mid + 1;
-            else if ( cmp > 0 )
-                hi = mid;
-            else
-                return node_view{ entries[mid].value };
-        }
-        return node_view{};
+        return node_view{ entries[result.index].value };
     }
 
     /// Получить ключ i-го поля объекта (для итерации).
@@ -640,6 +635,88 @@ inline void node_set_container_empty( uintptr_t node_off, node_tag tag )
     n->array_val.size     = 0;
     n->array_val.capacity = 0;
     n->array_val.data_off = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Вспомогательные функторы для сортированного массива object_entry (Фаза 16, Задача 16.2)
+// ---------------------------------------------------------------------------
+
+/// Извлечение ключа (chars_offset) из object_entry для pmem_array_insert_sorted.
+struct object_entry_key_of
+{
+    uintptr_t operator()( const object_entry& e ) const { return e.key_chars_offset; }
+};
+
+/// Лексикографическое сравнение ключей по chars_offset для pmem_array_insert_sorted.
+struct object_entry_less
+{
+    bool operator()( uintptr_t a_offset, uintptr_t b_offset ) const
+    {
+        if ( a_offset == 0 && b_offset == 0 )
+            return false;
+        if ( a_offset == 0 )
+            return true; // "" < any non-empty
+        if ( b_offset == 0 )
+            return false;
+        const char* a = pmm_resolve<char>( a_offset );
+        const char* b = pmm_resolve<char>( b_offset );
+        if ( a == nullptr || b == nullptr )
+            return false;
+        return std::strcmp( a, b ) < 0;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Бинарный поиск по ключу в отсортированном массиве object_entry (Фаза 16, Задача 16.2)
+// ---------------------------------------------------------------------------
+
+/// Реализация бинарного поиска ключа key в отсортированном массиве object_entry.
+/// data_off — смещение массива object_entry в ПАП, sz — число элементов.
+/// Возвращает object_find_result { index, found }.
+/// Делегирует три ранее дублировавшихся реализации бинарного поиска.
+inline object_find_result node_object_find_key( uintptr_t data_off, uintptr_t sz, const char* key )
+{
+    uintptr_t lo = 0, hi = sz;
+    while ( lo < hi )
+    {
+        uintptr_t            mid     = ( lo + hi ) / 2;
+        const object_entry* entries = pmm_resolve<object_entry>( data_off );
+        if ( entries == nullptr )
+            return { sz, false };
+        const object_entry& e = entries[mid];
+        int                 cmp;
+        if ( e.key_chars_offset == 0 )
+            cmp = ( key[0] == '\0' ) ? 0 : 1;
+        else
+        {
+            const char* ks = pmm_resolve<char>( e.key_chars_offset );
+            cmp            = ( ks != nullptr ) ? std::strcmp( ks, key ) : -1;
+        }
+        if ( cmp < 0 )
+            lo = mid + 1;
+        else if ( cmp > 0 )
+            hi = mid;
+        else
+            return { mid, true };
+    }
+    return { sz, false };
+}
+
+// ---------------------------------------------------------------------------
+// Шаблонный helper для безопасного разрешения узла с проверкой тега (Фаза 16, Задача 16.3)
+// ---------------------------------------------------------------------------
+
+/// Разрешить узел по смещению id и проверить, что тег == expected_tag.
+/// Возвращает указатель на узел (nullptr при невалидном смещении или несовпадении тега).
+/// Устраняет дублирование паттерна «resolve + tag check» в методах pjson_db_pmm.
+inline node* node_resolve_checked( node_id id, node_tag expected_tag )
+{
+    if ( id == 0 )
+        return nullptr;
+    node* n = pmm_resolve<node>( id );
+    if ( n == nullptr || n->tag != expected_tag )
+        return nullptr;
+    return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -912,32 +989,15 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     uintptr_t sz       = n->object_val.size;
     uintptr_t data_off = n->object_val.data_off;
 
-    // Ищем существующий ключ через бинарный поиск по key_chars_offset.
+    // Ищем существующий ключ через бинарный поиск (Задача 16.2).
     if ( sz > 0 && data_off != 0 )
     {
-        object_entry* entries = pmm_resolve<object_entry>( data_off );
-        uintptr_t     lo = 0, hi = sz;
-        while ( lo < hi )
+        auto find_result = node_object_find_key( data_off, sz, key );
+        if ( find_result.found )
         {
-            uintptr_t mid = ( lo + hi ) / 2;
-            entries       = pmm_resolve<object_entry>( data_off );
-            if ( entries == nullptr )
-                break;
-            const object_entry& e = entries[mid];
-            int                 cmp;
-            if ( e.key_chars_offset == 0 )
-                cmp = ( key[0] == '\0' ) ? 0 : 1;
-            else
-            {
-                const char* ks = pmm_resolve<char>( e.key_chars_offset );
-                cmp            = ( ks != nullptr ) ? std::strcmp( ks, key ) : -1;
-            }
-            if ( cmp < 0 )
-                lo = mid + 1;
-            else if ( cmp > 0 )
-                hi = mid;
-            else
-                return entries[mid].value; // ключ существует — возвращаем slot
+            const object_entry* entries = pmm_resolve<object_entry>( data_off );
+            if ( entries != nullptr )
+                return entries[find_result.index].value; // ключ существует — возвращаем slot
         }
     }
 
@@ -963,31 +1023,7 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
         return slot_off;
 
     // Вставляем новую запись в отсортированный массив object_entry.
-    // Используем pmem_array_insert_sorted с KeyOf и Less для object_entry.
-    struct ObjKeyOf
-    {
-        uintptr_t operator()( const object_entry& e ) const { return e.key_chars_offset; }
-    };
-    struct ObjLess
-    {
-        // Сравниваем ключи лексикографически через c_str().
-        // Оба chars_offset должны указывать на интернированные строки.
-        bool operator()( uintptr_t a_offset, uintptr_t b_offset ) const
-        {
-            if ( a_offset == 0 && b_offset == 0 )
-                return false;
-            if ( a_offset == 0 )
-                return true; // "" < any non-empty
-            if ( b_offset == 0 )
-                return false;
-            const char* a = pmm_resolve<char>( a_offset );
-            const char* b = pmm_resolve<char>( b_offset );
-            if ( a == nullptr || b == nullptr )
-                return false;
-            return std::strcmp( a, b ) < 0;
-        }
-    };
-
+    // Используем общие функторы object_entry_key_of / object_entry_less (Задача 16.2).
     object_entry new_entry;
     new_entry.key_length       = key_result.length;
     new_entry.key_chars_offset = key_result.chars_offset;
@@ -999,7 +1035,8 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     uintptr_t hdr_off = pam_pmm_ptr_to_offset(
         reinterpret_cast<pmem_array_hdr*>( &( pmm_resolve<node>( node_off )->object_val.size ) ) );
 
-    pmem_array_insert_sorted<object_entry, ObjKeyOf, ObjLess>( hdr_off, new_entry, ObjKeyOf{}, ObjLess{} );
+    pmem_array_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
+        hdr_off, new_entry, object_entry_key_of{}, object_entry_less{} );
 
     return slot_off;
 }
