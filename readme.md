@@ -35,7 +35,7 @@ C++17 header-only библиотека для работы с JSON в перси
 | **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок (Фаза 12) |
 | **Глубокое копирование** | `node_clone()` + `pjson_db::clone()` — создание полных копий поддеревьев JSON в ПАП (Фаза 13) |
 | **PMM интеграция** | Подключена библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — единственный бэкенд ПАП (Фаза 14); утилита миграции `pam_migrate` (Задача 14.9); устаревший код ПАМ удалён (Задача 14.10); все тесты и демо адаптированы для PMM (Задача 14.11) |
-| **Консолидация** | Устранение дублирования между оригинальными `.h` и `_pmm.h` файлами (Фаза 15); `_pmm.h` — канонические реализации, оригинальные файлы — тонкие обёртки-алиасы; `pmem_array.h` → `pmem_array_pmm.h` (Задача 15.1); `pvector.h` → `pvector_pmm.h` (Задача 15.2); `pmap.h` → `pmap_pmm.h` (Задача 15.3); `pstring.h` → `pstring_pmm.h` (Задача 15.4) |
+| **Консолидация** | Устранение дублирования между оригинальными `.h` и `_pmm.h` файлами (Фаза 15) ✅; `_pmm.h` — канонические реализации, оригинальные файлы — тонкие обёртки-алиасы; `pmem_array.h` → `pmem_array_pmm.h` (Задача 15.1); `pvector.h` → `pvector_pmm.h` (Задача 15.2); `pmap.h` → `pmap_pmm.h` (Задача 15.3); `pstring.h` → `pstring_pmm.h` (Задача 15.4); `pstringview.h` → `pstringview_pmm.h` (Задача 15.5); `pallocator.h` → `pallocator_pmm.h` (Задача 15.6); `pjson_pool.h` → `pjson_pool_pmm.h` (Задача 15.7) |
 
 ---
 
@@ -98,6 +98,7 @@ C++17 header-only библиотека для работы с JSON в перси
 ├─────────────────────────────────────────────┤
 │   Слой C: pjson_node + pjson_pool           │
 │   (модель узлов, пул аллокации)             │
+│   pjson_pool.h → обёртка (Фаза 15) ✅      │
 ├─────────────────────────────────────────────┤
 │   Слой C: pjson_codec                       │
 │   (парсинг, сериализация, base64)           │
@@ -107,6 +108,8 @@ C++17 header-only библиотека для работы с JSON в перси
 │   pmem_array.h → обёртка (Фаза 15) ✅       │
 │   pmap.h → обёртка (Фаза 15) ✅             │
 │   pstring.h → обёртка (Фаза 15) ✅          │
+│   pstringview.h → обёртка (Фаза 15) ✅      │
+│   pallocator.h → обёртка (Фаза 15) ✅       │
 ├─────────────────────────────────────────────┤
 │   Слой A: PMM (Фаза 14) ✅                   │
 │   PersistMemoryManager: новый бэкенд ПАП    │
@@ -115,6 +118,7 @@ C++17 header-only библиотека для работы с JSON в перси
 │   pmem_array_pmm.h: массивы (каноник) ✅    │
 │   pvector.h → обёртка (Фаза 15) ✅          │
 │   pmap_pmm.h: карта (каноник) ✅            │
+│   pstringview_pmm.h: строки (каноник) ✅    │
 │   pjson_pool_pmm.h: пул узлов на PMM ✅     │
 │   pam_pmm.h: фасад ПАМ на PMM ✅            │
 │   fptr_pmm.h: персистный указатель PMM ✅   │
@@ -149,10 +153,10 @@ C++17 header-only библиотека для работы с JSON в перси
 | `pvector.h` | B | Обёртка-алиас для `pvector_pmm.h` (Задача 15.2): `pvector<T>` = `pvector_pmm<T>` |
 | `pmap.h` | B | Обёртка-алиас для `pmap_pmm.h` (Задача 15.3): `pmap<K,V>` = `pmap_pmm<K,V>`, `pmap_entry<K,V>` = `pmap_entry_pmm<K,V>` |
 | `pstring.h` | B | Обёртка-алиас для `pstring_pmm.h` (Задача 15.4): `pstring` = `pstring_pmm` |
-| `pstringview.h` | B | Интернированная read-only строка + персистный словарь (`pstringview_table`); смещение таблицы хранится в `pam_header.string_table_offset`; содержит `pam_intern_string()`, `pam_search_strings()`, `pam_all_strings()` |
-| `pallocator.h` | B | STL-совместимый аллокатор поверх ПАМ |
+| `pstringview.h` | B | Обёртка-алиас для `pstringview_pmm.h` (Задача 15.5): `pstringview` = `pstringview_pmm`; интернированная read-only строка + словарь |
+| `pallocator.h` | B | Обёртка-алиас для `pallocator_pmm.h` (Задача 15.6): `pallocator<T>` = `pallocator_pmm<T>` |
 | `pjson_node.h` | C | Новая модель узлов JSON (Фаза 3): `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; вспомогательные функции init/set/assign/push_back/insert; итераторы: `node_view_iterator`, `object_iterator`, `object_items_range`, `array_range` (Фаза 10); коды ошибок: `node_error`, `NODE_ERROR_BASE`, `node_view_error()`, `node_view::is_error()`, `node_view::error()` (Фаза 11); сообщения об ошибках: `node_error_message()`, `node_view::error_message()` (Фаза 12); глубокое копирование: `node_clone()` (Фаза 13) |
-| `pjson_pool.h` | C | Пул узлов JSON (Фаза 4): `pjson_pool` — быстрая аллокация O(1) через `pvector<node>` + free-list на основе `node_tag::_free`; API: `alloc()`, `free()`, `get()` |
+| `pjson_pool.h` | C | Обёртка над `pjson_pool_pmm.h` (Задача 15.7): struct-обёртка с member-функциями, делегирующими в `pjson_pool_pmm_*`; API: `alloc()`, `free()`, `get()` |
 | `pjson_codec.h` | C | Новая сериализация/десериализация (Фаза 5): парсер/сериализатор для `node_id`-модели; поддержка `$ref` и `$base64`; Base64 кодек; функции: `node_to_string()`, `node_from_string()`, `node_parse()` |
 | `pjson_db.h` | D | Менеджер персистной JSON-БД (Фазы 6–8, 13): единственный заголовок для конечного пользователя (Тр.18); path-адресация (`/a/b/0/c`), `put`/`get`/`erase`/`exists`, разыменование `$ref`, `resolve_all_refs()`, персистные метрики (`db_metrics`) через `/$metrics`, `update_metrics()`, pmap-интерфейс (`operator[]`, `find`, `insert`), сквозной поиск по строкам (`search_strings`, `search_node_strings`), сериализация, глубокое копирование (`clone()`) |
 | `main.cpp` | — | Демонстрационная программа |
