@@ -128,6 +128,56 @@ class pjson_db_pmm
     }
 
     // -----------------------------------------------------------------------
+    // Пакетные операции (batch)
+    // -----------------------------------------------------------------------
+
+    /// Начать пакетную операцию.
+    /// Пока активна хотя бы одна пакетная операция, пересчёт метрик
+    /// откладывается. Вызовы batch_begin/batch_end могут быть вложенными.
+    void batch_begin() { ++_batch_depth; }
+
+    /// Завершить пакетную операцию.
+    /// Когда глубина вложенности возвращается к нулю, выполняется
+    /// однократный пересчёт метрик.
+    void batch_end()
+    {
+        if ( _batch_depth == 0 )
+            return;
+        --_batch_depth;
+        if ( _batch_depth == 0 )
+            _update_metrics_after_mutation();
+    }
+
+    /// Проверить, активна ли пакетная операция.
+    bool in_batch() const { return _batch_depth > 0; }
+
+    /// RAII-обёртка для пакетных операций.
+    /// При создании вызывает batch_begin(), при разрушении — batch_end().
+    /// Использование:
+    ///   {
+    ///       auto guard = db.batch();
+    ///       db.put("/a", 1);
+    ///       db.put("/b", 2);
+    ///   } // метрики пересчитываются один раз здесь
+    class batch_guard
+    {
+      public:
+        explicit batch_guard( pjson_db_pmm& db ) : _db( db ) { _db.batch_begin(); }
+        ~batch_guard() { _db.batch_end(); }
+
+        batch_guard( const batch_guard& )            = delete;
+        batch_guard& operator=( const batch_guard& ) = delete;
+        batch_guard( batch_guard&& )                 = delete;
+        batch_guard& operator=( batch_guard&& )      = delete;
+
+      private:
+        pjson_db_pmm& _db;
+    };
+
+    /// Создать RAII-обёртку для пакетной операции.
+    batch_guard batch() { return batch_guard{ *this }; }
+
+    // -----------------------------------------------------------------------
     // Корневой узел
     // -----------------------------------------------------------------------
 
@@ -628,6 +678,8 @@ class pjson_db_pmm
     uintptr_t pmm_named_count() const { return pam_pmm_named_count(); }
 
   private:
+    uintptr_t _batch_depth = 0; ///< Глубина вложенности пакетных операций.
+
     // -----------------------------------------------------------------------
     // Вспомогательные методы: пул и корень
     // -----------------------------------------------------------------------
@@ -1223,6 +1275,8 @@ class pjson_db_pmm
 
     void _update_metrics_after_mutation()
     {
+        if ( _batch_depth > 0 )
+            return; // откладываем пересчёт до завершения пакетной операции
         db_metrics_pmm* m = _get_metrics_struct();
         if ( m == nullptr )
             return;
