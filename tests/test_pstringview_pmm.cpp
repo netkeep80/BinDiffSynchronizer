@@ -418,6 +418,7 @@ TEST_CASE( "pstringview_pmm: survives PAM Save and Load (persistence)", "[pstrin
     }
 
     pjson::pstringview_pmm_reset();
+    pjson::PamManager::destroy();
     rm_pstringview_file( fname );
 }
 
