@@ -88,7 +88,7 @@ C++20 header-only библиотека для работы с JSON в перси
 │   (парсинг, сериализация, base64)           │
 ├─────────────────────────────────────────────┤
 │   Слой B: pstringview_pmm                   │
-│   + pmem_array_pmm + pvector_pmm + pmap_pmm │
+│   + pvector_pmm + pmap_pmm                  │
 │   (readonly/readwrite строки, массивы)       │
 ├─────────────────────────────────────────────┤
 │   Слой A: PMM                               │
@@ -106,9 +106,9 @@ C++20 header-only библиотека для работы с JSON в перси
 |------|------|----------|
 | `pam_pmm_config.h` | A | Конфигурация менеджера PMM: определяет `PamManager` |
 | `pam_adapter.h` | A | Адаптер pptr<T> ↔ uintptr_t: `pptr_to_offset()`, `offset_to_pptr()`, `pmm_resolve<T>()` |
-| `pmem_array_pmm.h` | A | Персистный массив: `pmem_array_hdr_pmm`, шаблонные функции `pmem_array_pmm_*` |
-| `pvector_pmm.h` | A | Динамический массив: `pvector_pmm<T>` |
-| `pmap_pmm.h` | A | Персистная карта: `pmap_pmm<K,V>` — sorted array |
+| ~~`pmem_array_pmm.h`~~ | A | Удалён (Issue #145, План 2.2): используйте `PamManager::parray<T>` напрямую |
+| `pvector_pmm.h` | A | Динамический массив: `pvector_pmm<T>` — обёртка над `PamManager::parray<T>` |
+| `pmap_pmm.h` | A | Персистная карта: `pmap_pmm<K,V>` — sorted array на `PamManager::parray<Entry>` |
 | ~~`pstring_pmm.h`~~ | A | Удалён (Issue #144, План 2.1): используйте `PamManager::pstring` напрямую |
 | `pstringview_pmm.h` | A | Интернированная строка: `pstringview_pmm` — адаптер для `pmm::pstringview`, O(1) сравнение |
 | `pjson_pool_pmm.h` | C | Пул узлов: `pjson_pool_pmm` — аллокация O(1) через PMM + free-list |
@@ -136,9 +136,9 @@ enum class node_tag : uint32_t {
     uinteger,   // uint64_t
     real,       // double
     string,     // PamManager::pstring (readwrite, изменяемое строковое значение)
-    binary,     // pvector_pmm<uint8_t> в ПАП ($base64 при сериализации)
-    array,      // pvector_pmm<node_id>
-    object,     // pmap_pmm<pstringview_pmm, node_id> — ключи readonly (pstringview_pmm)
+    binary,     // PamManager::parray<uint8_t> в ПАП ($base64 при сериализации)
+    array,      // PamManager::parray<node_id>
+    object,     // PamManager::parray<object_entry> — sorted array, ключи readonly (pstringview_pmm)
     ref,        // pstringview_pmm path (readonly) + node_id target ($ref при сериализации)
 };
 ```

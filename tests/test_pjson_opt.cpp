@@ -470,8 +470,8 @@ TEST_CASE( "pjson opt F3: pstringview deduplicates object keys", "[pjson][opt][f
     node_set_int( s2, 2 );
 
     // Оба объекта должны использовать одно и то же смещение для ключа "shared_key".
-    auto* e1 = pmm_resolve<object_entry>( pmm_resolve<node>( fn.addr() )->object_val.data_off );
-    auto* e2 = pmm_resolve<object_entry>( pmm_resolve<node>( fn2.addr() )->object_val.data_off );
+    auto* e1 = pmm_resolve<node>( fn.addr() )->object_val.data();
+    auto* e2 = pmm_resolve<node>( fn2.addr() )->object_val.data();
     // key_chars_offset одинаков для одинаковых ключей (дедупликация через pstringview_table).
     REQUIRE( e1->key_chars_offset == e2->key_chars_offset );
 

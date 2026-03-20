@@ -20,7 +20,7 @@
 // Важно: pjson_node.h должен быть включен первым, чтобы определить ::node
 // до включения pam_adapter.h.
 #include "pjson_node.h"
-#include "pmem_array_pmm.h" // Для pmm_resolve, pmm_resolve_const, pptr_to_offset, offset_to_pptr
+#include "pam_adapter.h" // Для pmm_resolve, pmm_resolve_const, pptr_to_offset, offset_to_pptr
 #include <cstdint>
 #include <cstring>
 #include <type_traits>

@@ -1010,11 +1010,8 @@ class pjson_db_pmm
                     _free_node_tree( elem.id );
             }
             node* n = pmm_resolve<node>( id );
-            if ( n != nullptr && n->array_val.data_off != 0 )
-            {
-                auto arr_pptr = offset_to_pptr<node_id>( n->array_val.data_off );
-                PamManager::template deallocate_typed<node_id>( arr_pptr );
-            }
+            if ( n != nullptr )
+                n->array_val.free_data();
             break;
         }
         case node_tag::object:
@@ -1027,11 +1024,8 @@ class pjson_db_pmm
                     _free_node_tree( val.id );
             }
             node* n = pmm_resolve<node>( id );
-            if ( n != nullptr && n->object_val.data_off != 0 )
-            {
-                auto arr_pptr = offset_to_pptr<object_entry>( n->object_val.data_off );
-                PamManager::template deallocate_typed<object_entry>( arr_pptr );
-            }
+            if ( n != nullptr )
+                n->object_val.free_data();
             break;
         }
         case node_tag::string:
@@ -1046,11 +1040,8 @@ class pjson_db_pmm
         case node_tag::binary:
         {
             node* n = pmm_resolve<node>( id );
-            if ( n != nullptr && n->binary_val.data_off != 0 )
-            {
-                auto bin_pptr = offset_to_pptr<uint8_t>( n->binary_val.data_off );
-                PamManager::template deallocate_typed<uint8_t>( bin_pptr );
-            }
+            if ( n != nullptr )
+                n->binary_val.free_data();
             break;
         }
         case node_tag::ref:
@@ -1072,26 +1063,25 @@ class pjson_db_pmm
         if ( n == nullptr )
             return false;
 
-        uintptr_t sz = n->object_val.size;
-        if ( sz == 0 || n->object_val.data_off == 0 )
+        uintptr_t sz = n->object_val.size();
+        if ( sz == 0 )
             return false;
 
         // Делегируем бинарный поиск в node_object_find_key (Задача 16.2).
-        auto find_result = node_object_find_key( n->object_val.data_off, sz, key );
+        object_entry* entries = n->object_val.data();
+        if ( entries == nullptr )
+            return false;
+        auto find_result = node_object_find_key( entries, sz, key );
         if ( !find_result.found )
             return false;
         uintptr_t del_idx = find_result.index;
 
-        uintptr_t     data_off = n->object_val.data_off;
-        object_entry* entries  = pmm_resolve<object_entry>( data_off );
-        if ( entries == nullptr )
-            return false;
         for ( uintptr_t i = del_idx; i + 1 < sz; ++i )
             entries[i] = entries[i + 1];
 
         n = pmm_resolve<node>( obj_id );
         if ( n != nullptr )
-            n->object_val.size--;
+            n->object_val._size--;
 
         return true;
     }
@@ -1102,12 +1092,11 @@ class pjson_db_pmm
         if ( n == nullptr )
             return false;
 
-        uintptr_t sz = n->array_val.size;
+        uintptr_t sz = n->array_val.size();
         if ( idx >= sz )
             return false;
 
-        uintptr_t data_off = n->array_val.data_off;
-        node_id*  arr      = pmm_resolve<node_id>( data_off );
+        node_id* arr = n->array_val.data();
         if ( arr == nullptr )
             return false;
 
@@ -1117,7 +1106,7 @@ class pjson_db_pmm
 
         n = pmm_resolve<node>( arr_id );
         if ( n != nullptr )
-            n->array_val.size--;
+            n->array_val._size--;
 
         return true;
     }
@@ -1140,17 +1129,7 @@ class pjson_db_pmm
         new_entry.value            = value_id;
 
         // Задача 16.2: используем общие функторы object_entry_key_of / object_entry_less.
-        n = pmm_resolve<node>( obj_id );
-        if ( n == nullptr )
-            return false;
-
-        // object_val — это pmem_array_hdr_pmm напрямую, берём его адрес.
-        uintptr_t hdr_off = pam_pmm_ptr_to_offset( &( n->object_val ) );
-        if ( hdr_off == 0 )
-            return false;
-
-        pmem_array_pmm_insert_sorted<object_entry, object_entry_key_of, object_entry_less>(
-            hdr_off, new_entry, object_entry_key_of{}, object_entry_less{} );
+        parray_insert_sorted_object_entry( obj_id, new_entry );
 
         return true;
     }
@@ -1165,11 +1144,11 @@ class pjson_db_pmm
         if ( n == nullptr )
             return false;
 
-        uintptr_t current_size = n->array_val.size;
+        uintptr_t current_size = n->array_val.size();
 
         if ( idx < current_size )
         {
-            node_id* arr = pmm_resolve<node_id>( n->array_val.data_off );
+            node_id* arr = n->array_val.data();
             if ( arr != nullptr )
             {
                 arr[idx] = value_id;
@@ -1184,15 +1163,15 @@ class pjson_db_pmm
             n = pmm_resolve<node>( arr_id );
             if ( n == nullptr )
                 return false;
-            current_size = n->array_val.size;
+            current_size = n->array_val.size();
         }
 
         node_array_push_back( arr_id );
         n = pmm_resolve<node>( arr_id );
-        if ( n == nullptr || n->array_val.data_off == 0 )
+        if ( n == nullptr )
             return false;
 
-        node_id* arr = pmm_resolve<node_id>( n->array_val.data_off );
+        node_id* arr = n->array_val.data();
         if ( arr == nullptr )
             return false;
 

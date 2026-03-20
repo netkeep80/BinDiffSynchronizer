@@ -27,10 +27,11 @@ TEST_CASE( "pmap_entry_pmm<int,int>: is trivially copyable", "[pmap_pmm][layout]
 // ТЕСТЫ pmap_pmm — Layout
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: size is 3 * sizeof(void*)", "[pmap_pmm][layout]" )
+TEST_CASE( "pmap_pmm<int,int>: size is 12 bytes (parray)", "[pmap_pmm][layout]" )
 {
-    REQUIRE( sizeof( pmap_pmm<int, int> ) == 3 * sizeof( void* ) );
-    REQUIRE( sizeof( pmap_pmm<int, double> ) == 3 * sizeof( void* ) );
+    // pmap_pmm оборачивает PamManager::parray<Entry> = uint32_t * 3 = 12 байт
+    REQUIRE( sizeof( pmap_pmm<int, int> ) == 12u );
+    REQUIRE( sizeof( pmap_pmm<int, double> ) == 12u );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

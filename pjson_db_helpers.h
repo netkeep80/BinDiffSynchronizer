@@ -103,11 +103,11 @@ inline void pjson_count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64
         // Не обходим цель ref (избегаем дублирования счёта).
         break;
     case node_tag::binary:
-        // Считаем байты из binary_val.size.
+        // Считаем байты из binary_val.size().
         {
             const node* n = pmm_resolve<node>( id );
             if ( n != nullptr )
-                binary_bytes += static_cast<uint64_t>( n->binary_val.size );
+                binary_bytes += static_cast<uint64_t>( n->binary_val.size() );
         }
         break;
     default:

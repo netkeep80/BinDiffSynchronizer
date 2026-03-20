@@ -458,7 +458,7 @@ TEST_CASE( "pjson_codec: from_string for $base64 with data", "[pjson_codec][from
     // Проверяем содержимое.
     const node* n = pmm_resolve<node>( fv.addr() );
     REQUIRE( n != nullptr );
-    const uint8_t* data = pmm_resolve<uint8_t>( n->binary_val.data_off );
+    const uint8_t* data = n->binary_val.data();
     REQUIRE( data != nullptr );
     REQUIRE( data[0] == 0 );
     REQUIRE( data[1] == 1 );

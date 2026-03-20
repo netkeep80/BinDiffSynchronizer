@@ -120,8 +120,6 @@ struct pam_pmm_registry
 
 static_assert( std::is_trivially_copyable<pam_pmm_registry>::value,
                "pam_pmm_registry должен быть тривиально копируемым" );
-static_assert( sizeof( pam_pmm_registry ) == 6 * sizeof( void* ),
-               "pam_pmm_registry должен занимать 6 * sizeof(void*) байт" );
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ГЛОБАЛЬНОЕ СОСТОЯНИЕ PAM_PMM

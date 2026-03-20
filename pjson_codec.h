@@ -905,14 +905,14 @@ inline void node_serialize_to( node_id id, std::string& out )
     {
         // binary -> {"$base64": "..."}
         const node* n = pmm_resolve<node>( id );
-        if ( n == nullptr || n->binary_val.size == 0 )
+        if ( n == nullptr || n->binary_val.size() == 0 )
         {
             out += "{\"$base64\":\"\"}";
         }
         else
         {
-            const uint8_t* data = pmm_resolve<uint8_t>( n->binary_val.data_off );
-            std::string    b64  = base64_encode( data, n->binary_val.size );
+            const uint8_t* data = n->binary_val.data();
+            std::string    b64  = base64_encode( data, n->binary_val.size() );
             out += "{\"$base64\":\"";
             out += b64;
             out += "\"}";
