@@ -148,14 +148,20 @@ JSON-базу данных поверх PMM. Текущая архитектур
 - Это делает pmm::pmap несовместимой с персистентным save/reload — после загрузки файла данные карты теряются
 - Sorted-array подход корректно сохраняет и восстанавливает данные, так как использует только содержимое блока данных parray
 
-### 2.4 Замена pjson_pool_pmm на pmm::ppool
+### 2.4 Замена pjson_pool_pmm на pmm::ppool ✅
 
-**После pmm 3.6:** pmm будет предоставлять `ppool<T, ManagerT>`.
+**Выполнено (Issue #166):** `pjson_pool_pmm` заменён на `PamManager::ppool<node>` (pmm::ppool<node, PamManager>).
 
-**Действия:**
-- Заменить `pjson_pool_pmm` на `pmm::ppool<pjson_node, PamManager>`
-- Обновить `pjson_node` — аллокация/деаллокация через `ppool`
-- Удалить `pjson_pool_pmm.h`
+**Что сделано:**
+- `pjson_pool_pmm` переопределён как алиас `PamManager::ppool<node>` — пул использует чанковую аллокацию O(1) из pmm::ppool вместо ручного массива с удвоением
+- Функции `pjson_pool_pmm_alloc()` / `_free()` делегируют в `ppool::allocate()` / `ppool::deallocate()`
+- Конверсия node* ↔ node_id (байтовое смещение) через `node_ptr_to_id()` и `pmm_resolve<node>()`
+- `pjson_pool_pmm_init()` использует placement new для корректной инициализации ppool (включая `_objects_per_chunk = 64`)
+- Защита от zero-init: `pjson_pool_pmm_alloc()` устанавливает `_objects_per_chunk` по умолчанию, если он равен 0 (после `pam_pmm_create` memset)
+- Метрики: `total_count` → `ppool::total_capacity()`, `used_count` → `ppool::allocated_count()`, `free_in_pool` → `ppool::free_count()`
+- Тесты обновлены: `total_count` теперь отражает чанковую ёмкость (`>=` вместо `==`), удалён тест на `node_tag::_free`
+- `pjson_pool_pmm.h` сохранён как тонкая обёртка над `PamManager::ppool<node>` (не удалён, т.к. предоставляет node_id-совместимый API)
+- Все 593 теста проходят
 
 ### 2.5 Упрощение pstringview_pmm
 
