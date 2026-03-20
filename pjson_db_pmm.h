@@ -1129,11 +1129,7 @@ class pjson_db_pmm
         new_entry.value            = value_id;
 
         // Задача 16.2: используем общие функторы object_entry_key_of / object_entry_less.
-        n = pmm_resolve<node>( obj_id );
-        if ( n == nullptr )
-            return false;
-
-        parray_insert_sorted_object_entry( n->object_val, new_entry );
+        parray_insert_sorted_object_entry( obj_id, new_entry );
 
         return true;
     }

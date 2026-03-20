@@ -645,10 +645,20 @@ struct object_entry_less
 
 /// Вставить object_entry в отсортированный parray (вставка или обновление).
 /// Выполняет бинарный поиск, вставляет со сдвигом или обновляет существующий.
-inline void parray_insert_sorted_object_entry( PamManager::parray<object_entry>& arr, const object_entry& value )
+/// Вставить object_entry в отсортированный parray. Безопасна при росте PMM-пула:
+/// push_back выполняется на стековой копии parray, результат записывается обратно
+/// в node после повторной резолвации node_off.
+/// @param node_off Смещение object-узла в ПАП (для переразрешения после push_back).
+/// @param value    Вставляемый object_entry.
+inline void parray_insert_sorted_object_entry( uintptr_t node_off, const object_entry& value )
 {
-    uintptr_t sz = arr.size();
-    uintptr_t lo = 0, hi = sz;
+    node* n = pmm_resolve<node>( node_off );
+    if ( n == nullptr )
+        return;
+
+    PamManager::parray<object_entry> arr = n->object_val;
+    uintptr_t                        sz  = arr.size();
+    uintptr_t                        lo = 0, hi = sz;
 
     // Бинарный поиск (lower_bound)
     {
@@ -677,12 +687,17 @@ inline void parray_insert_sorted_object_entry( PamManager::parray<object_entry>&
         {
             // Ключ найден — обновляем элемент
             arr.set( idx, value );
+            // Записываем обратно в node (set не вызывает аллокацию, но для единообразия).
+            n             = pmm_resolve<node>( node_off );
+            n->object_val = arr;
             return;
         }
     }
 
     // Нужно вставить новый элемент в позицию idx.
     // Добавляем пустой элемент в конец, затем сдвигаем.
+    // push_back может вызвать рост PMM-пула, инвалидируя все указатели.
+    // Работаем на стековой копии arr (безопасно).
     object_entry empty{};
     arr.push_back( empty );
 
@@ -694,6 +709,10 @@ inline void parray_insert_sorted_object_entry( PamManager::parray<object_entry>&
     // Записываем новый элемент.
     if ( raw != nullptr )
         raw[idx] = value;
+
+    // Записываем обновлённый parray обратно в node (после возможного роста пула).
+    n             = pmm_resolve<node>( node_off );
+    n->object_val = arr;
 }
 
 // ---------------------------------------------------------------------------
@@ -929,7 +948,15 @@ inline node_id node_array_push_back( uintptr_t node_off )
         return slot_off;
 
     // Добавляем slot_off в массив через parray::push_back.
-    n->array_val.push_back( slot_off );
+    // push_back может вызвать рост PMM-пула, инвалидируя n.
+    // Используем стековую копию parray для безопасности.
+    {
+        PamManager::parray<node_id> arr_copy = n->array_val;
+        arr_copy.push_back( slot_off );
+        // Переразрешаем node после возможного роста пула.
+        n            = pmm_resolve<node>( node_off );
+        n->array_val = arr_copy;
+    }
 
     return slot_off;
 }
@@ -991,7 +1018,7 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     new_entry.key_chars_offset = key_result.chars_offset;
     new_entry.value            = slot_off;
 
-    parray_insert_sorted_object_entry( n->object_val, new_entry );
+    parray_insert_sorted_object_entry( node_off, new_entry );
 
     return slot_off;
 }
@@ -1004,7 +1031,12 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
     node* n = pmm_resolve<node>( node_off );
     if ( n == nullptr || n->tag != node_tag::binary )
         return;
-    n->binary_val.push_back( byte );
+    // push_back может вызвать рост PMM-пула, инвалидируя n.
+    // Используем стековую копию parray для безопасности.
+    PamManager::parray<uint8_t> arr_copy = n->binary_val;
+    arr_copy.push_back( byte );
+    n             = pmm_resolve<node>( node_off );
+    n->binary_val = arr_copy;
 }
 
 // ---------------------------------------------------------------------------
