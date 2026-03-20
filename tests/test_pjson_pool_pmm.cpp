@@ -125,7 +125,7 @@ TEST_CASE( "pjson_pool_pmm_free: adds node to free-list (free_count increases)",
 
     uintptr_t pool_off = pjson_pool_pmm_create();
 
-    node_id   id         = pjson_pool_pmm_alloc( pool_off );
+    node_id   id               = pjson_pool_pmm_alloc( pool_off );
     uintptr_t free_after_alloc = pjson_pool_pmm_free_in_pool( pool_off );
 
     pjson_pool_pmm_free( pool_off, id );
@@ -176,7 +176,7 @@ TEST_CASE( "pjson_pool_pmm: realloc from free-list reuses freed slot", "[pjson_p
 
     uintptr_t pool_off = pjson_pool_pmm_create();
 
-    node_id id1 = pjson_pool_pmm_alloc( pool_off );
+    node_id   id1              = pjson_pool_pmm_alloc( pool_off );
     uintptr_t free_after_alloc = pjson_pool_pmm_free_in_pool( pool_off );
 
     pjson_pool_pmm_free( pool_off, id1 );
