@@ -280,7 +280,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         if ( lo + 1 < sz )
             std::memmove( raw + lo, raw + lo + 1, ( sz - lo - 1 ) * sizeof( Entry ) );
 
-        arr_._size--;
+        arr_.pop_back();
         return true;
     }
 

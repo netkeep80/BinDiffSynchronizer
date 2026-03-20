@@ -1,17 +1,16 @@
 #pragma once
 /**
  * @file pjson_pool_pmm.h
- * @brief Пул памяти для узлов pjson на базе PersistMemoryManager (Задача 14.5).
+ * @brief Пул памяти для узлов pjson на базе pmm::ppool (Issue #166, План 2.4).
  *
- * Пул узлов node для pjson на базе PersistMemoryManager (PMM).
+ * Пул узлов node для pjson на базе pmm::ppool<node, PamManager>.
  *
  * Принцип работы:
- *   - Пул хранит непрерывный массив узлов node в ПАП через PMM.
- *   - Свободные слоты помечаются тегом node_tag::_free и связываются
- *     через поле _free_next в free-list.
- *   - При аллокации: берём голову free-list (O(1)).
- *     Если free-list пуст — добавляем узел в конец массива (push_back), O(1) амортизированно.
- *   - При освобождении: узел помечается node_tag::_free и добавляется в голову free-list (O(1)).
+ *   - Пул использует pmm::ppool<node> для O(1) аллокации/деаллокации узлов.
+ *   - ppool выделяет крупные чанки из PMM и разбивает их на
+ *     гранулярно-выровненные слоты.
+ *   - Свободные слоты связаны через встроенный free-list в ppool.
+ *   - node_id = байтовое смещение узла в ПАП (формат совместим с остальной системой).
  *
  * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t
  * @see pjson_node.h — структура node и node_tag
@@ -29,44 +28,55 @@ namespace pjson
 {
 
 // ═══════════════════════════════════════════════════════════════════════════
-// pjson_pool_pmm — Пул памяти для узлов node на базе PMM (Задача 14.5)
+// pjson_pool_pmm — тип пула узлов на базе pmm::ppool (Issue #166, План 2.4)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Персистный пул для узлов node на базе PMM.
+ * @brief Персистный пул для узлов node на базе pmm::ppool.
  *
+ * pjson_pool_pmm — это алиас для PamManager::ppool<node>.
  * Структура живёт в ПАП; создаётся через pjson_pool_pmm_create().
  *
- * Внутренняя раскладка:
- *   nodes_size_     — текущее число узлов в массиве
- *   nodes_cap_      — ёмкость массива
- *   nodes_data_off_ — байтовое смещение массива node[] в ПАП
- *   free_head_      — node_id головы free-list (0 = пусто)
- *   free_count_     — число узлов в free-list
+ * pmm::ppool<node> обеспечивает:
+ *   - O(1) аллокацию через встроенный free-list / выделение нового чанка
+ *   - O(1) деаллокацию через возврат слота в free-list
+ *   - Гранулярное выравнивание слотов для корректной адресации через pptr
+ *   - Персистентность: все поля — POD, пригодны для хранения в ПАП
  *
  * node_id — смещение узла в ПАП (как везде в системе).
- * Для узлов из пула node_id == байтовое смещение узла в массиве nodes_data_off_.
+ * Преобразование: node* <-> node_id через base_ptr арифметику.
  */
-struct pjson_pool_pmm
-{
-    uintptr_t nodes_size_ = 0; ///< Число узлов в массиве
-    uintptr_t nodes_cap_  = 0; ///< Ёмкость массива
-    uintptr_t nodes_data_off_ = 0; ///< Байтовое смещение массива node[] в ПАП; 0 = не выделено
-
-    node_id   free_head_  = 0; ///< node_id головы free-list; 0 = пусто
-    uintptr_t free_count_ = 0; ///< Число узлов в free-list
-};
+using pjson_pool_pmm = PamManager::ppool<node>;
 
 static_assert( std::is_trivially_copyable<pjson_pool_pmm>::value, "pjson_pool_pmm должен быть тривиально копируемым" );
-static_assert( sizeof( pjson_pool_pmm ) == 5 * sizeof( uintptr_t ),
-               "pjson_pool_pmm должен занимать 5 * sizeof(uintptr_t) байт" );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Вспомогательные функции
+// Вспомогательная функция: node* -> node_id (байтовое смещение)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Инициализировать пул нулями (пустой пул).
+ * @brief Преобразовать указатель node* в node_id (байтовое смещение в ПАП).
+ *
+ * @param ptr Указатель на узел (из ppool::allocate()).
+ * @return node_id (байтовое смещение); 0 если ptr == nullptr.
+ */
+inline node_id node_ptr_to_id( const node* ptr ) noexcept
+{
+    if ( ptr == nullptr )
+        return 0;
+    const uint8_t* base = PamManager::backend().base_ptr();
+    return static_cast<node_id>( reinterpret_cast<const uint8_t*>( ptr ) - base );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Функции управления пулом
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @brief Инициализировать пул (пустой пул с корректными значениями по умолчанию).
+ *
+ * Использует placement new для вызова конструктора ppool по умолчанию,
+ * который устанавливает _objects_per_chunk = 64 и все остальные поля в 0.
  *
  * @param pool_off Байтовое смещение структуры pjson_pool_pmm в ПАП.
  */
@@ -76,122 +86,15 @@ inline void pjson_pool_pmm_init( uintptr_t pool_off )
         return;
     pjson_pool_pmm* pool = pmm_resolve<pjson_pool_pmm>( pool_off );
     if ( pool != nullptr )
-    {
-        pool->nodes_size_     = 0;
-        pool->nodes_cap_      = 0;
-        pool->nodes_data_off_ = 0;
-        pool->free_head_      = 0;
-        pool->free_count_     = 0;
-    }
-}
-
-/**
- * @brief Добавить новый null-узел в конец массива nodes_.
- *
- * Внутренняя функция для pjson_pool_pmm_alloc().
- * Возвращает node_id (байтовое смещение в ПАП) нового узла.
- *
- * @param pool_off Байтовое смещение структуры pjson_pool_pmm в ПАП.
- * @return node_id нового узла; 0 при ошибке.
- */
-inline node_id pjson_pool_pmm_push_node( uintptr_t pool_off )
-{
-    if ( pool_off == 0 )
-        return 0;
-
-    pjson_pool_pmm* pool = pmm_resolve<pjson_pool_pmm>( pool_off );
-    if ( pool == nullptr )
-        return 0;
-
-    uintptr_t sz  = pool->nodes_size_;
-    uintptr_t cap = pool->nodes_cap_;
-
-    if ( sz >= cap )
-    {
-        // Нужен grow: удваиваем ёмкость (начальная = 4).
-        uintptr_t new_cap = ( cap == 0 ) ? 4u : cap * 2u;
-
-        // Выделяем новый массив через PMM.
-        auto new_data_pptr = PamManager::template allocate_typed<node>( new_cap );
-        if ( new_data_pptr.is_null() )
-            return 0;
-
-        uintptr_t new_data_off = pptr_to_offset( new_data_pptr );
-
-        // Инициализируем новые слоты нулём.
-        node* new_raw = new_data_pptr.resolve();
-        if ( new_raw != nullptr )
-        {
-            for ( uintptr_t i = 0; i < new_cap; ++i )
-            {
-                new_raw[i].tag  = node_tag::null;
-                new_raw[i]._pad = 0;
-                std::memset( &new_raw[i].ref_val, 0, sizeof( new_raw[i].ref_val ) );
-            }
-        }
-
-        // Переразрешаем pool после аллокации.
-        pool = pmm_resolve<pjson_pool_pmm>( pool_off );
-        if ( pool == nullptr )
-            return 0;
-
-        // Копируем существующие узлы.
-        uintptr_t old_data_off = pool->nodes_data_off_;
-        uintptr_t old_size     = pool->nodes_size_;
-
-        if ( old_data_off != 0 && old_size > 0 )
-        {
-            const node* old_raw = pmm_resolve_const<node>( old_data_off );
-            new_raw             = pmm_resolve<node>( new_data_off );
-            if ( old_raw != nullptr && new_raw != nullptr )
-                std::memcpy( new_raw, old_raw, old_size * sizeof( node ) );
-
-            // Освобождаем старый массив.
-            auto old_pptr = offset_to_pptr<node>( old_data_off );
-            PamManager::template deallocate_typed<node>( old_pptr );
-
-            // Переразрешаем pool после деаллокации.
-            pool = pmm_resolve<pjson_pool_pmm>( pool_off );
-            if ( pool == nullptr )
-                return 0;
-        }
-
-        pool->nodes_data_off_ = new_data_off;
-        pool->nodes_cap_      = new_cap;
-    }
-
-    // Вычисляем смещение нового слота в ПАП.
-    pool               = pmm_resolve<pjson_pool_pmm>( pool_off );
-    uintptr_t idx      = pool->nodes_size_;
-    uintptr_t data_off = pool->nodes_data_off_;
-
-    // node_id — это байтовое смещение узла в ПАП.
-    node*   raw     = pmm_resolve<node>( data_off );
-    node_id slot_id = 0;
-    if ( raw != nullptr )
-    {
-        node* slot = &raw[idx];
-        slot->tag  = node_tag::null;
-        slot->_pad = 0;
-        std::memset( &slot->ref_val, 0, sizeof( slot->ref_val ) );
-        slot->tag = node_tag::null;
-
-        // Вычисляем байтовое смещение: data_off + idx * sizeof(node)
-        slot_id = data_off + idx * sizeof( node );
-    }
-
-    // Увеличиваем размер.
-    pool = pmm_resolve<pjson_pool_pmm>( pool_off );
-    pool->nodes_size_++;
-
-    return slot_id;
+        new ( pool ) pjson_pool_pmm();
 }
 
 /**
  * @brief Выделить новый узел из пула.
  *
  * Возвращает node_id (байтовое смещение в ПАП).
- * O(1) амортизированно: сначала берём из free-list, иначе push_back.
+ * O(1): ppool выделяет из free-list или создаёт новый чанк.
+ * Узел инициализируется как null (ppool обнуляет слот при выделении).
  *
  * @param pool_off Байтовое смещение структуры pjson_pool_pmm в ПАП.
  * @return node_id нового узла; 0 при ошибке.
@@ -205,40 +108,25 @@ inline node_id pjson_pool_pmm_alloc( uintptr_t pool_off )
     if ( pool == nullptr )
         return 0;
 
-    if ( pool->free_head_ != 0 )
-    {
-        // Берём голову free-list.
-        node_id slot_id = pool->free_head_;
+    // Если _objects_per_chunk == 0 (например, после zero-init через pam_pmm_create),
+    // устанавливаем значение по умолчанию.
+    if ( pool->_objects_per_chunk == 0 )
+        pool->_objects_per_chunk = pjson_pool_pmm::default_objects_per_chunk;
 
-        // Читаем _free_next через resolve.
-        node*   fn  = pmm_resolve<node>( slot_id );
-        node_id nxt = ( fn != nullptr ) ? fn->_free_next : 0;
+    node* ptr = pool->allocate();
+    if ( ptr == nullptr )
+        return 0;
 
-        // Обновляем pool.
-        pool             = pmm_resolve<pjson_pool_pmm>( pool_off );
-        pool->free_head_ = nxt;
-        pool->free_count_--;
+    // ppool::allocate() обнуляет слот, поэтому tag == 0 == node_tag::null.
+    // Явно устанавливаем tag для ясности.
+    ptr->tag  = node_tag::null;
+    ptr->_pad = 0;
 
-        // Инициализируем слот нулём (null-узел).
-        node* n = pmm_resolve<node>( slot_id );
-        if ( n != nullptr )
-        {
-            n->tag  = node_tag::null;
-            n->_pad = 0;
-            std::memset( &n->ref_val, 0, sizeof( n->ref_val ) );
-        }
-
-        return slot_id;
-    }
-
-    // Free-list пуст — добавляем новый узел в конец массива.
-    return pjson_pool_pmm_push_node( pool_off );
+    return node_ptr_to_id( ptr );
 }
 
 /**
  * @brief Вернуть узел с node_id id в free-list пула.
- *
- * Узел помечается тегом node_tag::_free.
  *
  * @param pool_off Байтовое смещение структуры pjson_pool_pmm в ПАП.
  * @param id node_id освобождаемого узла.
@@ -252,19 +140,11 @@ inline void pjson_pool_pmm_free( uintptr_t pool_off, node_id id )
     if ( pool == nullptr )
         return;
 
-    // Помечаем узел как свободный и записываем текущую голову free-list.
     node* n = pmm_resolve<node>( id );
     if ( n == nullptr )
         return;
 
-    n->tag        = node_tag::_free;
-    n->_pad       = 0;
-    n->_free_next = pool->free_head_;
-
-    // Обновляем голову free-list.
-    pool             = pmm_resolve<pjson_pool_pmm>( pool_off );
-    pool->free_head_ = id;
-    pool->free_count_++;
+    pool->deallocate( n );
 }
 
 /**
@@ -297,14 +177,14 @@ inline const node* pjson_pool_pmm_get_const( node_id id )
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Всего узлов в пуле (выделено из ПАП, включая свободные).
+ * @brief Всего слотов в пуле (ёмкость, включая свободные).
  */
 inline uintptr_t pjson_pool_pmm_total_count( uintptr_t pool_off )
 {
     if ( pool_off == 0 )
         return 0;
     const pjson_pool_pmm* pool = pmm_resolve_const<pjson_pool_pmm>( pool_off );
-    return ( pool != nullptr ) ? pool->nodes_size_ : 0;
+    return ( pool != nullptr ) ? pool->total_capacity() : 0;
 }
 
 /**
@@ -315,18 +195,18 @@ inline uintptr_t pjson_pool_pmm_free_in_pool( uintptr_t pool_off )
     if ( pool_off == 0 )
         return 0;
     const pjson_pool_pmm* pool = pmm_resolve_const<pjson_pool_pmm>( pool_off );
-    return ( pool != nullptr ) ? pool->free_count_ : 0;
+    return ( pool != nullptr ) ? pool->free_count() : 0;
 }
 
 /**
- * @brief Число занятых (выделенных пользователем) узлов: total - free.
+ * @brief Число занятых (выделенных пользователем) узлов.
  */
 inline uintptr_t pjson_pool_pmm_used_count( uintptr_t pool_off )
 {
     if ( pool_off == 0 )
         return 0;
     const pjson_pool_pmm* pool = pmm_resolve_const<pjson_pool_pmm>( pool_off );
-    return ( pool != nullptr ) ? ( pool->nodes_size_ - pool->free_count_ ) : 0;
+    return ( pool != nullptr ) ? pool->allocated_count() : 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -334,9 +214,10 @@ inline uintptr_t pjson_pool_pmm_used_count( uintptr_t pool_off )
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Освободить весь массив узлов (возвращает память в PMM).
+ * @brief Освободить все чанки пула (возвращает память в PMM).
  *
- * После вызова пул не пригоден для использования без повторной инициализации.
+ * После вызова пул пуст, но может быть использован повторно
+ * (ppool::free_all() сбрасывает состояние).
  *
  * @param pool_off Байтовое смещение структуры pjson_pool_pmm в ПАП.
  */
@@ -349,28 +230,13 @@ inline void pjson_pool_pmm_free_pool( uintptr_t pool_off )
     if ( pool == nullptr )
         return;
 
-    if ( pool->nodes_data_off_ != 0 )
-    {
-        auto data_pptr = offset_to_pptr<node>( pool->nodes_data_off_ );
-        PamManager::template deallocate_typed<node>( data_pptr );
-    }
-
-    // Переразрешаем pool после деаллокации.
-    pool = pmm_resolve<pjson_pool_pmm>( pool_off );
-    if ( pool != nullptr )
-    {
-        pool->nodes_size_     = 0;
-        pool->nodes_cap_      = 0;
-        pool->nodes_data_off_ = 0;
-        pool->free_head_      = 0;
-        pool->free_count_     = 0;
-    }
+    pool->free_all();
 }
 
 /**
  * @brief Создать новый пул через PMM.
  *
- * Аллоцирует структуру pjson_pool_pmm в ПАП и инициализирует её.
+ * Аллоцирует структуру pjson_pool_pmm (ppool<node>) в ПАП и инициализирует её.
  *
  * @return Байтовое смещение нового пула; 0 при ошибке.
  */
@@ -396,7 +262,7 @@ inline void pjson_pool_pmm_destroy( uintptr_t pool_off )
     if ( pool_off == 0 )
         return;
 
-    // Сначала освобождаем массив узлов.
+    // Сначала освобождаем все чанки.
     pjson_pool_pmm_free_pool( pool_off );
 
     // Затем освобождаем саму структуру пула.

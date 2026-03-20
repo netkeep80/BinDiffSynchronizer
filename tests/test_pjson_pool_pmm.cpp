@@ -25,9 +25,12 @@ TEST_CASE( "pjson_pool_pmm: is trivially copyable POD struct", "[pjson_pool_pmm]
     REQUIRE( std::is_trivially_copyable<pjson_pool_pmm>::value );
 }
 
-TEST_CASE( "pjson_pool_pmm: struct size is 5 * sizeof(uintptr_t)", "[pjson_pool_pmm][layout]" )
+TEST_CASE( "pjson_pool_pmm: struct size matches ppool<node>", "[pjson_pool_pmm][layout]" )
 {
-    REQUIRE( sizeof( pjson_pool_pmm ) == 5 * sizeof( uintptr_t ) );
+    // pjson_pool_pmm = PamManager::ppool<node> (Issue #166, Plan 2.4).
+    // ppool<node> содержит 5 полей: _free_head_idx (uint32), _chunk_head_idx (uint32),
+    // _objects_per_chunk (uint32), _total_allocated (uint32), _total_capacity (uint32).
+    REQUIRE( sizeof( pjson_pool_pmm ) == sizeof( PamManager::ppool<node> ) );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -75,14 +78,16 @@ TEST_CASE( "pjson_pool_pmm_alloc: increments used_count and total_count", "[pjso
     uintptr_t pool_off = pjson_pool_pmm_create();
 
     node_id id1 = pjson_pool_pmm_alloc( pool_off );
-    REQUIRE( pjson_pool_pmm_total_count( pool_off ) == 1u );
+    REQUIRE( pjson_pool_pmm_total_count( pool_off ) >= 1u );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 1u );
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 0u );
 
     node_id id2 = pjson_pool_pmm_alloc( pool_off );
-    REQUIRE( pjson_pool_pmm_total_count( pool_off ) == 2u );
+    REQUIRE( pjson_pool_pmm_total_count( pool_off ) >= 2u );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 2u );
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 0u );
+
+    // Инвариант: total_count == used_count + free_in_pool
+    REQUIRE( pjson_pool_pmm_total_count( pool_off ) ==
+             pjson_pool_pmm_used_count( pool_off ) + pjson_pool_pmm_free_in_pool( pool_off ) );
 
     REQUIRE( id1 != id2 );
 
@@ -120,29 +125,28 @@ TEST_CASE( "pjson_pool_pmm_free: adds node to free-list (free_count increases)",
 
     uintptr_t pool_off = pjson_pool_pmm_create();
 
-    node_id id = pjson_pool_pmm_alloc( pool_off );
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 0u );
+    node_id   id               = pjson_pool_pmm_alloc( pool_off );
+    uintptr_t free_after_alloc = pjson_pool_pmm_free_in_pool( pool_off );
 
     pjson_pool_pmm_free( pool_off, id );
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 1u );
+    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == free_after_alloc + 1 );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 0u );
 
     pjson_pool_pmm_destroy( pool_off );
     PamManager::destroy();
 }
 
-TEST_CASE( "pjson_pool_pmm_free: freed node is tagged as _free", "[pjson_pool_pmm][free]" )
+TEST_CASE( "pjson_pool_pmm_free: freed node's used_count decreases", "[pjson_pool_pmm][free]" )
 {
     PamManager::create( 64 * 1024 );
 
     uintptr_t pool_off = pjson_pool_pmm_create();
 
     node_id id = pjson_pool_pmm_alloc( pool_off );
-    pjson_pool_pmm_free( pool_off, id );
+    REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 1u );
 
-    const ::node* n = pjson_pool_pmm_get_const( id );
-    REQUIRE( n != nullptr );
-    REQUIRE( n->tag == node_tag::_free );
+    pjson_pool_pmm_free( pool_off, id );
+    REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 0u );
 
     pjson_pool_pmm_destroy( pool_off );
     PamManager::destroy();
@@ -172,16 +176,17 @@ TEST_CASE( "pjson_pool_pmm: realloc from free-list reuses freed slot", "[pjson_p
 
     uintptr_t pool_off = pjson_pool_pmm_create();
 
-    node_id id1 = pjson_pool_pmm_alloc( pool_off );
-    pjson_pool_pmm_free( pool_off, id1 );
+    node_id   id1              = pjson_pool_pmm_alloc( pool_off );
+    uintptr_t free_after_alloc = pjson_pool_pmm_free_in_pool( pool_off );
 
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 1u );
+    pjson_pool_pmm_free( pool_off, id1 );
+    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == free_after_alloc + 1 );
 
     node_id id2 = pjson_pool_pmm_alloc( pool_off );
 
-    // Повторно выделенный слот совпадает с освобождённым.
+    // Повторно выделенный слот совпадает с освобождённым (LIFO free-list).
     REQUIRE( id2 == id1 );
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 0u );
+    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == free_after_alloc );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 1u );
 
     pjson_pool_pmm_free( pool_off, id2 );
@@ -364,9 +369,11 @@ TEST_CASE( "pjson_pool_pmm: allocate 1000 nodes", "[pjson_pool_pmm][stress]" )
         ids.push_back( id );
     }
 
-    REQUIRE( pjson_pool_pmm_total_count( pool_off ) == N );
+    REQUIRE( pjson_pool_pmm_total_count( pool_off ) >= N );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == N );
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 0u );
+    // Инвариант: total == used + free
+    REQUIRE( pjson_pool_pmm_total_count( pool_off ) ==
+             pjson_pool_pmm_used_count( pool_off ) + pjson_pool_pmm_free_in_pool( pool_off ) );
 
     // Проверяем, что значения сохранились.
     for ( uintptr_t i = 0; i < N; i++ )
@@ -401,13 +408,15 @@ TEST_CASE( "pjson_pool_pmm: free every second node and reallocate without growth
     }
 
     uintptr_t total_before = pjson_pool_pmm_total_count( pool_off );
-    REQUIRE( total_before == N );
+    REQUIRE( total_before >= N );
 
     // Освобождаем каждый второй узел.
     for ( uintptr_t i = 0; i < N; i += 2 )
         pjson_pool_pmm_free( pool_off, ids[i] );
 
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == N / 2 );
+    uintptr_t free_after_half_free = pjson_pool_pmm_free_in_pool( pool_off );
+    // Число свободных увеличилось на N/2 от исходного (chunk-based excess + freed).
+    REQUIRE( pjson_pool_pmm_used_count( pool_off ) == N / 2 );
 
     // Повторно аллоцируем N/2 узлов — должны браться из free-list.
     std::vector<node_id> new_ids;
@@ -421,7 +430,7 @@ TEST_CASE( "pjson_pool_pmm: free every second node and reallocate without growth
 
     // total_count не должен увеличиться — повторное использование из free-list.
     REQUIRE( pjson_pool_pmm_total_count( pool_off ) == total_before );
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 0u );
+    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == free_after_half_free - N / 2 );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == N );
 
     // Освобождаем все оставшиеся узлы.
@@ -451,7 +460,8 @@ TEST_CASE( "pjson_pool_pmm_free_pool: releases all nodes", "[pjson_pool_pmm][fre
     (void)id2;
     (void)id3;
 
-    REQUIRE( pjson_pool_pmm_total_count( pool_off ) == 3u );
+    REQUIRE( pjson_pool_pmm_total_count( pool_off ) >= 3u );
+    REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 3u );
 
     pjson_pool_pmm_free_pool( pool_off );
 
@@ -482,23 +492,26 @@ TEST_CASE( "pjson_pool_pmm: free-list chain is correct after multiple free/alloc
         n->tag     = node_tag::integer;
         n->int_val = i;
     }
-    REQUIRE( pjson_pool_pmm_total_count( pool_off ) == 5u );
+    uintptr_t total_after_5 = pjson_pool_pmm_total_count( pool_off );
+    REQUIRE( total_after_5 >= 5u );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 5u );
 
     // Освобождаем все 5 узлов.
     for ( int i = 0; i < 5; i++ )
         pjson_pool_pmm_free( pool_off, ids[i] );
 
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 5u );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 0u );
+    // Все 5 возвращены в free-list, total_count не изменился.
+    REQUIRE( pjson_pool_pmm_total_count( pool_off ) == total_after_5 );
+    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == total_after_5 );
 
     // Аллоцируем снова 5 узлов — все должны браться из free-list.
     node_id ids2[5];
     for ( int i = 0; i < 5; i++ )
         ids2[i] = pjson_pool_pmm_alloc( pool_off );
 
-    REQUIRE( pjson_pool_pmm_total_count( pool_off ) == 5u ); // без роста
-    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == 0u );
+    REQUIRE( pjson_pool_pmm_total_count( pool_off ) == total_after_5 ); // без роста
+    REQUIRE( pjson_pool_pmm_free_in_pool( pool_off ) == total_after_5 - 5u );
     REQUIRE( pjson_pool_pmm_used_count( pool_off ) == 5u );
 
     // Узлы переинициализированы как null.
