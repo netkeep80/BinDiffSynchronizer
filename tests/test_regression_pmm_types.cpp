@@ -290,7 +290,7 @@ TEST_CASE( "regression parray: save/load preserves elements", "[regression][parr
         pam_pmm_init( fname );
 
         using IntArray = PamManager::parray<int>;
-        saved_off = pam_pmm_create<IntArray>( "reg_parr" );
+        saved_off      = pam_pmm_create<IntArray>( "reg_parr" );
         REQUIRE( saved_off != 0u );
 
         auto* arr = pam_pmm_resolve<IntArray>( saved_off );
@@ -307,7 +307,7 @@ TEST_CASE( "regression parray: save/load preserves elements", "[regression][parr
         pam_pmm_init( fname );
 
         using IntArray = PamManager::parray<int>;
-        uintptr_t off = pam_pmm_find( "reg_parr" );
+        uintptr_t off  = pam_pmm_find( "reg_parr" );
         REQUIRE( off == saved_off );
 
         const auto* arr = pam_pmm_resolve_const<IntArray>( off );
@@ -326,8 +326,7 @@ TEST_CASE( "regression parray: save/load preserves elements", "[regression][parr
 // 3. ppool — граничные случаи
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "regression ppool: interleaved alloc/free maintains consistency",
-           "[regression][ppool]" )
+TEST_CASE( "regression ppool: interleaved alloc/free maintains consistency", "[regression][ppool]" )
 {
     pstringview_pmm_reset();
     pam_pmm_init( nullptr );
@@ -357,7 +356,7 @@ TEST_CASE( "regression ppool: interleaved alloc/free maintains consistency",
     REQUIRE( pjson_pool_pmm_get_const( id_c )->int_val == 333 );
 
     // Allocate D — should reuse B's slot (free-list LIFO)
-    node_id id_d = pjson_pool_pmm_alloc( pool_off );
+    node_id id_d                        = pjson_pool_pmm_alloc( pool_off );
     pjson_pool_pmm_get( id_d )->tag     = node_tag::integer;
     pjson_pool_pmm_get( id_d )->int_val = 444;
 
@@ -385,13 +384,13 @@ TEST_CASE( "regression ppool: mixed node types in pool", "[regression][ppool]" )
     node_id id_int  = pjson_pool_pmm_alloc( pool_off );
     node_id id_real = pjson_pool_pmm_alloc( pool_off );
 
-    pjson_pool_pmm_get( id_null )->tag      = node_tag::null;
-    pjson_pool_pmm_get( id_bool )->tag      = node_tag::boolean;
+    pjson_pool_pmm_get( id_null )->tag         = node_tag::null;
+    pjson_pool_pmm_get( id_bool )->tag         = node_tag::boolean;
     pjson_pool_pmm_get( id_bool )->boolean_val = 1u;
-    pjson_pool_pmm_get( id_int )->tag       = node_tag::integer;
-    pjson_pool_pmm_get( id_int )->int_val   = -42;
-    pjson_pool_pmm_get( id_real )->tag      = node_tag::real;
-    pjson_pool_pmm_get( id_real )->real_val = 3.14159;
+    pjson_pool_pmm_get( id_int )->tag          = node_tag::integer;
+    pjson_pool_pmm_get( id_int )->int_val      = -42;
+    pjson_pool_pmm_get( id_real )->tag         = node_tag::real;
+    pjson_pool_pmm_get( id_real )->real_val    = 3.14159;
 
     // Verify all types retained
     REQUIRE( pjson_pool_pmm_get_const( id_null )->tag == node_tag::null );
@@ -406,8 +405,7 @@ TEST_CASE( "regression ppool: mixed node types in pool", "[regression][ppool]" )
     pam_pmm_destroy();
 }
 
-TEST_CASE( "regression ppool: persistence with multiple nodes and partial free",
-           "[regression][ppool][persistence]" )
+TEST_CASE( "regression ppool: persistence with multiple nodes and partial free", "[regression][ppool][persistence]" )
 {
     const char* fname = "./test_regression_ppool_save.pam";
     rm_file( fname );
@@ -588,7 +586,7 @@ TEST_CASE( "regression pmap: save/load preserves sorted order", "[regression][pm
         pam_pmm_init( fname );
 
         using IntMap = pmap_pmm<int, int>;
-        saved_off = pam_pmm_create<IntMap>( "reg_pmap" );
+        saved_off    = pam_pmm_create<IntMap>( "reg_pmap" );
         REQUIRE( saved_off != 0u );
 
         auto* pm = pam_pmm_resolve<IntMap>( saved_off );
@@ -606,7 +604,7 @@ TEST_CASE( "regression pmap: save/load preserves sorted order", "[regression][pm
     {
         pam_pmm_init( fname );
 
-        using IntMap = pmap_pmm<int, int>;
+        using IntMap  = pmap_pmm<int, int>;
         uintptr_t off = pam_pmm_find( "reg_pmap" );
         REQUIRE( off == saved_off );
 
@@ -798,7 +796,7 @@ TEST_CASE( "regression integration: save/load with pstring + parray + pmap toget
 
         // parray
         using IntArray = PamManager::parray<int>;
-        off_arr = pam_pmm_create<IntArray>( "integ_arr" );
+        off_arr        = pam_pmm_create<IntArray>( "integ_arr" );
         REQUIRE( off_arr != 0u );
         auto* arr = pam_pmm_resolve<IntArray>( off_arr );
         std::memset( arr, 0, sizeof( IntArray ) );
@@ -808,7 +806,7 @@ TEST_CASE( "regression integration: save/load with pstring + parray + pmap toget
 
         // pmap
         using IntMap = pmap_pmm<int, int>;
-        off_map = pam_pmm_create<IntMap>( "integ_map" );
+        off_map      = pam_pmm_create<IntMap>( "integ_map" );
         REQUIRE( off_map != 0u );
         auto* pm = pam_pmm_resolve<IntMap>( off_map );
         std::memset( pm, 0, sizeof( IntMap ) );
@@ -831,7 +829,7 @@ TEST_CASE( "regression integration: save/load with pstring + parray + pmap toget
 
         // Verify parray
         using IntArray = PamManager::parray<int>;
-        off = pam_pmm_find( "integ_arr" );
+        off            = pam_pmm_find( "integ_arr" );
         REQUIRE( off == off_arr );
         const auto* arr = pam_pmm_resolve_const<IntArray>( off );
         REQUIRE( arr->size() == 3u );
@@ -841,7 +839,7 @@ TEST_CASE( "regression integration: save/load with pstring + parray + pmap toget
 
         // Verify pmap
         using IntMap = pmap_pmm<int, int>;
-        off = pam_pmm_find( "integ_map" );
+        off          = pam_pmm_find( "integ_map" );
         REQUIRE( off == off_map );
         const auto* pm = pam_pmm_resolve_const<IntMap>( off );
         REQUIRE( pm->size() == 2u );
@@ -856,8 +854,7 @@ TEST_CASE( "regression integration: save/load with pstring + parray + pmap toget
     rm_file( fname );
 }
 
-TEST_CASE( "regression integration: pjson_db full cycle save/load",
-           "[regression][integration][persistence]" )
+TEST_CASE( "regression integration: pjson_db full cycle save/load", "[regression][integration][persistence]" )
 {
     const char* fname = "./test_regression_db_save.pam";
     rm_file( fname );
