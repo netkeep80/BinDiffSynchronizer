@@ -35,6 +35,7 @@ set(TEST_SOURCES
     test_pallocator_pmm.cpp
     test_pjson_db_pmm.cpp
     test_pjson_db_batch.cpp
+    test_regression_pmm_types.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
