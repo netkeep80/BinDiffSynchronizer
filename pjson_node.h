@@ -1,5 +1,4 @@
 #pragma once
-#include "pam_adapter.h"
 #include "pam_pmm_config.h"
 #include "pmap_pmm.h"
 #include "fptr_pmm.h"

@@ -20,11 +20,10 @@
  *   Поиск — через pam_search_strings() / pam_all_strings() из pam_pmm.h.
  *
  * @see pam_pmm.h — API словаря строк (pam_intern_string, pam_search_strings)
- * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t
+ * @see pam_pmm.h — фасад ПАМ на PMM (pmm_resolve, pmm_resolve_const)
  */
 
 #include "pam_pmm_config.h"
-#include "pam_adapter.h"
 #include <cstring>
 #include <limits>
 #include <string>
@@ -127,7 +126,7 @@ inline void pstringview_pmm_inorder( pmm_pstringview_pptr node, const char* patt
         {
             pstringview_pmm_search_result r;
             r.value        = str;
-            r.chars_offset = pptr_to_offset( node );
+            r.chars_offset = node.byte_offset();
             r.length       = static_cast<uintptr_t>( sv->size() );
             results.push_back( std::move( r ) );
         }

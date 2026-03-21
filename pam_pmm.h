@@ -9,7 +9,7 @@
  * Основные функции:
  *   - pam_pmm_init(filename) — инициализация / загрузка хранилища
  *   - pam_pmm_create<T>(name) / pam_pmm_create_array<T>(count, name) — создание объектов
- *   - pmm_resolve<T>(offset) — разрешение смещения в указатель
+ *   - pmm_resolve<T>(offset) / pmm_resolve_const<T>(offset) — разрешение смещения в указатель
  *   - pam_pmm_delete(offset) — удаление объектов
  *   - pam_pmm_find(name) / pam_pmm_find_typed<T>(name) — поиск по имени
  *   - pam_pmm_save() — сохранение в файл
@@ -19,7 +19,6 @@
  */
 
 #include "pam_pmm_config.h"
-#include "pam_adapter.h"
 #include "pmap_pmm.h"
 #include "pstringview_pmm.h"
 #include <cstdio>
@@ -28,6 +27,43 @@
 
 namespace pjson
 {
+
+// ═══════════════════════════════════════════════════════════════════════════
+// РАЗРЕШЕНИЕ БАЙТОВЫХ СМЕЩЕНИЙ В УКАЗАТЕЛИ
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @brief Разрешить байтовое смещение в указатель T* через PMM.
+ *
+ * Поддерживает как выровненные (гранульные) смещения, так и невыровненные
+ * (смещения на подобъекты внутри гранулы, напр. поля структуры).
+ *
+ * @tparam T Тип данных.
+ * @param off Байтовое смещение.
+ * @return T* — сырой указатель или nullptr для off==0.
+ */
+template <typename T> inline T* pmm_resolve( uintptr_t off )
+{
+    if ( off == 0 )
+        return nullptr;
+    std::uint8_t* base = PamManager::backend().base_ptr();
+    if ( base == nullptr )
+        return nullptr;
+    return reinterpret_cast<T*>( base + off );
+}
+
+/**
+ * @brief Разрешить байтовое смещение в const T* через PMM.
+ */
+template <typename T> inline const T* pmm_resolve_const( uintptr_t off )
+{
+    if ( off == 0 )
+        return nullptr;
+    const std::uint8_t* base = PamManager::backend().base_ptr();
+    if ( base == nullptr )
+        return nullptr;
+    return reinterpret_cast<const T*>( base + off );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // КОНСТАНТЫ ДЛЯ PAM_PMM
@@ -196,7 +232,7 @@ inline uintptr_t pam_pmm_registry_create()
     if ( reg_pptr.is_null() )
         return 0;
 
-    uintptr_t reg_off = pptr_to_offset( reg_pptr );
+    uintptr_t reg_off = reg_pptr.byte_offset();
 
     // Инициализируем карты нулями (они уже инициализированы конструктором по умолчанию).
     pam_pmm_registry* reg = reg_pptr.resolve();
@@ -222,7 +258,7 @@ inline uintptr_t pam_pmm_create_root_and_registry()
     if ( root_pptr.is_null() )
         return 0;
 
-    uintptr_t root_off = pptr_to_offset( root_pptr );
+    uintptr_t root_off = root_pptr.byte_offset();
 
     // Инициализируем корневую структуру.
     pam_pmm_root* root = root_pptr.resolve();
@@ -301,7 +337,7 @@ inline void pam_pmm_init( const char* filename )
                         pam_pmm_root* root = root_pptr.resolve();
                         if ( root != nullptr && root->magic == PAM_PMM_MAGIC && root->version == PAM_PMM_VERSION )
                         {
-                            detail::pam_pmm_root_offset() = pptr_to_offset( root_pptr );
+                            detail::pam_pmm_root_offset() = root_pptr.byte_offset();
                             loaded                        = true;
                         }
                     }
@@ -418,7 +454,7 @@ template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullpt
     if ( obj_pptr.is_null() )
         return 0;
 
-    uintptr_t obj_off = pptr_to_offset( obj_pptr );
+    uintptr_t obj_off = obj_pptr.byte_offset();
 
     // Инициализируем объект нулями (T гарантированно trivially copyable по static_assert).
     T* obj = obj_pptr.resolve();
@@ -489,7 +525,7 @@ template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, con
     if ( arr_pptr.is_null() )
         return 0;
 
-    uintptr_t arr_off = pptr_to_offset( arr_pptr );
+    uintptr_t arr_off = arr_pptr.byte_offset();
 
     // Инициализируем массив нулями (T гарантированно trivially copyable по static_assert).
     T* arr = arr_pptr.resolve();
@@ -573,8 +609,8 @@ inline void pam_pmm_delete( uintptr_t offset )
 
     // Деаллоцируем память.
     // Используем char для деаллокации, так как тип неизвестен.
-    auto pptr = offset_to_pptr<char>( offset );
-    PamManager::template deallocate_typed<char>( pptr );
+    auto p = PamManager::pptr_from_byte_offset<char>( offset );
+    PamManager::template deallocate_typed<char>( p );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -846,7 +882,7 @@ template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, ui
     if ( new_pptr.is_null() )
         return 0;
 
-    uintptr_t new_offset = pptr_to_offset( new_pptr );
+    uintptr_t new_offset = new_pptr.byte_offset();
 
     // Копируем данные из старого блока.
     T* new_data = new_pptr.resolve();
@@ -859,7 +895,7 @@ template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, ui
     }
 
     // Деаллоцируем старый блок.
-    auto old_pptr = offset_to_pptr<T>( old_offset );
+    auto old_pptr = PamManager::pptr_from_byte_offset<T>( old_offset );
     PamManager::template deallocate_typed<T>( old_pptr );
 
     // Обновляем запись в slot_map_.
@@ -1078,7 +1114,7 @@ inline std::vector<pstringview_search_result> pam_search_strings( const char* pa
         // Пересчитываем chars_offset для указания на str[] внутри блока.
         if ( r.chars_offset != 0 && base != nullptr )
         {
-            auto                   p  = offset_to_pptr<pmm_pstringview>( r.chars_offset );
+            auto                   p  = PamManager::pptr_from_byte_offset<pmm_pstringview>( r.chars_offset );
             const pmm_pstringview* sv = p.resolve();
             if ( sv != nullptr )
             {

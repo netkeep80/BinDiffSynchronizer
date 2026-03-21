@@ -300,7 +300,7 @@ TEST_CASE( "fptr_pmm<int>: pptr() and set_pptr() access internal pptr", "[fptr_p
     // pptr() возвращает гранульный индекс; addr() — байтовое смещение
     auto pp = p.pptr();
     REQUIRE( pp.offset() != 0 );
-    REQUIRE( p.addr() == pptr_to_offset( pp ) );
+    REQUIRE( p.addr() == pp.byte_offset() );
 
     // set_pptr() устанавливает внутренний pptr
     fptr_pmm<int> p2;

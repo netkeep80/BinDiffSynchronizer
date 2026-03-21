@@ -10,7 +10,6 @@
  */
 
 #include "pam_pmm_config.h"
-#include "pam_adapter.h"
 #include <cstring>
 #include <type_traits>
 
