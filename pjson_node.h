@@ -206,11 +206,13 @@ static_assert( sizeof( node::ref_val ) == 3 * sizeof( void* ), "node::ref_val д
 // Необходимы до объявления node_view, чтобы методы begin()/end()/items()
 // могли использовать эти типы как возвращаемые.
 
-struct node_view_iterator; ///< Итератор элементов array-узла
-struct object_item;        ///< Пара ключ-значение для object-итерации
-struct object_iterator;    ///< Итератор пар ключ-значение object-узла
-struct object_items_range; ///< Диапазон для items()
-struct array_range;        ///< Диапазон для range-based for по массиву
+template <typename Derived, typename Value> struct pjson_iterator_base; ///< CRTP-база итераторов
+template <typename Iterator> struct pjson_range; ///< Шаблонный диапазон для range-based for
+struct node_view_iterator;                       ///< Итератор элементов array-узла
+struct object_item;                              ///< Пара ключ-значение для object-итерации
+struct object_iterator;                          ///< Итератор пар ключ-значение object-узла
+using object_items_range = pjson_range<object_iterator>; ///< Диапазон для items()
+using array_range = pjson_range<node_view_iterator>; ///< Диапазон для range-based for по массиву
 
 // ---------------------------------------------------------------------------
 // Предварительные объявления helpers для бинарного поиска
@@ -1229,7 +1231,48 @@ inline node_id node_clone( node_id src_id )
 //   for (auto [key, val] : obj_view.items()) { ... } // для object
 //
 // Все итераторы — forward-only, read-only.
+// pjson_iterator_base<Derived, Value> — CRTP-база для итераторов (Issue #184, Этап 7).
+// pjson_range<Iterator> — шаблонный диапазон для range-based for.
 // Комментарии — на русском языке.
+
+// ---------------------------------------------------------------------------
+// pjson_iterator_base — CRTP-база для forward-итераторов (Issue #184, Этап 7)
+// ---------------------------------------------------------------------------
+
+/// CRTP-база для forward-итераторов pjson.
+/// Реализует operator++, operator++(int), operator==, operator!=.
+/// Derived должен определить operator*() const.
+template <typename Derived, typename Value> struct pjson_iterator_base
+{
+    node_id   nid; ///< node_id контейнера (массива или объекта)
+    uintptr_t idx; ///< Текущий индекс
+
+    using iterator_category = std::forward_iterator_tag;
+    using value_type        = Value;
+    using difference_type   = std::ptrdiff_t;
+    using pointer           = const Value*;
+    using reference         = Value;
+
+    pjson_iterator_base( node_id id, uintptr_t i ) : nid( id ), idx( i ) {}
+
+    /// Инкремент (префиксный).
+    Derived& operator++()
+    {
+        ++idx;
+        return static_cast<Derived&>( *this );
+    }
+
+    /// Инкремент (постфиксный).
+    Derived operator++( int )
+    {
+        Derived tmp = static_cast<const Derived&>( *this );
+        ++idx;
+        return tmp;
+    }
+
+    bool operator==( const Derived& other ) const { return nid == other.nid && idx == other.idx; }
+    bool operator!=( const Derived& other ) const { return !( *this == other ); }
+};
 
 // ---------------------------------------------------------------------------
 // node_view_iterator — итератор элементов массива
@@ -1237,39 +1280,12 @@ inline node_id node_clone( node_id src_id )
 
 /// Итератор для обхода элементов array-узла.
 /// Возвращает node_view для каждого элемента массива по индексу.
-struct node_view_iterator
+struct node_view_iterator : pjson_iterator_base<node_view_iterator, node_view>
 {
-    node_id   arr_id; ///< node_id массива
-    uintptr_t idx;    ///< Текущий индекс
-
-    using iterator_category = std::forward_iterator_tag;
-    using value_type        = node_view;
-    using difference_type   = std::ptrdiff_t;
-    using pointer           = const node_view*;
-    using reference         = node_view;
-
-    node_view_iterator( node_id aid, uintptr_t i ) : arr_id( aid ), idx( i ) {}
+    using pjson_iterator_base::pjson_iterator_base;
 
     /// Разыменование: возвращает node_view для текущего элемента.
-    node_view operator*() const { return node_view{ arr_id }.at( idx ); }
-
-    /// Инкремент (префиксный).
-    node_view_iterator& operator++()
-    {
-        ++idx;
-        return *this;
-    }
-
-    /// Инкремент (постфиксный).
-    node_view_iterator operator++( int )
-    {
-        node_view_iterator tmp = *this;
-        ++idx;
-        return tmp;
-    }
-
-    bool operator==( const node_view_iterator& other ) const { return arr_id == other.arr_id && idx == other.idx; }
-    bool operator!=( const node_view_iterator& other ) const { return !( *this == other ); }
+    node_view operator*() const { return node_view{ nid }.at( idx ); }
 };
 
 // ---------------------------------------------------------------------------
@@ -1289,78 +1305,40 @@ struct object_item
 
 /// Итератор для обхода пар ключ-значение object-узла.
 /// Возвращает object_item{key, value} для каждого поля объекта.
-struct object_iterator
+struct object_iterator : pjson_iterator_base<object_iterator, object_item>
 {
-    node_id   obj_id; ///< node_id объекта
-    uintptr_t idx;    ///< Текущий индекс
-
-    using iterator_category = std::forward_iterator_tag;
-    using value_type        = object_item;
-    using difference_type   = std::ptrdiff_t;
-    using pointer           = const object_item*;
-    using reference         = object_item;
-
-    object_iterator( node_id oid, uintptr_t i ) : obj_id( oid ), idx( i ) {}
+    using pjson_iterator_base::pjson_iterator_base;
 
     /// Разыменование: возвращает object_item для текущего поля объекта.
     object_item operator*() const
     {
-        node_view v{ obj_id };
+        node_view v{ nid };
         return object_item{ v.key_at( idx ), v.value_at( idx ) };
     }
-
-    /// Инкремент (префиксный).
-    object_iterator& operator++()
-    {
-        ++idx;
-        return *this;
-    }
-
-    /// Инкремент (постфиксный).
-    object_iterator operator++( int )
-    {
-        object_iterator tmp = *this;
-        ++idx;
-        return tmp;
-    }
-
-    bool operator==( const object_iterator& other ) const { return obj_id == other.obj_id && idx == other.idx; }
-    bool operator!=( const object_iterator& other ) const { return !( *this == other ); }
 };
 
 // ---------------------------------------------------------------------------
-// object_items_range — вспомогательный диапазон для items()
+// pjson_range — шаблонный диапазон для range-based for (Issue #184, Этап 7)
 // ---------------------------------------------------------------------------
+
+/// Шаблонный диапазон для range-based for.
+/// Используется для массивов (Iterator=node_view_iterator) и объектов (Iterator=object_iterator).
+template <typename Iterator> struct pjson_range
+{
+    node_id   nid; ///< node_id контейнера
+    uintptr_t sz;  ///< Число элементов
+
+    pjson_range( node_id id, uintptr_t n ) : nid( id ), sz( n ) {}
+
+    Iterator begin() const { return Iterator{ nid, 0 }; }
+    Iterator end() const { return Iterator{ nid, sz }; }
+};
 
 /// Диапазон для range-based for по парам ключ-значение объекта.
-/// Возвращается методом node_view::items().
-struct object_items_range
-{
-    node_id   obj_id; ///< node_id объекта
-    uintptr_t sz;     ///< Число элементов
-
-    object_items_range( node_id oid, uintptr_t n ) : obj_id( oid ), sz( n ) {}
-
-    object_iterator begin() const { return object_iterator{ obj_id, 0 }; }
-    object_iterator end() const { return object_iterator{ obj_id, sz }; }
-};
-
-// ---------------------------------------------------------------------------
-// array_range — вспомогательный диапазон для range-based for по массиву
-// ---------------------------------------------------------------------------
+using object_items_range = pjson_range<object_iterator>;
 
 /// Диапазон для range-based for по элементам array-узла.
-/// Используется при итерации через node_view::begin()/end().
-struct array_range
-{
-    node_id   arr_id; ///< node_id массива
-    uintptr_t sz;     ///< Число элементов
-
-    array_range( node_id aid, uintptr_t n ) : arr_id( aid ), sz( n ) {}
-
-    node_view_iterator begin() const { return node_view_iterator{ arr_id, 0 }; }
-    node_view_iterator end() const { return node_view_iterator{ arr_id, sz }; }
-};
+using array_range = pjson_range<node_view_iterator>;
 
 // ---------------------------------------------------------------------------
 // Определения методов node_view для итерации
