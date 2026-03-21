@@ -1,821 +1,273 @@
-# План переделки BinDiffSynchronizer под новый pmm
+# План рефакторинга BinDiffSynchronizer (pjson_db_pmm)
 
-Документ описывает план миграции [BinDiffSynchronizer](https://github.com/netkeep80/BinDiffSynchronizer)
-(pjson_db_pmm) на обновлённый PersistMemoryManager после выполнения [Фазы 3 плана pmm](plan.md).
-
----
-
-## Текущее состояние BinDiffSynchronizer
-
-BinDiffSynchronizer (pjson_db_pmm) — header-only C++20 библиотека, реализующая персистентную
-JSON-базу данных поверх PMM. Текущая архитектура имеет 4 уровня:
-
-```
-Уровень D: pjson_db_pmm        (высокоуровневый API: path-навигация, $ref, метрики)
-Уровень C: pjson_node + codec   (модель узлов, парсинг/сериализация JSON)
-Уровень B: Персистентные примитивы (pstringview_pmm, pstring_pmm, pvector_pmm, pmap_pmm, pmem_array_pmm)
-Уровень A: Адаптер PMM          (pam_adapter.h, pam_pmm.h, pam_pmm_config.h, fptr_pmm.h, pallocator_pmm.h)
-```
-
-### Проблема
-
-Уровни A и B содержат значительный объём кода (~2500 строк), дублирующего или
-оборачивающего функциональность, которая должна предоставляться самим pmm.
-Это приводит к:
-
-- **Дублированию кода** — `pstring_pmm`, `pmem_array_pmm`, `pmap_pmm`, `pallocator_pmm`
-  повторяют логику, которую pmm мог бы предоставить
-- **Несогласованности API** — BinDiffSynchronizer работает с байтовыми смещениями (`uintptr_t`),
-  а pmm — с гранульными индексами, требуя постоянных конверсий
-- **Сложности поддержки** — два набора персистентных контейнеров с разными API и гарантиями
+Документ описывает результаты code review библиотеки [BinDiffSynchronizer](https://github.com/netkeep80/BinDiffSynchronizer)
+(pjson_db_pmm) и план дальнейшего рефакторинга.
 
 ---
 
-## Предварительные условия
+## Выполненные этапы миграции
 
-Перед началом миграции BinDiffSynchronizer должны быть выполнены следующие задачи
-из [Фазы 3 плана pmm](plan.md):
+Этапы 1–7 полностью завершены. Миграция на PMM выполнена, дублирование кода устранено,
+итераторы унифицированы через CRTP. Подробности каждого этапа — в git-истории.
 
-| Задача pmm | Заменяет в BinDiffSynchronizer |
-|------------|-------------------------------|
-| 3.1 `pstring<ManagerT>` | `pstring_pmm` |
-| 3.2 `parray<T, ManagerT>` | `pmem_array_pmm` |
-| 3.3 `pmap::erase()` + итератор | `pmap_pmm` (частично) |
-| 3.5 `pallocator<T, ManagerT>` | `pallocator_pmm` |
-| 3.6 `ppool<T, ManagerT>` | `pjson_pool_pmm` |
-| 3.7 Корневой объект | `pam_pmm_root` в `pam_pmm.h` |
-| 4.4 Конверсия pptr ↔ байтовые смещения | `pam_adapter.h` |
+| Этап | Описание | Статус |
+|------|----------|--------|
+| 1. Миграция уровня A | Удаление pam_adapter.h, pallocator_pmm.h; упрощение pam_pmm.h и fptr_pmm.h | ✅ |
+| 2. Миграция уровня B | Замена pstring_pmm, pmem_array_pmm, pvector_pmm на типы PMM; миграция pmap_pmm, ppool, pstringview | ✅ |
+| 3. Обновление уровней C и D | Обновление pjson_node, pjson_codec, pjson_db_pmm для работы с новыми типами PMM | ✅ |
+| 4. Тестирование и валидация | 619+ тестов, 354 000+ assertion; регрессия, совместимость save/load, бенчмарки | ✅ |
+| 5. Дедупликация кода | 10 паттернов дублирования устранены: бинарный поиск, итераторы, put-boilerplate, visitor, null-guard | ✅ |
+| 6. parray::insert/erase | Замена ручных memmove на parray::insert()/erase(); ~43 строки удалено | ✅ |
+| 7. Унификация итераторов | CRTP-база pjson_iterator_base + шаблонный pjson_range; ~22 строки удалено | ✅ |
 
----
-
-## Этап 1: Миграция уровня A (адаптер PMM)
-
-### 1.1 Удаление pam_adapter.h ✅
-
-**Выполнено (Issue #169):** `pam_adapter.h` удалён — конверсия через PMM v0.43.0 API (Phase 4.4, Issue pmm#211).
-
-**Что сделано:**
-- Все вызовы `pptr_to_offset(p)` заменены на `p.byte_offset()` (PMM метод pptr)
-- Все вызовы `offset_to_pptr<T>(off)` заменены на `PamManager::pptr_from_byte_offset<T>(off)`
-- `pmm_resolve<T>()` и `pmm_resolve_const<T>()` перенесены в `pam_pmm.h` (по-прежнему нужны для node_id → raw pointer)
-- Удалены: `PMM_GRANULE_SIZE`, `pmm_index_type`, `is_aligned_offset()`, `align_offset_up()`, `get_granule_size()`, `char_pptr`, `byte_pptr`
-- Обновлены все файлы: `pam_pmm.h`, `pmap_pmm.h`, `pstringview_pmm.h`, `pjson_pool_pmm.h`, `pjson_node.h`, `fptr_pmm.h`
-- Тесты обновлены для нового API
-- Все 574 теста проходят
-
-### 1.2 Упрощение pam_pmm.h — использование корневого объекта pmm ✅
-
-**Выполнено (Issue #163):** `pam_pmm.h` использует `PamManager::set_root()` / `get_root()` для хранения и загрузки корневой структуры.
-
-**Что сделано:**
-- `pam_pmm_create_root_and_registry()` сохраняет корень через `PamManager::set_root( root_pptr )` вместо ручного поиска по ПАП
-- `pam_pmm_init()` загружает корень через `PamManager::template get_root<pam_pmm_root>()` — magic-number поиск по всему ПАП удалён
-- Валидация magic/version сохранена: проверяется на корне, полученном через API (не через сканирование)
-- Структура `pam_pmm_root` сохранена (magic, version, registry_off, reserved) для обратной совместимости формата файла
-
-### 1.3 Удаление pallocator_pmm.h ✅
-
-**Выполнено (Issue #143):** `pallocator_pmm.h` удалён.
-
-**Что сделано:**
-- `pallocator_pmm<T>` уже являлся алиасом для `PamManager::pallocator<T>` (с Issue #163)
-- Все тесты обновлены: используют `PamManager::pallocator<T>` напрямую
-- Удалён `pallocator_pmm.h` — обёртка больше не нужна
-- Удалён алиас `pjson::pallocator<T>` (использовался только в тестах)
-
-### 1.4 Упрощение fptr_pmm.h ✅
-
-**Выполнено (Issue #143):** `fptr_pmm<T>` переделан в тонкую обёртку над `pptr<T>`.
-
-**Что сделано:**
-- Внутреннее хранение заменено с `uintptr_t __addr` на `PamManager::pptr<T> _p`
-- Разыменование делегировано операторам `pptr<T>` (operator*, operator->)
-- Удалена прямая зависимость от `pmm_resolve`/`pmm_resolve_const`
-- sizeof(fptr_pmm<T>) == sizeof(pptr<T>) вместо sizeof(void*)
-- Обратная совместимость через `addr()`/`set_addr()` (байтовые смещения)
-- Добавлены методы `pptr()`/`set_pptr()` для доступа к внутреннему pptr<T>
-- Удобные методы `New()`/`Delete()`/`find()` сохранены
+**Итого удалено:** ~5 файлов (~1900 строк), ~381 строка дублирования.
+**Тесты:** 630 тестов, ~360 000 assertion.
 
 ---
 
-## Этап 2: Миграция уровня B (персистентные примитивы)
+## Code review: текущие проблемы реализации
 
-### 2.1 Замена pstring_pmm на pmm::pstring ✅
+### Проблема 1: Мёртвый код parse_object() в pjson_codec.h
 
-**Выполнено (Issue #144):** `pstring_pmm` заменён на `PamManager::pstring` (pmm::pstring<PamManager>).
+**Файл:** `pjson_codec.h`, строки 530–636
 
-**Что сделано:**
-- `node::string_val` теперь имеет тип `PamManager::pstring` (12 байт: uint32_t _length + _capacity + _data_idx) вместо `pstring_pmm` (16 байт: uintptr_t length + chars_off)
-- `node_view::as_string()` использует `pstring::c_str()` и `pstring::size()` вместо прямого доступа к полям
-- `node_set_string()` использует `pstring::assign()` через стековую копию (realloc-безопасность)
-- Деаллокация строковых данных в `pjson_db_pmm.h` через `pstring::free_data()`
-- Удалён `pstring_pmm.h` — обёртка больше не нужна
-- Устранены предупреждения memset для non-trivial node в `pjson_pool_pmm.h`
-- Все 596 тестов проходят
+Функция `parse_object()` содержит заглушку `return false` (строка 635) и никогда не используется — вызывается только `parse_object_v2()`. Мёртвый код размером ~100 строк затрудняет чтение.
 
-### 2.2 Замена pmem_array_pmm на pmm::parray ✅
-
-**Выполнено (Issue #145):** `pmem_array_pmm` заменён на `PamManager::parray<T>` (pmm::parray<T, PamManager>).
-
-**Что сделано:**
-- `node::array_val`, `node::object_val`, `node::binary_val` теперь имеют тип `PamManager::parray<T>` (12 байт: uint32_t _size + _capacity + _data_idx) вместо `pmem_array_hdr_pmm` (24 байта: uintptr_t size + capacity + data_off)
-- `pvector_pmm<T>` переписан как обёртка над `PamManager::parray<T>`, все операции делегируются методам parray
-- `pmap_pmm<K,V>` переписан с хранением `PamManager::parray<Entry>` вместо `pmem_array_hdr_pmm`, с безопасной вставкой при росте PMM-пула (self-offset pattern)
-- Добавлена свободная функция `parray_insert_sorted_object_entry()` для sorted insert в object_val
-- `pjson_node.h`: структура `object_entry` перемещена перед `node` (необходимо для `parray<object_entry>`)
-- `pjson_db_pmm.h`: деаллокация данных через `free_data()` вместо ручного `offset_to_pptr + deallocate_typed`
-- `pjson_codec.h`, `pjson_db_helpers.h`, `pjson_pool_pmm.h`: обновлены для нового API
-- Удалён `pmem_array_pmm.h` — обёртка больше не нужна
-- Все тесты обновлены: размерные проверки отражают 12-байтовый parray
-- Все 593 теста проходят
-
-### 2.3 Миграция pmap_pmm ✅
-
-**Выполнено (Issue #166):** Выбран Вариант B — pmap_pmm остаётся как sorted-array над `PamManager::parray<Entry>`.
-
-**Что сделано:**
-- Исследован Вариант A (замена на pmm::pmap<K,V>, AVL-дерево): обнаружена фундаментальная несовместимость с save/reload — `PMM::load()` → `rebuild_free_tree()` вызывает `reset_avl_fields_of()` на ВСЕХ блоках, разрушая структуру AVL-дерева пользовательских pmap
-- Принято решение оставить Вариант B: sorted-array на базе `PamManager::parray<Entry>` с бинарным поиском O(log n) для find, O(n) для insert/erase
-- Исправлен `erase()`: прямой доступ `arr_._size--` заменён на `arr_.pop_back()` (корректное использование публичного API parray)
-- pmap_pmm уже использует `PamManager::parray<Entry>` после задачи 2.2 — дополнительная миграция внутреннего хранения не требуется
-- Все 593 теста проходят
-
-**Обоснование выбора Варианта B:**
-- pmm::pmap<K,V> хранит AVL-узлы в TreeNode-полях заголовков блоков PMM (left_offset, right_offset, parent_offset, avl_height)
-- Функция `rebuild_free_tree()` при загрузке файла сбрасывает TreeNode-поля ВСЕХ блоков, включая пользовательские AVL-деревья
-- Это делает pmm::pmap несовместимой с персистентным save/reload — после загрузки файла данные карты теряются
-- Sorted-array подход корректно сохраняет и восстанавливает данные, так как использует только содержимое блока данных parray
-
-### 2.4 Замена pjson_pool_pmm на pmm::ppool ✅
-
-**Выполнено (Issue #166):** `pjson_pool_pmm` заменён на `PamManager::ppool<node>` (pmm::ppool<node, PamManager>).
-
-**Что сделано:**
-- `pjson_pool_pmm` переопределён как алиас `PamManager::ppool<node>` — пул использует чанковую аллокацию O(1) из pmm::ppool вместо ручного массива с удвоением
-- Функции `pjson_pool_pmm_alloc()` / `_free()` делегируют в `ppool::allocate()` / `ppool::deallocate()`
-- Конверсия node* ↔ node_id (байтовое смещение) через `node_ptr_to_id()` и `pmm_resolve<node>()`
-- `pjson_pool_pmm_init()` использует placement new для корректной инициализации ppool (включая `_objects_per_chunk = 64`)
-- Защита от zero-init: `pjson_pool_pmm_alloc()` устанавливает `_objects_per_chunk` по умолчанию, если он равен 0 (после `pam_pmm_create` memset)
-- Метрики: `total_count` → `ppool::total_capacity()`, `used_count` → `ppool::allocated_count()`, `free_in_pool` → `ppool::free_count()`
-- Тесты обновлены: `total_count` теперь отражает чанковую ёмкость (`>=` вместо `==`), удалён тест на `node_tag::_free`
-- `pjson_pool_pmm.h` сохранён как тонкая обёртка над `PamManager::ppool<node>` (не удалён, т.к. предоставляет node_id-совместимый API)
-- Все 593 теста проходят
-
-### 2.5 Упрощение pstringview_pmm ✅
-
-**Выполнено (Issue #167):** Структура `pstringview_pmm` удалена, `pstringview_pmm.h` упрощён до тонкой обёртки.
-
-**Что сделано:**
-- Удалена структура `pstringview_pmm` (16-байтовая обёртка с `length` + `chars_offset`) — не использовалась вне тестов
-- Удалены дублирующие функции `pstringview_pmm_intern()`, `pstringview_pmm_intern_result` — вместо них `pam_intern_string()` из `pam_pmm.h`
-- `pstringview_pmm.h` сохранён как тонкая обёртка: типовые алиасы (`pmm_pstringview`, `pmm_pstringview_pptr`), hooks для персистентности корня AVL-дерева, `pstringview_pmm_reset()`, AVL-обход для поиска строк, `pstringview_manager`
-- `pjson_node.h`: include заменён с `pstringview_pmm.h` на `pam_adapter.h` (реальная зависимость)
-- Тесты переведены на `pam_intern_string()` / `pam_search_strings()` / `pam_all_strings()`
-- Все 587 тестов проходят
-
-### 2.6 Удаление pvector_pmm ✅
-
-**Выполнено (Issue #167):** `pvector_pmm.h` удалён — обёртка над `PamManager::parray<T>` больше не нужна.
-
-**Что сделано:**
-- Удалён `pvector_pmm.h` — тонкая обёртка (210 строк) над `PamManager::parray<T>` с собственными итераторами
-- `pjson_node.h`: удалён мёртвый `#include "pvector_pmm.h"` (тип `pvector_pmm` не использовался в production-коде после задачи 2.2); удалён дублирующий `#include "pam_adapter.h"`
-- `tests/test_pvector.cpp`: переписан — тесты используют `PamManager::parray<T>` напрямую (capacity growth, front/back через data(), pointer iteration, double type, clear+push_back, pop_back on empty)
-- `tests/test_pmem_array_pmm.cpp`: удалены 7 тестов `pvector_pmm` (layout, push_back, front/back, pop_back, clear, iterators, capacity) — их функциональность покрыта тестами parray
-- Все 576 тестов проходят
+**Решение:** Удалить `parse_object()`, переименовать `parse_object_v2()` → `parse_object()`.
 
 ---
 
-## Этап 3: Обновление уровней C и D
+### Проблема 2: Двойной парсинг объектов в parse_object_v2()
 
-### 3.1 Обновление pjson_node ✅
+**Файл:** `pjson_codec.h`, строки 639–791
 
-**Выполнено (Issues #144, #145, #166, #167):** Все типы в union `node` обновлены на типы PMM в ходе этапа 2.
+При парсинге обычного (не `$ref`/`$base64`) объекта функция парсит первый ключ-значение для проверки специальных объектов, затем откатывает позицию (`st.pos = reparse_pos`, строка 757) и парсит весь объект заново. Это:
 
-**Что сделано:**
-- `node::string_val` → `PamManager::pstring` (Issue #144, План 2.1)
-- `node::array_val` → `PamManager::parray<node_id>` (Issue #145, План 2.2)
-- `node::object_val` → `PamManager::parray<object_entry>` (Issue #145, План 2.2)
-- `node::binary_val` → `PamManager::parray<uint8_t>` (Issue #145, План 2.2)
-- Все типы остаются POD (trivially copyable) — подтверждено static_assert
-- `object_entry` перемещена перед `node` (необходимо для `parray<object_entry>`)
-- Удалены все зависимости от `pstring_pmm`, `pvector_pmm`, `pmem_array_pmm`
+- Удваивает работу парсера для обычных объектов (большинство случаев)
+- Усложняет логику: два раздельных прохода парсинга со skip-логикой для значений
 
-### 3.2 Обновление pjson_codec ✅
-
-**Выполнено (Issues #144, #145):** Парсер/сериализатор обновлён в ходе миграции типов на этапе 2.
-
-**Что сделано:**
-- Парсинг строк использует `node_set_string()` → `PamManager::pstring::assign()`
-- Сериализация строк использует `node_view::as_string()` → `PamManager::pstring::c_str()`
-- Base64 кодирование/декодирование работает с `PamManager::parray<uint8_t>` через `.size()` и `.data()`
-- Массивы и объекты работают через `node_view::at(i)` и `node_view::size()`, которые используют parray прозрачно
-- Старые типы не используются: нет ссылок на `pstring_pmm`, `pvector_pmm`, `pmem_array_pmm`
-
-### 3.3 Обновление pjson_db_pmm (публичный API) ✅
-
-**Выполнено (Issues #144, #145, #166):** Публичный API обновлён в ходе этапа 2.
-
-**Что сделано:**
-- `put()`, `get()`, `erase()` работают с новыми типами PMM прозрачно через node_view
-- `batch_begin()`/`batch_end()` совместимы с `PamManager::ppool<node>` (Issue #166, План 2.4)
-- Деаллокация данных через `pstring::free_data()` и `parray::free_data()` вместо ручного `offset_to_pptr + deallocate_typed`
-- Пул узлов: `pjson_pool_pmm` = `PamManager::ppool<node>` — чанковая аллокация O(1)
-- Метрики используют `ppool::total_capacity()`, `ppool::allocated_count()`, `ppool::free_count()`
+**Решение:** Парсить все ключи-значения в один проход, создавая узлы сразу. После первого ключа проверять, является ли объект `$ref`/`$base64`. Если да — преобразовать уже созданный узел. Если нет — продолжить парсинг остальных пар ключ-значение.
 
 ---
 
-## Этап 4: Тестирование и валидация
+### Проблема 3: Глобальное состояние в pam_pmm.h
 
-### 4.1 Регрессионное тестирование ✅
+**Файл:** `pam_pmm.h`, строки 164–194 (namespace detail)
 
-**Выполнено (Issue #170):** Все существующие тесты проходят, добавлены регрессионные тесты на граничные случаи.
-
-**Что сделано:**
-- Все 574 существующих теста проходят без изменений после миграции
-- Добавлен `test_regression_pmm_types.cpp` — 32 новых теста (1243 assertion) на граничные случаи:
-  - **pstring** (7 тестов): большие строки (4 КБ), grow/shrink/grow, UTF-8, append после clear, множественные append, assign после clear, save/load персистность
-  - **parray** (4 теста): single push/pop, free_data + push_back, рост при 1000 push_back, pop_back до пустого, save/load персистность
-  - **ppool** (3 теста): чередование alloc/free с проверкой целостности, смешанные типы узлов (null/bool/int/real), save/load с partial free
-  - **pmap_pmm** (6 тестов): erase первого/последнего/единственного элемента, последовательное удаление всех, erase из пустой карты, save/load с сохранением порядка
-  - **fptr_pmm** (3 теста): find несуществующего объекта, New/Delete/find цикл, NewArray с единичным элементом
-  - **pptr byte_offset** (5 тестов): round-trip для int/double/struct, null pptr → offset 0, различные аллокации → различные offset
-  - **Интеграция** (4 теста): save/load с pstring+parray+pmap вместе, полный цикл pjson_db (string/int/double/bool/nested/array), erase + re-put после save/load
-- Итого: 606 тестов (354,101 assertion) — все проходят
-
-### 4.2 Тестирование совместимости ✅
-
-**Выполнено (Issue #172):** Добавлен `test_compat_save_load.cpp` — 13 тестов (690 assertion) на совместимость save/load.
-
-**Что сделано:**
-- Добавлен файл `tests/test_compat_save_load.cpp` с 13 тестами на полный цикл save/load
-- Все типы узлов (null, bool, int64, uint64, double, string, binary, array, object, ref) — round-trip через файл
-- Вложенные структуры (глубина 5+) — сохраняются и восстанавливаются
-- Большие строки (4 КБ+, включая UTF-8) — сохраняются побайтово
-- Массивы с 200 элементами — корректное восстановление порядка и значений
-- Объекты с 150 ключами — sorted order сохраняется
-- Метрики (`/$metrics/node_count_total`, `array_count`, `last_save_time`) — корректны после reload
-- Множественные save/load циклы (3 итерации с мутациями) — данные не повреждаются
-- Мутации после reload (erase нечётных, добавление новых) — корректный результат
-- $ref-узлы: путь сохраняется, `resolve_all_refs()` работает после reload
-- Пустая БД: save/load пустого файла без ошибок
-- Batch-мутации после reload: `batch_guard` корректно работает
-- Полный JSON документ: parse → save → load → dump даёт идентичный результат
-- Стратегия миграции: формат не изменился (типы PMM бинарно совместимы), миграция существующих файлов не требуется
-- Итого: 619 тестов (354 791 assertion) — все проходят
-
-### 4.3 Бенчмарки ✅
-
-**Выполнено (Issues #170, #172):** Бенчмарки реализованы в 3 файлах: `test_pjson_bench.cpp`, `test_pjson_db_perf.cpp`, `test_pjson_db_perf_large.cpp`, `test_compat_save_load.cpp`.
-
-**Что сделано:**
-- `test_pjson_bench.cpp`: бенчмарки node_to_string (500 iter), node_from_string (1000 iter), intern_string (10k), pool_alloc vs fptr::New (10k)
-- `test_pjson_db_perf.cpp`: put 10k int/string, get 100k, parse_into 1k, erase 10k, lifecycle, ReserveSlots
-- `test_pjson_db_perf_large.cpp`: 16 тестов — put/get/exists/erase/parse_into/dump/clone/put_ref/resolve/search_strings/search_node_strings/update_metrics/save/overwrite/ReserveSlots/deep path/lifecycle
-- `test_compat_save_load.cpp`: бенчмарк save/load 1k mixed nodes (информационный)
-- Все бенчмарки информационные — не ограничивают время, но выводят результаты в формате `[bench]`/`[perf9]`/`[perf_large]`/`[compat_bench]`
-- Покрытие: вставка JSON-объектов, поиск по пути, итерация, save/load — все измерены
-
-### 4.4 Стабильность node_id ссылок после resize (рефакторинг pjson) ✅
-
-**Выполнено (Issue #194):** Проведён анализ архитектуры pjson на предмет стабильности ссылок (node_id)
-при росте json array и json object. Написаны тесты, подтверждающие корректность.
-
-**Контекст:** При использовании pjson в [jsonRVM](https://github.com/netkeep80/jsonRVM) хранятся
-указатели (node_id) на элементы json-деревьев. При добавлении элементов в array/object внутренний
-`parray` может выполнить реаллокацию. Необходимо убедиться, что ранее полученные node_id остаются
-корректными после resize.
-
-**Результат анализа:**
-- pjson хранит элементы через `node_id` (смещение в ПАП), а не через raw-указатели
-- Узлы аллоцируются из `ppool<node>` — каждый узел получает свой слот, который не перемещается
-- При resize `parray<node_id>` перемещается только массив идентификаторов, сами узлы остаются на месте
-- Raw-указатели (`node*`), полученные через `pmm_resolve<node>()`, могут инвалидироваться при росте PMM
-- Паттерн `parray_push_back_safe()` корректно переразрешает указатели после возможного realloc
-- **Вывод:** архитектура pjson корректна для использования в jsonRVM — node_id стабильны при resize
-
-**Тесты (`test_pjson_ref_stability.cpp`):**
-- Стабильность node_id в array после resize (10 → 60 элементов)
-- Стабильность node_id разных типов (null, bool, int, uint, real, string) после resize
-- Стабильность node_id в object после resize (10 → 60 ключей)
-- Сценарий из Issue #194: сохранить ссылку на 5-й элемент, добавить 200 элементов, проверить
-- Вложенные структуры: inner refs survive outer resize
-- Object внутри array: refs survive resize обоих контейнеров
-- Крупные тесты: 1000 элементов array, 500 ключей object — все node_id валидны
-- Модификация значений через сохранённый node_id после resize
-- Итого: 11 тестов, 5330 assertion — все проходят
-
----
-
-## Ожидаемые результаты
-
-### Количественные
-
-| Метрика | До | Ожидание | Текущее состояние |
-|---------|-----|----------|-------------------|
-| Файлы в уровне A | 5 | 1–2 | 3 (pam_pmm_config.h, pam_pmm.h фасад, fptr_pmm.h обёртка) |
-| Файлы в уровне B | 5 | 1 (pstringview_pmm wrapper) | 2 (pstringview_pmm + pmap_pmm — тонкие обёртки) |
-| Строки кода (уровни A+B) | ~2500 | ~300 | ~625 (обёртки, без pam_pmm.h фасада) |
-| Собственные персистентные типы | 7 | 1–2 (тонкие обёртки) | 2 (pmap_pmm sorted array, pstringview_pmm алиасы) |
-
-**Удалённые файлы:** `pallocator_pmm.h`, `pstring_pmm.h`, `pmem_array_pmm.h`, `pvector_pmm.h`, `pam_adapter.h` — 5 файлов, ~1900 строк кода.
-
-### Качественные
-
-- ✅ **Единый API** — все персистентные типы (`pstring`, `parray`, `ppool`, `pallocator`) предоставляются PMM
-- ✅ **Меньше кода для поддержки** — основная логика в pmm, BinDiffSynchronizer фокусируется на JSON
-- ✅ **Лучшая тестируемость** — типы pmm тестируются отдельно
-- ✅ **Согласованность** — единые гарантии потокобезопасности, персистентности, управления памятью
-- ✅ **Проще интеграция** — новые проекты на базе pmm могут переиспользовать те же типы
-- ✅ **Полное удаление адаптера** — `pam_adapter.h` удалён (PMM v0.43.0, Phase 4.4)
-
----
-
-## Порядок выполнения
-
-```
-pmm Фаза 3 (параллельно с планированием миграции)
-    │
-    ├── 3.1 pstring    ──────────── Этап 2.1 (замена pstring_pmm)         ✅
-    ├── 3.2 parray     ──────────── Этап 2.2 (замена pmem_array_pmm)      ✅
-    ├── 3.3 pmap::erase ─────────── Этап 2.3 (миграция pmap_pmm)          ✅
-    ├── 3.5 pallocator  ─────────── Этап 1.3 (замена pallocator_pmm)      ✅
-    ├── 3.6 ppool      ──────────── Этап 2.4 (замена pjson_pool_pmm)      ✅
-    ├── 3.7 root object ─────────── Этап 1.2 (упрощение pam_pmm)          ✅
-    │
-    └── pmm 4.4 byte offset ─────── Этап 1.1 (удаление pam_adapter)      ✅
-                                         │
-                                    Этап 3 (обновление pjson_node, codec, db) ✅
-                                         │
-                                    Этап 4 (тестирование и валидация)
-                                         │
-                                    4.1 Регрессионное тестирование      ✅
-                                         │
-                                    4.2 Тестирование совместимости      ✅
-                                         │
-                                    4.3 Бенчмарки                       ✅
-                                         │
-                                    4.4 Стабильность node_id (resize)   ✅
-                                         │
-                                    Этап 7 (унификация итераторов)     ✅
-```
-
-Все этапы 1, 2 и 3 выполнены. Обновление типов в этапе 3 было выполнено
-параллельно с этапом 2, т.к. замена типов в node/codec/db была частью каждой задачи этапа 2.
-Этап 1.1 выполнен после обновления PMM до v0.43.0 (Phase 4.4: `pptr::byte_offset()` и
-`PersistMemoryManager::pptr_from_byte_offset<T>()`).
-Задача 4.1 выполнена: все тесты проходят, добавлены 32 регрессионных теста на граничные случаи.
-
-**Все задачи выполнены.** Этапы 1–7 и 4.1–4.4 завершены. Задача 5.10 выполнена (Issue #182).
-
-**Этап 5 (устранение дублирования кода) выполнен:** задачи 5.1–5.9 (Issue #171), задача 5.10 (Issue #182).
-
-**Этап 7 (унификация итераторов) выполнен:** задача 7.1 (Issue #184).
-
----
-
-## Этап 5: Устранение дублирования кода (Code Review, Issue #128)
-
-### Результаты Code Review
-
-Проведён полный анализ кодовой базы на предмет дублирования функциональности и кода.
-Ниже перечислены обнаруженные паттерны дублирования, отсортированные по приоритету.
-
----
-
-### 5.1 Бинарный поиск в pmap_pmm.h (Критический) ✅
-
-**Выполнено (Issue #171):** Извлечён приватный статический метод `_lower_bound()`, 4 дублирования → 1 реализация.
-
-**Файл:** `pmap_pmm.h`, строки 131–144, 207–215, 234–242, 265–272
-
-**Проблема:** Бинарный поиск (lower_bound) реализован 4 раза: в `_insert_impl()`, `find()`, `find() const`, `erase()`.
-Каждая реализация содержит идентичный цикл `while (lo < hi) { mid = (lo+hi)/2; if (Less{}(raw[mid].key, k)) lo = mid+1; else hi = mid; }`.
-
-**Решение:** Извлечь приватный метод `_lower_bound()`:
+Три статические переменные хранят глобальное состояние PMM:
 
 ```cpp
-// Приватный метод pmap_pmm
-uintptr_t _lower_bound(const Entry* raw, uintptr_t sz, const K& k) const {
-    uintptr_t lo = 0, hi = sz;
-    while (lo < hi) {
-        uintptr_t mid = (lo + hi) / 2;
-        if (Less{}(raw[mid].key, k)) lo = mid + 1;
-        else hi = mid;
-    }
-    return lo;
+static char filename[256] = {};
+static uintptr_t offset = 0;
+static bool initialized = false;
+```
+
+Это делает невозможным:
+- Одновременную работу с несколькими БД в одном процессе
+- Потокобезопасную инициализацию (data races при конкурентном вызове `pam_pmm_init`)
+- Юнит-тестирование с изоляцией (тесты зависят от глобального состояния)
+
+**Решение (поэтапно):**
+1. **Этап A:** Инкапсулировать три переменные в структуру `pam_pmm_state`
+2. **Этап B:** Передавать `pam_pmm_state&` как явный параметр вместо обращения к глобальным переменным
+3. **Этап C:** Опционально — защита `std::mutex` для потокобезопасной инициализации
+
+---
+
+### Проблема 4: Утечка временных узлов метрик
+
+**Файл:** `pjson_db_pmm.h`, метод `_get_metrics()`, строка 819
+
+Каждый вызов `_get_metrics()` аллоцирует временный узел через `pam_pmm_create<node>()`, но никогда его не освобождает:
+
+```cpp
+uintptr_t tmp_off = pam_pmm_create<node>();  // утечка!
+```
+
+При частом опросе метрик (мониторинг, CI) количество утечённых узлов растёт неограниченно.
+
+**Решение:** Переиспользовать один pre-allocated узел для метрик, аллоцированный при создании `pjson_db_pmm`. Либо освобождать узел после использования, возвращая значение напрямую (uint64_t) вместо node_view.
+
+---
+
+### Проблема 5: Неэффективное побайтовое копирование binary в node_clone()
+
+**Файл:** `pjson_node.h`, строки 1087–1116
+
+При клонировании binary-узла данные копируются побайтово с переразрешением указателей после каждого `push_back`:
+
+```cpp
+for ( uintptr_t i = 0; i < bin_size; ++i ) {
+    uint8_t byte = bin_data[i];
+    node_binary_push_back( dst_id, byte );
+    src = pmm_resolve<node>( src_id );  // на каждой итерации!
+    bin_data = src->binary_val.data();
 }
 ```
 
-**Экономия:** ~30 строк, 4 места → 1 реализация.
+Для binary-узла размером N байт это O(N) переразрешений и O(N²) операций при росте parray.
 
-**Примечание:** Аналогичный бинарный поиск в `parray_insert_sorted_object_entry()` и `node_object_find_key()` (`pjson_node.h`) использует другие типы ключей и компараторы, поэтому объединение с `pmap_pmm` нецелесообразно. Однако для `object_entry` уже существует единая реализация `node_object_find_key()`.
-
----
-
-### 5.2 Дублирование const/non-const пар в pmap_pmm.h (Средний) ✅
-
-**Выполнено (Issue #171):** non-const `find()` делегирует в const через паттерн Скотта Мейерса.
-
-**Файл:** `pmap_pmm.h`, строки 199–221 vs 226–248 (find/find const)
-
-**Проблема:** `find(const K& k)` и `find(const K& k) const` содержат идентичную логику (~20 строк каждый), отличаясь только квалификатором `const`.
-
-**Решение:** Использовать паттерн Скотта Мейерса (non-const вызывает const):
-
-```cpp
-const V* find(const K& k) const { /* единственная реализация */ }
-V* find(const K& k) {
-    return const_cast<V*>(static_cast<const pmap_pmm*>(this)->find(k));
-}
-```
-
-**Экономия:** ~18 строк.
+**Решение:** Скопировать данные в промежуточный `std::vector<uint8_t>`, затем выполнить bulk-вставку или предварительно зарезервировать место.
 
 ---
 
-### 5.3 Итераторы iterator/const_iterator в pmap_pmm.h (Средний) ✅
+### Проблема 6: Неэффективное создание + удаление временных слотов в node_clone()
 
-**Выполнено (Issue #171):** Шаблонный `iterator_base<IsConst>` заменяет два идентичных класса.
+**Файл:** `pjson_node.h`, строки 1118–1158 (array), 1160–1200 (object)
 
-**Файл:** `pmap_pmm.h`, строки 328–363 vs 368–403
+При клонировании массива/объекта для каждого элемента:
+1. Рекурсивно клонируется элемент → создаётся новый узел
+2. `node_array_push_back()` создаёт ещё один null-узел (slot)
+3. Клонированный node_id записывается поверх slot
+4. Временный null-узел удаляется через `fptr::Delete()`
 
-**Проблема:** `iterator` и `const_iterator` — идентичные классы (~35 строк каждый), отличающиеся только const-квалификаторами в типах указателей/ссылок.
+Это удваивает количество аллокаций/деаллокаций.
 
-**Решение:** Использовать шаблонный базовый итератор с параметром `IsConst`:
-
-```cpp
-template <bool IsConst>
-class iterator_base {
-    using MapPtr = std::conditional_t<IsConst, const pmap_pmm*, pmap_pmm*>;
-    using Ref    = std::conditional_t<IsConst, const Entry&, Entry&>;
-    using Ptr    = std::conditional_t<IsConst, const Entry*, Entry*>;
-    MapPtr _pm; uintptr_t _idx;
-public:
-    iterator_base(MapPtr pm, uintptr_t idx) : _pm(pm), _idx(idx) {}
-    Ref operator*() { return _pm->arr_.data()[_idx]; }
-    Ptr operator->() { return &_pm->arr_.data()[_idx]; }
-    iterator_base& operator++() { ++_idx; return *this; }
-    iterator_base operator++(int) { auto t = *this; ++_idx; return t; }
-    bool operator==(const iterator_base& o) const { return _idx == o._idx; }
-    bool operator!=(const iterator_base& o) const { return _idx != o._idx; }
-};
-using iterator       = iterator_base<false>;
-using const_iterator = iterator_base<true>;
-```
-
-**Экономия:** ~30 строк.
+**Решение:** Добавить функцию `node_array_push_back_id(node_off, existing_id)` для прямой вставки существующего node_id в массив без создания временного слота.
 
 ---
 
-### 5.4 Паттерн put-методов в pjson_db_pmm.h (Средний) ✅
+### Проблема 7: Отсутствие escaping '/' в path-сегментах
 
-**Выполнено (Issue #171):** Извлечён приватный шаблонный helper `_put_impl()`, 6 put-методов и put_ref делегируют в него.
+**Файл:** `pjson_db_pmm.h`, метод `_walk_path()`
 
-**Файл:** `pjson_db_pmm.h`, строки 278–373
-
-**Проблема:** 6 перегрузок `put()` (`bool`, `int64_t`, `uint64_t`, `double`, `const char*`) + `put_ref()` + `parse_into()` содержат одинаковый boilerplate:
+Символ `/` используется как разделитель пути, но не поддерживается экранирование. Если ключ объекта содержит `/`, обратиться к нему через path-адресацию невозможно:
 
 ```cpp
-bool put(const char* path, TYPE value) {
-    if (_is_metrics_path(path)) return false;
-    node_id slot = _ensure_path(path);
-    if (slot == 0) return false;
-    node_set_XXX(slot, value);        // ← единственное отличие
-    _update_metrics_after_mutation();
-    return true;
-}
+db.put("/config", R"({"a/b": 42})");
+db.get("/config/a/b");  // ищет config → "a" → "b" вместо config → "a/b"
 ```
 
-**Решение:** Извлечь приватный шаблонный helper:
-
-```cpp
-template <typename F>
-bool _put_impl(const char* path, F&& setter) {
-    if (_is_metrics_path(path)) return false;
-    node_id slot = _ensure_path(path);
-    if (slot == 0) return false;
-    setter(slot);
-    _update_metrics_after_mutation();
-    return true;
-}
-
-// Использование:
-bool put(const char* path, bool value) {
-    return _put_impl(path, [value](node_id s){ node_set_bool(s, value); });
-}
-```
-
-**Экономия:** ~40 строк.
+**Решение:** Поддержать RFC 6901 (JSON Pointer): символ `~` экранируется как `~0`, `/` как `~1`.
 
 ---
 
-### 5.5 Рекурсивный обход поддерева (switch по node_tag) (Средний) ✅
+### Проблема 8: Hardcoded максимальная глубина $ref
 
-**Выполнено (Issue #171):** Реализован `pjson_traverse_subtree()` с visitor-паттерном в `pjson_db_helpers.h`. Visitors: `pjson_count_visitor`, `pjson_search_strings_visitor`. `_free_node_tree()` и `_resolve_refs_in_subtree()` оставлены как есть (post-visit и зависимость от db::get()).
+**Файл:** `pjson_node.h`, метод `node_view::deref()`, строка 510
 
-**Файлы:**
-- `pjson_db_helpers.h`: `pjson_count_nodes_in_subtree()` (строки 64–116)
-- `pjson_db_helpers.h`: `pjson_search_node_strings_in_subtree()` (строки 124–180)
-- `pjson_db_pmm.h`: `_free_node_tree()` (строки 993–1055)
-- `pjson_db_pmm.h`: `_resolve_refs_in_subtree()` (строки 1269–1310)
-
-**Проблема:** Все 4 функции содержат идентичный обход: `switch(tag)`, case array (итерация `at(i)`), case object (итерация `value_at(i)`), рекурсивный вызов. Отличается только действие при посещении узла.
-
-**Решение:** Реализовать обобщённый шаблон обхода (visitor pattern):
+Максимальная глубина разыменования $ref захардкожена как `32`:
 
 ```cpp
-template <typename Visitor>
-void traverse_subtree(node_id id, Visitor&& vis) {
-    if (id == 0) return;
-    const node_view v{id};
-    if (!v.valid()) return;
-    vis.visit(id, v);
-    if (v.is_array()) {
-        uintptr_t sz = v.size();
-        for (uintptr_t i = 0; i < sz; ++i) {
-            node_view elem = v.at(i);
-            if (elem.valid()) traverse_subtree(elem.id, vis);
-        }
-    } else if (v.is_object()) {
-        uintptr_t sz = v.size();
-        for (uintptr_t i = 0; i < sz; ++i) {
-            node_view val = v.value_at(i);
-            if (val.valid()) traverse_subtree(val.id, vis);
-        }
-    }
-}
+node_view deref( bool recursive = true, uintptr_t max_depth = 32 ) const
 ```
 
-**Примечание:** `_free_node_tree()` требует дополнительной логики (освобождение данных после обхода), поэтому может потребоваться `pre_visit`/`post_visit` или обход с обратным вызовом. Также `_resolve_refs_in_subtree()` зависит от `pjson_db_pmm::get()`, поэтому останется методом класса, но может делегировать обход.
+Магическое число без обоснования.
 
-**Экономия:** ~80 строк (из ~160 совокупных).
+**Решение:** Вынести в именованную константу `PJSON_MAX_REF_DEPTH = 32` с документацией.
 
 ---
 
-### 5.6 Инициализация null-узла (дублирование node_init_null) (Низкий) ✅
+### Проблема 9: Дублирование обхода поддерева (array/object) в _free_node_tree и _resolve_refs_in_subtree
 
-**Выполнено (Issue #171):** Ручная инициализация в `node_array_push_back()` и `node_object_insert()` заменена на `node_init_null()`.
+**Файл:** `pjson_db_pmm.h`, методы `_free_node_tree()` (строки 931–993) и `_resolve_refs_in_subtree()` (строки 1190–1231)
 
-**Файл:** `pjson_node.h`, строки 930–940 vs 769–778
+Оба метода реализуют рекурсивный обход поддерева с одинаковой структурой: проверка типа → для array/object рекурсия по элементам. Это аналогично `pjson_traverse_subtree()` из `pjson_db_helpers.h`, но не использует его.
 
-**Проблема:** В `node_array_push_back()` и `node_object_insert()` слот инициализируется вручную (5 строк), хотя существует `node_init_null()`. Аналогичный код в `node_clone()`.
-
-```cpp
-// Повторяется 3 раза:
-slot->tag                       = node_tag::null;
-slot->_pad                      = 0;
-slot->ref_val.path_length       = 0;
-slot->ref_val.path_chars_offset = 0;
-slot->ref_val.target            = 0;
-```
-
-**Решение:** Заменить на вызов `node_init_null(slot_off)` после `fptr.New()`.
-
-**Экономия:** ~10 строк.
+**Решение:** Переписать `_free_node_tree()` и `_resolve_refs_in_subtree()` через `pjson_traverse_subtree()` с соответствующими visitor-функторами.
 
 ---
 
-### 5.7 Делегирующие обёртки pjson_pmm_count/search (Низкий) ✅
+### Проблема 10: node_view::tag() вызывает _resolve() при каждой проверке is_*()
 
-**Выполнено (Issue #171):** Обёртки `pjson_pmm_count_nodes_in_subtree()` и `pjson_pmm_search_node_strings_in_subtree()` удалены, вызовы заменены на прямые из `pjson_db_helpers.h`.
+**Файл:** `pjson_node.h`, строки 283–308
 
-**Файл:** `pjson_db_pmm.h`, строки 77–88
+Каждый вызов `is_string()`, `is_array()`, `is_number()` и т.д. вызывает `tag()`, который выполняет `pmm_resolve<node>(id)`. При цепочке проверок (`is_null() || is_boolean() || is_integer() || ...`) один и тот же узел разрешается многократно.
 
-**Проблема:** `pjson_pmm_count_nodes_in_subtree()` и `pjson_pmm_search_node_strings_in_subtree()` — однострочные делегаты к одноимённым функциям из `pjson_db_helpers.h`. Они не добавляют никакой логики.
+Метод `is_number()` вызывает `tag()` трижды:
 
-**Решение:** Удалить обёртки и вызывать функции из `pjson_db_helpers.h` напрямую.
+```cpp
+bool is_number() const { return is_integer() || is_uinteger() || is_real(); }
+```
 
-**Экономия:** ~12 строк.
+**Решение (низкий приоритет):** Кэширование тега в node_view не подходит (node_view — легковесный accessor). Можно рассмотреть метод `tag_checked()`, который одновременно проверяет тег и возвращает указатель, для горячих путей.
 
 ---
 
-### 5.8 Null-guard паттерн в pjson_pool_pmm.h (Низкий) ✅
+### Проблема 11: Отсутствие const-корректности в _walk_path
 
-**Выполнено (Issue #171):** Извлечены шаблонные helpers `pjson_resolve_or_null<T>()` и `pjson_resolve_const_or_null<T>()`, 8 функций упрощены.
+**Файл:** `pjson_db_pmm.h`, строка 593
 
-**Файл:** `pjson_pool_pmm.h`
+Метод `_walk_path<bool>()` объявлен `const`, но в режиме `CreateMode=true` модифицирует дерево узлов. Это возможно только потому, что PMM — глобальное состояние, и модификация происходит через глобальные функции, а не через членов класса.
 
-**Проблема:** Повторяющийся паттерн `if (pool_off == 0) return X; auto* pool = pmm_resolve<...>(pool_off); if (pool == nullptr) return X;` повторяется в 8 функциях.
-
-**Решение:** Извлечь inline-helper:
-
-```cpp
-template <typename T>
-T* resolve_or_null(uintptr_t off) {
-    if (off == 0) return nullptr;
-    return pmm_resolve<T>(off);
-}
-```
-
-**Экономия:** ~16 строк.
+**Связь:** Это следствие Проблемы 3 (глобальное состояние).
 
 ---
 
-### 5.9 Стековая копия parray для безопасности при realloc (Низкий) ✅
+### Проблема 12: Нет валидации UTF-8 codepoints > 0x10FFFF в парсере
 
-**Выполнено (Issue #171):** Извлечён шаблонный helper `parray_push_back_safe<T>()`, применён в `node_array_push_back()` и `node_binary_push_back()`. `parray_insert_sorted_object_entry()` и `pmap_pmm::_insert_impl()` оставлены как есть (более сложная логика insert+memmove).
+**Файл:** `pjson_codec.h`, строка 409
 
-**Файлы:** `pjson_node.h` (node_array_push_back, node_binary_push_back), `pmap_pmm.h` (_insert_impl), `pjson_node.h` (parray_insert_sorted_object_entry)
+После обработки суррогатной пары или одиночного `\uXXXX`, парсер вызывает `encode_utf8(out, cp)` без проверки, что `cp <= 0x10FFFF`. Значения выше максимума Unicode формируют невалидный UTF-8.
 
-**Проблема:** Паттерн «стековая копия parray → push_back → переразрешение node → запись обратно» повторяется 4 раза:
-
-```cpp
-PamManager::parray<T> arr_copy = n->xxx_val;
-arr_copy.push_back(elem);
-n = pmm_resolve<node>(node_off);
-n->xxx_val = arr_copy;
-```
-
-**Решение:** Шаблонный helper:
-
-```cpp
-template <typename T, typename NodeField>
-void parray_push_back_safe(uintptr_t node_off, NodeField node::* field, const T& elem) {
-    node* n = pmm_resolve<node>(node_off);
-    if (n == nullptr) return;
-    auto arr_copy = n->*field;
-    arr_copy.push_back(elem);
-    n = pmm_resolve<node>(node_off);
-    if (n != nullptr) n->*field = arr_copy;
-}
-```
-
-**Экономия:** ~20 строк.
+**Решение:** Добавить проверку `cp > 0x10FFFF → return false`.
 
 ---
 
-### 5.10 Сходство get() и _ensure_path() в pjson_db_pmm.h ✅
+## План рефакторинга
 
-**Выполнено (Issue #182):** Извлечён общий шаблонный метод `_walk_path<CreateMode>()`, `get()` и `_ensure_path()` делегируют в него.
+### Приоритет 1 (критичные / простые)
 
-**Файл:** `pjson_db_pmm.h`
+| # | Проблема | Файл | Сложность | Влияние |
+|---|----------|------|-----------|---------|
+| 1 | Мёртвый код parse_object() | pjson_codec.h | Низкая | Чистота кода |
+| 8 | Hardcoded max_depth = 32 | pjson_node.h | Низкая | Читаемость |
+| 12 | Нет валидации UTF-8 > 0x10FFFF | pjson_codec.h | Низкая | Корректность |
+| 4 | Утечка временных узлов метрик | pjson_db_pmm.h | Средняя | Стабильность |
 
-**Проблема:** `get()` и `_ensure_path()` содержали идентичный цикл разбора пути (split на '/', навигация по object/array, разыменование $ref). Различие в поведении: `get()` возвращает ошибку при отсутствии, `_ensure_path()` создаёт промежуточные узлы.
+### Приоритет 2 (оптимизация)
 
-**Решение:** Шаблонный метод `_walk_path<bool CreateMode>()` с `if constexpr` для ветвления:
-- `CreateMode=false` (read): возвращает 0 и код ошибки (`node_error`) при отсутствии узла
-- `CreateMode=true` (create): создаёт промежуточные узлы (object/array) по мере необходимости
+| # | Проблема | Файл | Сложность | Влияние |
+|---|----------|------|-----------|---------|
+| 5 | Побайтовое копирование binary | pjson_node.h | Средняя | Производительность |
+| 6 | Лишние аллокации в node_clone | pjson_node.h | Средняя | Производительность |
+| 9 | Дублирование обхода поддерева | pjson_db_pmm.h | Средняя | Кодовая база |
+| 2 | Двойной парсинг объектов | pjson_codec.h | Высокая | Производительность |
 
-```cpp
-template <bool CreateMode>
-node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) const
-{
-    // ... общий цикл разбора пути ...
-    // if constexpr (CreateMode) — создание узлов
-    // else — возврат ошибки
-}
-```
+### Приоритет 3 (архитектурные)
 
-- `get()` вызывает `_walk_path<false>(path, deref_refs, &err)` и оборачивает результат в `node_view`
-- `_ensure_path()` вызывает `_walk_path<true>(path, true, nullptr)`
-
-**Экономия:** ~60 строк (из ~175 совокупных), единая реализация парсинга пути и навигации.
-
----
-
-### Сводная таблица
-
-| # | Паттерн | Файл(ы) | Повторов | Строк | Приоритет |
-|---|---------|---------|----------|-------|-----------|
-| 5.1 | Бинарный поиск lower_bound | pmap_pmm.h | 4 | ~30 | Критический |
-| 5.2 | const/non-const find пара | pmap_pmm.h | 2 | ~18 | Средний |
-| 5.3 | iterator/const_iterator | pmap_pmm.h | 2 | ~30 | Средний |
-| 5.4 | put-методы boilerplate | pjson_db_pmm.h | 7 | ~40 | Средний |
-| 5.5 | Рекурсивный обход switch | db_helpers, db_pmm | 4 | ~80 | Средний |
-| 5.6 | Инициализация null-узла | pjson_node.h | 3 | ~10 | Низкий |
-| 5.7 | Делегирующие обёртки | pjson_db_pmm.h | 2 | ~12 | Низкий |
-| 5.8 | Null-guard в pool функциях | pjson_pool_pmm.h | 8 | ~16 | Низкий |
-| 5.9 | parray push_back safe | pjson_node.h, pmap_pmm.h | 4 | ~20 | Низкий |
-| 5.10 | get() vs _ensure_path() → _walk_path | pjson_db_pmm.h | 2 | ~60 | Выполнено ✅ |
-| **Итого** | | | **40** | **~316** | |
-
-### Рекомендуемый порядок выполнения
-
-1. **5.1** — Бинарный поиск в pmap_pmm (самый простой и безопасный рефакторинг)
-2. **5.2** — const/non-const find (зависит от 5.1)
-3. **5.3** — Шаблонный итератор (независимо)
-4. **5.6** — node_init_null (тривиальный, можно сделать попутно)
-5. **5.7** — Удаление делегатов (тривиальный)
-6. **5.4** — put-методы (требует C++17 `if constexpr` или лямбд)
-7. **5.5** — Visitor-обход (наибольший эффект, но наибольший риск)
-8. **5.8, 5.9** — Мелкие helpers (можно делать попутно)
-
-### Связь с pjson/nlohmann::json/jsonRVM
-
-Учитывая, что pjson в будущем будет использоваться в [jsonRVM](https://github.com/netkeep80/jsonRVM), рефакторинг на этапе 5 особенно важен:
-
-- **Visitor-паттерн (5.5)** станет ключевым для расширения набора операций над JSON-деревом в jsonRVM без дублирования обхода
-- **Шаблонный put (5.4)** упростит добавление новых типов узлов при расширении JSON-модели
-- **Общий _lower_bound (5.1–5.2)** обеспечит единую реализацию поиска в sorted-array, что критично при добавлении новых контейнерных типов
-
-## Этап 6: Использование parray::insert/erase (Issue #183, PMM PR #234)
-
-### 6.1 Обновление PMM до версии с parray::insert/erase ✅
-
-**Выполнено (Issue #183):** Обновлён `deps/pmm/pmm.h` до версии с `parray::insert(index, value)` и `parray::erase(index)` (PMM Issue #233, PR #234).
-
-### 6.2 Рефакторинг pmap_pmm.h ✅
-
-**Выполнено (Issue #183):**
-
-- `_insert_impl()`: заменён паттерн `push_back(empty) + memmove + write` на `arr_copy.insert(idx, entry)` — сокращение с ~20 строк до ~10
-- `erase()`: заменён паттерн `memmove + pop_back` на `arr_.erase(lo)` — сокращение с 7 строк до 1
-- Удалён `insert(k, v, self_off)` — 3-аргументная перегрузка (compatibility shim); `insert(k, v)` сам вычисляет `self_off`
-- Удалён `#include <cstring>` — заменён `std::memset(&def, 0, sizeof(V))` на `V def{}`
-- Сохранён `insert_direct()` — используется в production-коде (pam_pmm.h) и тестах
-
-### 6.3 Рефакторинг pjson_node.h ✅
-
-**Выполнено (Issue #183):**
-
-- `parray_insert_sorted_object_entry()`: заменён паттерн `push_back(empty) + memmove + write` на `arr.insert(idx, value)` — сокращение с 9 строк до 1
-
-### 6.4 Рефакторинг pjson_db_pmm.h ✅
-
-**Выполнено (Issue #183):**
-
-- `_object_erase()`: заменён ручной цикл сдвига + прямой `_size--` на `n->object_val.erase(del_idx)` — сокращение с 5 строк до 1
-- `_array_erase_at()`: заменён ручной цикл сдвига + зануление + `_size--` на `n->array_val.erase(idx)` — сокращение с 10 строк до 3
-
-### Сводка Этапа 6
-
-| Файл | Изменение | Строк удалено |
-|------|-----------|---------------|
-| `pmap_pmm.h` | `parray::insert` + `parray::erase` | ~20 |
-| `pjson_node.h` | `parray::insert` | ~8 |
-| `pjson_db_pmm.h` | `parray::erase` (2 места) | ~15 |
-| **Итого** | | **~43 строки** |
-
-## Этап 7: Унификация итераторов и диапазонов (Issue #184)
-
-### 7.1 CRTP-база итераторов pjson_iterator_base ✅
-
-**Выполнено (Issue #184):** `node_view_iterator` и `object_iterator` унифицированы через CRTP-базу `pjson_iterator_base<Derived, Value>`.
-
-**Файл:** `pjson_node.h`
-
-**Проблема:** `node_view_iterator` и `object_iterator` содержали идентичный boilerplate (~30 строк каждый):
-- `iterator_category`, `value_type`, `difference_type`, `pointer`, `reference` — идентичные typedef-ы
-- `operator++()` / `operator++(int)` — идентичная реализация
-- `operator==` / `operator!=` — идентичная реализация
-- Единственное различие — `operator*()` (разыменование)
-
-Аналогичный паттерн — дублирование `object_items_range` и `array_range` (идентичные структуры с `node_id` + `uintptr_t sz` + `begin()`/`end()`).
-
-**Решение:**
-1. CRTP-шаблон `pjson_iterator_base<Derived, Value>`:
-   - Содержит общие поля `nid` (node_id контейнера) и `idx` (текущий индекс)
-   - Реализует `operator++`, `operator++(int)`, `operator==`, `operator!=`
-   - Derived-классы определяют только `operator*() const`
-2. Шаблонный диапазон `pjson_range<Iterator>`:
-   - Заменяет `object_items_range` и `array_range`
-   - `using object_items_range = pjson_range<object_iterator>`
-   - `using array_range = pjson_range<node_view_iterator>`
-
-```cpp
-// CRTP-база итераторов
-template <typename Derived, typename Value> struct pjson_iterator_base {
-    node_id nid; uintptr_t idx;
-    // operator++, operator++(int), operator==, operator!=
-};
-
-// Конкретные итераторы — только operator*()
-struct node_view_iterator : pjson_iterator_base<node_view_iterator, node_view> {
-    using pjson_iterator_base::pjson_iterator_base;
-    node_view operator*() const { return node_view{nid}.at(idx); }
-};
-struct object_iterator : pjson_iterator_base<object_iterator, object_item> {
-    using pjson_iterator_base::pjson_iterator_base;
-    object_item operator*() const { ... }
-};
-
-// Шаблонный диапазон
-template <typename Iterator> struct pjson_range { ... };
-using object_items_range = pjson_range<object_iterator>;
-using array_range        = pjson_range<node_view_iterator>;
-```
-
-**Экономия:** ~22 строки (pjson_node.h: 1391 → 1369 строк).
-Удалены 4 дублирования (operator++, operator++(int), operator==, operator!=) + 2 дублирования range-структур.
-
-### Сводка Этапа 7
-
-| Файл | Изменение | Строк удалено |
-|------|-----------|---------------|
-| `pjson_node.h` | CRTP-база `pjson_iterator_base` + `pjson_range<Iterator>` | ~22 |
-| **Итого** | | **~22 строки** |
+| # | Проблема | Файл | Сложность | Влияние |
+|---|----------|------|-----------|---------|
+| 3 | Глобальное состояние PMM | pam_pmm.h | Высокая | Архитектура |
+| 7 | Нет escaping '/' в путях | pjson_db_pmm.h | Средняя | Совместимость |
+| 10 | Многократный resolve в is_*() | pjson_node.h | Средняя | Производительность |
+| 11 | const-корректность _walk_path | pjson_db_pmm.h | Средняя | Корректность |
 
 ---
 
-*Документ создан 2026-03-19 на основе анализа BinDiffSynchronizer и плана pmm Фазы 3.*
-*Обновлён 2026-03-21: отмечены выполненные задачи 1.2, 3.1, 3.2, 3.3 (Issue #168).*
-*Обновлён 2026-03-21: выполнена задача 1.1 — удалён pam_adapter.h после обновления PMM до v0.43.0 (Issue #169).*
-*Обновлён 2026-03-21: выполнена задача 4.1 — регрессионное тестирование, 32 новых теста (Issue #170).*
-*Обновлён 2026-03-21: code review и план устранения дублирования кода (Issue #128).*
-*Обновлён 2026-03-21: выполнен Этап 5 — устранение дублирования кода, задачи 5.1–5.9 (Issue #171).*
-*Обновлён 2026-03-21: выполнены задачи 4.2 (совместимость save/load) и 4.3 (бенчмарки) (Issue #172).*
-*Обновлён 2026-03-21: задача 4.4 — тестирование стабильности node_id ссылок после resize array/object (Issue #194).*
-*Обновлён 2026-03-21: задача 5.10 — объединение get() и _ensure_path() в общий _walk_path<CreateMode>() (Issue #182).*
-*Обновлён 2026-03-21: Этап 6 — рефакторинг на parray::insert/erase (Issue #183, PMM PR #234).*
-*Обновлён 2026-03-21: Этап 7 — унификация итераторов через CRTP-базу pjson_iterator_base и шаблонный pjson_range (Issue #184).*
+## Рекомендуемый порядок выполнения
+
+```
+Этап 8: Приоритет 1 — критичные / простые исправления
+  8.1  Удалить parse_object(), переименовать parse_object_v2() → parse_object()
+  8.2  Вынести PJSON_MAX_REF_DEPTH = 32
+  8.3  Добавить валидацию cp > 0x10FFFF
+  8.4  Исправить утечку временных узлов метрик
+       → тесты: все 630 тестов проходят
+
+Этап 9: Приоритет 2 — оптимизация
+  9.1  Bulk-копирование binary в node_clone()
+  9.2  Прямая вставка node_id в массив (node_array_push_back_id)
+  9.3  _free_node_tree и _resolve_refs через pjson_traverse_subtree
+  9.4  Оптимизация parse_object: один проход вместо двух
+       → тесты: бенчмарки подтверждают улучшения
+
+Этап 10: Приоритет 3 — архитектурные улучшения
+  10.1  Инкапсуляция глобального состояния pam_pmm
+  10.2  Поддержка RFC 6901 (JSON Pointer) для путей
+  10.3  Оптимизация tag-проверок на горячих путях
+  10.4  const-корректность с явной передачей состояния
+```
+
+---
+
+## История документа
+
+| Дата | Изменение |
+|------|-----------|
+| 2026-03-21 | Переписан: результаты code review, анализ проблем, новый план рефакторинга (Issue #199) |
+| 2026-03-20 | Этап 7: CRTP-база pjson_iterator_base (Issue #184) |
+| 2026-03-19 | Этап 6: parray::insert/erase (Issue #183) |
+| 2026-03-18 | Этап 5: дедупликация кода (Issues #175–#182) |
+| 2026-03-17 | Этап 4: тестирование (Issues #170, #172, #194) |
+| 2026-03-15 | Этапы 1–3: миграция на PMM (Issues #143–#169) |
