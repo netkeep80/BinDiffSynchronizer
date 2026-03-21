@@ -211,7 +211,7 @@ TEST_CASE( "pjson ref stability: node_id remains valid after object resize", "[p
 // Сценарий из Issue #194: сохранить указатель, добавить элементы, проверить
 // =============================================================================
 
-TEST_CASE( "pjson ref stability: Issue #194 scenario — save ref, grow array, verify",
+TEST_CASE( "pjson ref stability: Issue #194 scenario - save ref, grow array, verify",
            "[pjson][ref_stability][array][issue194]" )
 {
     reset_pam();
@@ -258,7 +258,7 @@ TEST_CASE( "pjson ref stability: Issue #194 scenario — save ref, grow array, v
     fn.Delete();
 }
 
-TEST_CASE( "pjson ref stability: Issue #194 scenario — save ref, grow object, verify",
+TEST_CASE( "pjson ref stability: Issue #194 scenario - save ref, grow object, verify",
            "[pjson][ref_stability][object][issue194]" )
 {
     reset_pam();
@@ -310,7 +310,7 @@ TEST_CASE( "pjson ref stability: Issue #194 scenario — save ref, grow object, 
 // Стабильность node_id при вложенных структурах и resize
 // =============================================================================
 
-TEST_CASE( "pjson ref stability: nested array — inner refs survive outer resize",
+TEST_CASE( "pjson ref stability: nested array - inner refs survive outer resize",
            "[pjson][ref_stability][array][nested]" )
 {
     reset_pam();
@@ -352,7 +352,7 @@ TEST_CASE( "pjson ref stability: nested array — inner refs survive outer resiz
     outer.Delete();
 }
 
-TEST_CASE( "pjson ref stability: object inside array — refs survive resize", "[pjson][ref_stability][nested]" )
+TEST_CASE( "pjson ref stability: object inside array - refs survive resize", "[pjson][ref_stability][nested]" )
 {
     reset_pam();
 
@@ -403,7 +403,7 @@ TEST_CASE( "pjson ref stability: object inside array — refs survive resize", "
 // Крупный тест: 1000 элементов — множественный resize
 // =============================================================================
 
-TEST_CASE( "pjson ref stability: 1000 array elements — all node_ids survive", "[pjson][ref_stability][array][large]" )
+TEST_CASE( "pjson ref stability: 1000 array elements - all node_ids survive", "[pjson][ref_stability][array][large]" )
 {
     reset_pam();
     fptr<node> fn;
@@ -439,7 +439,7 @@ TEST_CASE( "pjson ref stability: 1000 array elements — all node_ids survive", 
     fn.Delete();
 }
 
-TEST_CASE( "pjson ref stability: 500 object keys — all node_ids survive", "[pjson][ref_stability][object][large]" )
+TEST_CASE( "pjson ref stability: 500 object keys - all node_ids survive", "[pjson][ref_stability][object][large]" )
 {
     reset_pam();
     fptr<node> fn;
