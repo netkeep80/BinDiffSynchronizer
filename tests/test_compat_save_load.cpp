@@ -211,8 +211,7 @@ TEST_CASE( "compat: nested structures survive save/load", "[compat][save_load]" 
         db.put( "/a/b/x", 3.14 );
 
         // Вложенный JSON через parse_into
-        db.parse_into( "/nested",
-                       R"({"level1":{"level2":{"level3":{"level4":{"level5":"bottom"}}}}})" );
+        db.parse_into( "/nested", R"({"level1":{"level2":{"level3":{"level4":{"level5":"bottom"}}}}})" );
 
         db.save();
         pam_pmm_destroy();
@@ -905,10 +904,9 @@ TEST_CASE( "compat: save/load benchmark with 1k nodes", "[compat][save_load][ben
             }
         }
 
-        auto      t0 = bench_clk::now();
+        auto t0 = bench_clk::now();
         db.save();
-        long long save_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>( bench_clk::now() - t0 ).count();
+        long long save_ms = std::chrono::duration_cast<std::chrono::milliseconds>( bench_clk::now() - t0 ).count();
 
         std::printf( "[compat_bench] save %u mixed nodes: %lld ms\n", BENCH_N, save_ms );
 
@@ -919,10 +917,9 @@ TEST_CASE( "compat: save/load benchmark with 1k nodes", "[compat][save_load][ben
     {
         reset_pam_compat();
 
-        auto      t0 = bench_clk::now();
+        auto t0 = bench_clk::now();
         pam_pmm_init( filename );
-        long long load_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>( bench_clk::now() - t0 ).count();
+        long long load_ms = std::chrono::duration_cast<std::chrono::milliseconds>( bench_clk::now() - t0 ).count();
 
         pjson_db_pmm db;
 
