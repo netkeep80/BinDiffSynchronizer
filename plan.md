@@ -310,7 +310,308 @@ pmm Фаза 3 (параллельно с планированием мигра�
 
 ---
 
+## Этап 5: Устранение дублирования кода (Code Review, Issue #128)
+
+### Результаты Code Review
+
+Проведён полный анализ кодовой базы на предмет дублирования функциональности и кода.
+Ниже перечислены обнаруженные паттерны дублирования, отсортированные по приоритету.
+
+---
+
+### 5.1 Бинарный поиск в pmap_pmm.h (Критический)
+
+**Файл:** `pmap_pmm.h`, строки 131–144, 207–215, 234–242, 265–272
+
+**Проблема:** Бинарный поиск (lower_bound) реализован 4 раза: в `_insert_impl()`, `find()`, `find() const`, `erase()`.
+Каждая реализация содержит идентичный цикл `while (lo < hi) { mid = (lo+hi)/2; if (Less{}(raw[mid].key, k)) lo = mid+1; else hi = mid; }`.
+
+**Решение:** Извлечь приватный метод `_lower_bound()`:
+
+```cpp
+// Приватный метод pmap_pmm
+uintptr_t _lower_bound(const Entry* raw, uintptr_t sz, const K& k) const {
+    uintptr_t lo = 0, hi = sz;
+    while (lo < hi) {
+        uintptr_t mid = (lo + hi) / 2;
+        if (Less{}(raw[mid].key, k)) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+```
+
+**Экономия:** ~30 строк, 4 места → 1 реализация.
+
+**Примечание:** Аналогичный бинарный поиск в `parray_insert_sorted_object_entry()` и `node_object_find_key()` (`pjson_node.h`) использует другие типы ключей и компараторы, поэтому объединение с `pmap_pmm` нецелесообразно. Однако для `object_entry` уже существует единая реализация `node_object_find_key()`.
+
+---
+
+### 5.2 Дублирование const/non-const пар в pmap_pmm.h (Средний)
+
+**Файл:** `pmap_pmm.h`, строки 199–221 vs 226–248 (find/find const)
+
+**Проблема:** `find(const K& k)` и `find(const K& k) const` содержат идентичную логику (~20 строк каждый), отличаясь только квалификатором `const`.
+
+**Решение:** Использовать паттерн Скотта Мейерса (non-const вызывает const):
+
+```cpp
+const V* find(const K& k) const { /* единственная реализация */ }
+V* find(const K& k) {
+    return const_cast<V*>(static_cast<const pmap_pmm*>(this)->find(k));
+}
+```
+
+**Экономия:** ~18 строк.
+
+---
+
+### 5.3 Итераторы iterator/const_iterator в pmap_pmm.h (Средний)
+
+**Файл:** `pmap_pmm.h`, строки 328–363 vs 368–403
+
+**Проблема:** `iterator` и `const_iterator` — идентичные классы (~35 строк каждый), отличающиеся только const-квалификаторами в типах указателей/ссылок.
+
+**Решение:** Использовать шаблонный базовый итератор с параметром `IsConst`:
+
+```cpp
+template <bool IsConst>
+class iterator_base {
+    using MapPtr = std::conditional_t<IsConst, const pmap_pmm*, pmap_pmm*>;
+    using Ref    = std::conditional_t<IsConst, const Entry&, Entry&>;
+    using Ptr    = std::conditional_t<IsConst, const Entry*, Entry*>;
+    MapPtr _pm; uintptr_t _idx;
+public:
+    iterator_base(MapPtr pm, uintptr_t idx) : _pm(pm), _idx(idx) {}
+    Ref operator*() { return _pm->arr_.data()[_idx]; }
+    Ptr operator->() { return &_pm->arr_.data()[_idx]; }
+    iterator_base& operator++() { ++_idx; return *this; }
+    iterator_base operator++(int) { auto t = *this; ++_idx; return t; }
+    bool operator==(const iterator_base& o) const { return _idx == o._idx; }
+    bool operator!=(const iterator_base& o) const { return _idx != o._idx; }
+};
+using iterator       = iterator_base<false>;
+using const_iterator = iterator_base<true>;
+```
+
+**Экономия:** ~30 строк.
+
+---
+
+### 5.4 Паттерн put-методов в pjson_db_pmm.h (Средний)
+
+**Файл:** `pjson_db_pmm.h`, строки 278–373
+
+**Проблема:** 6 перегрузок `put()` (`bool`, `int64_t`, `uint64_t`, `double`, `const char*`) + `put_ref()` + `parse_into()` содержат одинаковый boilerplate:
+
+```cpp
+bool put(const char* path, TYPE value) {
+    if (_is_metrics_path(path)) return false;
+    node_id slot = _ensure_path(path);
+    if (slot == 0) return false;
+    node_set_XXX(slot, value);        // ← единственное отличие
+    _update_metrics_after_mutation();
+    return true;
+}
+```
+
+**Решение:** Извлечь приватный шаблонный helper:
+
+```cpp
+template <typename F>
+bool _put_impl(const char* path, F&& setter) {
+    if (_is_metrics_path(path)) return false;
+    node_id slot = _ensure_path(path);
+    if (slot == 0) return false;
+    setter(slot);
+    _update_metrics_after_mutation();
+    return true;
+}
+
+// Использование:
+bool put(const char* path, bool value) {
+    return _put_impl(path, [value](node_id s){ node_set_bool(s, value); });
+}
+```
+
+**Экономия:** ~40 строк.
+
+---
+
+### 5.5 Рекурсивный обход поддерева (switch по node_tag) (Средний)
+
+**Файлы:**
+- `pjson_db_helpers.h`: `pjson_count_nodes_in_subtree()` (строки 64–116)
+- `pjson_db_helpers.h`: `pjson_search_node_strings_in_subtree()` (строки 124–180)
+- `pjson_db_pmm.h`: `_free_node_tree()` (строки 993–1055)
+- `pjson_db_pmm.h`: `_resolve_refs_in_subtree()` (строки 1269–1310)
+
+**Проблема:** Все 4 функции содержат идентичный обход: `switch(tag)`, case array (итерация `at(i)`), case object (итерация `value_at(i)`), рекурсивный вызов. Отличается только действие при посещении узла.
+
+**Решение:** Реализовать обобщённый шаблон обхода (visitor pattern):
+
+```cpp
+template <typename Visitor>
+void traverse_subtree(node_id id, Visitor&& vis) {
+    if (id == 0) return;
+    const node_view v{id};
+    if (!v.valid()) return;
+    vis.visit(id, v);
+    if (v.is_array()) {
+        uintptr_t sz = v.size();
+        for (uintptr_t i = 0; i < sz; ++i) {
+            node_view elem = v.at(i);
+            if (elem.valid()) traverse_subtree(elem.id, vis);
+        }
+    } else if (v.is_object()) {
+        uintptr_t sz = v.size();
+        for (uintptr_t i = 0; i < sz; ++i) {
+            node_view val = v.value_at(i);
+            if (val.valid()) traverse_subtree(val.id, vis);
+        }
+    }
+}
+```
+
+**Примечание:** `_free_node_tree()` требует дополнительной логики (освобождение данных после обхода), поэтому может потребоваться `pre_visit`/`post_visit` или обход с обратным вызовом. Также `_resolve_refs_in_subtree()` зависит от `pjson_db_pmm::get()`, поэтому останется методом класса, но может делегировать обход.
+
+**Экономия:** ~80 строк (из ~160 совокупных).
+
+---
+
+### 5.6 Инициализация null-узла (дублирование node_init_null) (Низкий)
+
+**Файл:** `pjson_node.h`, строки 930–940 vs 769–778
+
+**Проблема:** В `node_array_push_back()` и `node_object_insert()` слот инициализируется вручную (5 строк), хотя существует `node_init_null()`. Аналогичный код в `node_clone()`.
+
+```cpp
+// Повторяется 3 раза:
+slot->tag                       = node_tag::null;
+slot->_pad                      = 0;
+slot->ref_val.path_length       = 0;
+slot->ref_val.path_chars_offset = 0;
+slot->ref_val.target            = 0;
+```
+
+**Решение:** Заменить на вызов `node_init_null(slot_off)` после `fptr.New()`.
+
+**Экономия:** ~10 строк.
+
+---
+
+### 5.7 Делегирующие обёртки pjson_pmm_count/search (Низкий)
+
+**Файл:** `pjson_db_pmm.h`, строки 77–88
+
+**Проблема:** `pjson_pmm_count_nodes_in_subtree()` и `pjson_pmm_search_node_strings_in_subtree()` — однострочные делегаты к одноимённым функциям из `pjson_db_helpers.h`. Они не добавляют никакой логики.
+
+**Решение:** Удалить обёртки и вызывать функции из `pjson_db_helpers.h` напрямую.
+
+**Экономия:** ~12 строк.
+
+---
+
+### 5.8 Null-guard паттерн в pjson_pool_pmm.h (Низкий)
+
+**Файл:** `pjson_pool_pmm.h`
+
+**Проблема:** Повторяющийся паттерн `if (pool_off == 0) return X; auto* pool = pmm_resolve<...>(pool_off); if (pool == nullptr) return X;` повторяется в 8 функциях.
+
+**Решение:** Извлечь inline-helper:
+
+```cpp
+template <typename T>
+T* resolve_or_null(uintptr_t off) {
+    if (off == 0) return nullptr;
+    return pmm_resolve<T>(off);
+}
+```
+
+**Экономия:** ~16 строк.
+
+---
+
+### 5.9 Стековая копия parray для безопасности при realloc (Низкий)
+
+**Файлы:** `pjson_node.h` (node_array_push_back, node_binary_push_back), `pmap_pmm.h` (_insert_impl), `pjson_node.h` (parray_insert_sorted_object_entry)
+
+**Проблема:** Паттерн «стековая копия parray → push_back → переразрешение node → запись обратно» повторяется 4 раза:
+
+```cpp
+PamManager::parray<T> arr_copy = n->xxx_val;
+arr_copy.push_back(elem);
+n = pmm_resolve<node>(node_off);
+n->xxx_val = arr_copy;
+```
+
+**Решение:** Шаблонный helper:
+
+```cpp
+template <typename T, typename NodeField>
+void parray_push_back_safe(uintptr_t node_off, NodeField node::* field, const T& elem) {
+    node* n = pmm_resolve<node>(node_off);
+    if (n == nullptr) return;
+    auto arr_copy = n->*field;
+    arr_copy.push_back(elem);
+    n = pmm_resolve<node>(node_off);
+    if (n != nullptr) n->*field = arr_copy;
+}
+```
+
+**Экономия:** ~20 строк.
+
+---
+
+### 5.10 Сходство get() и _ensure_path() в pjson_db_pmm.h (Информационный)
+
+**Файл:** `pjson_db_pmm.h`, строки 195–272 vs 883–987
+
+**Проблема:** `get()` и `_ensure_path()` содержат похожий цикл разбора пути (split на '/', навигация по object/array). Различие в поведении: `get()` возвращает ошибку при отсутствии, `_ensure_path()` создаёт промежуточные узлы.
+
+**Решение:** Потенциально можно объединить в общий метод `_walk_path(path, create_mode)`, но различия в логике (создание промежуточных узлов, выбор типа array/object) делают объединение неочевидным. Рекомендуется оставить как есть или рассмотреть после упрощения остальных дублирований.
+
+---
+
+### Сводная таблица
+
+| # | Паттерн | Файл(ы) | Повторов | Строк | Приоритет |
+|---|---------|---------|----------|-------|-----------|
+| 5.1 | Бинарный поиск lower_bound | pmap_pmm.h | 4 | ~30 | Критический |
+| 5.2 | const/non-const find пара | pmap_pmm.h | 2 | ~18 | Средний |
+| 5.3 | iterator/const_iterator | pmap_pmm.h | 2 | ~30 | Средний |
+| 5.4 | put-методы boilerplate | pjson_db_pmm.h | 7 | ~40 | Средний |
+| 5.5 | Рекурсивный обход switch | db_helpers, db_pmm | 4 | ~80 | Средний |
+| 5.6 | Инициализация null-узла | pjson_node.h | 3 | ~10 | Низкий |
+| 5.7 | Делегирующие обёртки | pjson_db_pmm.h | 2 | ~12 | Низкий |
+| 5.8 | Null-guard в pool функциях | pjson_pool_pmm.h | 8 | ~16 | Низкий |
+| 5.9 | parray push_back safe | pjson_node.h, pmap_pmm.h | 4 | ~20 | Низкий |
+| 5.10 | get() vs _ensure_path() | pjson_db_pmm.h | 2 | инф. | Информационный |
+| **Итого** | | | **38** | **~256** | |
+
+### Рекомендуемый порядок выполнения
+
+1. **5.1** — Бинарный поиск в pmap_pmm (самый простой и безопасный рефакторинг)
+2. **5.2** — const/non-const find (зависит от 5.1)
+3. **5.3** — Шаблонный итератор (независимо)
+4. **5.6** — node_init_null (тривиальный, можно сделать попутно)
+5. **5.7** — Удаление делегатов (тривиальный)
+6. **5.4** — put-методы (требует C++17 `if constexpr` или лямбд)
+7. **5.5** — Visitor-обход (наибольший эффект, но наибольший риск)
+8. **5.8, 5.9** — Мелкие helpers (можно делать попутно)
+
+### Связь с pjson/nlohmann::json/jsonRVM
+
+Учитывая, что pjson в будущем будет использоваться в [jsonRVM](https://github.com/netkeep80/jsonRVM), рефакторинг на этапе 5 особенно важен:
+
+- **Visitor-паттерн (5.5)** станет ключевым для расширения набора операций над JSON-деревом в jsonRVM без дублирования обхода
+- **Шаблонный put (5.4)** упростит добавление новых типов узлов при расширении JSON-модели
+- **Общий _lower_bound (5.1–5.2)** обеспечит единую реализацию поиска в sorted-array, что критично при добавлении новых контейнерных типов
+
+---
+
 *Документ создан 2026-03-19 на основе анализа BinDiffSynchronizer и плана pmm Фазы 3.*
 *Обновлён 2026-03-21: отмечены выполненные задачи 1.2, 3.1, 3.2, 3.3 (Issue #168).*
 *Обновлён 2026-03-21: выполнена задача 1.1 — удалён pam_adapter.h после обновления PMM до v0.43.0 (Issue #169).*
 *Обновлён 2026-03-21: выполнена задача 4.1 — регрессионное тестирование, 32 новых теста (Issue #170).*
+*Обновлён 2026-03-21: code review и план устранения дублирования кода (Issue #128).*
