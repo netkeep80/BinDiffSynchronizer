@@ -395,21 +395,17 @@ TEST_CASE( "pmap_pmm<int,int>: operations on empty map", "[pmap_pmm][empty]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТ: Вставка с использованием insert() (с self_off)
+// ТЕСТ: Вставка с использованием insert() (2-argument version)
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pmap_pmm<int,int>: insert with self_off", "[pmap_pmm][insert]" )
+TEST_CASE( "pmap_pmm<int,int>: insert two-argument", "[pmap_pmm][insert]" )
 {
     PamManager::create( 64 * 1024 );
 
-    auto      pm     = PamManager::template allocate_typed<pmap_pmm<int, int>>();
-    uintptr_t pm_off = pm.byte_offset();
+    auto pm = PamManager::template allocate_typed<pmap_pmm<int, int>>();
     std::memset( pm.resolve(), 0, sizeof( pmap_pmm<int, int> ) );
 
-    pm->insert( 42, 100, pm_off );
-
-    // После insert нужно обновить указатель (может быть realloc)
-    pm = PamManager::pptr_from_byte_offset<pmap_pmm<int, int>>( pm_off );
+    pm->insert( 42, 100 );
 
     REQUIRE( pm->size() == 1u );
     REQUIRE( *pm->find( 42 ) == 100 );
