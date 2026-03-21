@@ -4,6 +4,32 @@ C++20 header-only библиотека для работы с JSON в перси
 
 ---
 
+## Быстрый старт
+
+```cpp
+#include "pjson_db_pmm.h"
+using namespace pjson;
+
+int main() {
+    // Открыть или создать базу данных
+    auto db = pjson_db_pmm::open("data.pam");
+
+    // Записать данные
+    db.put("/users/alice/name", "Alice");
+    db.put("/users/alice/age",  30);
+    db.put("/users/alice/active", true);
+
+    // Прочитать данные
+    node_view name = db.get("/users/alice/name");
+    printf("Name: %.*s\n", (int)name.as_string().size(), name.as_string().data());
+
+    // Сохранить образ ПАП в файл
+    db.save();
+}
+```
+
+---
+
 ## Концепция
 
 **pjson_db_pmm** позволяет работать с JSON-данными так же, как с `nlohmann::json`, но с одним принципиальным отличием: все объекты хранятся в **персистном адресном пространстве** — двоичном образе файла, отображённом в память. Это превращает JSON в полноценную базу данных: данные переживают перезапуск программы без сериализации и десериализации.
@@ -24,7 +50,7 @@ C++20 header-only библиотека для работы с JSON в перси
 | **Персистность** | Данные в ПАП переживают перезапуск без явной сериализации |
 | **Два типа строк** | readonly (`pstringview_pmm`): ключи объектов, пути `$ref`, интернированы, сравнение O(1); readwrite (`PamManager::pstring`): строковые значения JSON, изменяемые на лету |
 | **Нет SSO** | Ни `pstringview_pmm`, ни `PamManager::pstring` не используют SSO — все строки хранятся в ПАП (необходимо для сквозного поиска) |
-| **jsonRVM-совместимость** | `pstring`-узлы могут модифицироваться непосредственно в БД библиотекой [jsonRVM](https://github.com/netkeep80/jsonRVM); `node_id`-ссылки стабильны при resize array/object (Issue #194) |
+| **jsonRVM-совместимость** | `pstring`-узлы могут модифицироваться непосредственно в БД библиотекой [jsonRVM](https://github.com/netkeep80/jsonRVM); `node_id`-ссылки стабильны при resize array/object |
 | **Path-адресация** | Доступ к узлам через строковые пути вида `/a/b/0/c` |
 | **$ref как указатели** | `{ "$ref": "/path" }` при разборе становится прямым указателем в ПАП |
 | **Метрики** | Персистная структура `db_metrics_pmm` в ПАМ; обновляется при каждой мутации; доступ через `/$metrics/...` |
@@ -32,11 +58,9 @@ C++20 header-only библиотека для работы с JSON в перси
 | **Поиск по строкам** | `search_strings` — по словарю ключей (pstringview_pmm); `search_node_strings` — по значениям узлов (pstring) |
 | **Итераторы** | `node_view` поддерживает range-based for: `begin()`/`end()` для массивов, `items()` для объектов |
 | **Коды ошибок** | `node_error` enum + `is_error()` / `error()` в `node_view`; `get()` возвращает типизированные ошибки (`not_found`, `wrong_type`, `index_out_of_range`, `ref_cycle`) |
-| **Сообщения об ошибках** | `node_error_message()` + `node_view::error_message()` — человекочитаемые описания ошибок |
 | **Глубокое копирование** | `node_clone()` + `pjson_db_pmm::clone()` — создание полных копий поддеревьев JSON в ПАП |
 | **PMM** | Библиотека [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — единственный бэкенд ПАП |
 | **Пакетные операции** | `batch_begin()`/`batch_end()` и RAII-обёртка `batch_guard` — откладывают пересчёт метрик при массовых мутациях; поддержка вложенности |
-| **Метапрограммирование** | Шаблонные helpers для устранения дублирования кода: `node_resolve_and_set_tag()`, `node_set_container_empty()`, `node_object_find_key()`, `node_resolve_checked()`, реестр метрик |
 
 ---
 
@@ -87,7 +111,7 @@ C++20 header-only библиотека для работы с JSON в перси
 │   Слой C: pjson_codec                       │
 │   (парсинг, сериализация, base64)           │
 ├─────────────────────────────────────────────┤
-│   Слой B: pmap_pmm                            │
+│   Слой B: pmap_pmm                          │
 │   + pstringview_pmm (тонкая обёртка)        │
 │   (sorted map, readonly строки)             │
 ├─────────────────────────────────────────────┤
@@ -104,23 +128,18 @@ C++20 header-only библиотека для работы с JSON в перси
 | Файл | Слой | Описание |
 |------|------|----------|
 | `pam_pmm_config.h` | A | Конфигурация менеджера PMM: определяет `PamManager` |
-| ~~`pam_adapter.h`~~ | A | Удалён (Issue #169, План 1.1): конверсия через `pptr::byte_offset()` и `PamManager::pptr_from_byte_offset<T>()` (PMM v0.43.0); `pmm_resolve<T>()` перенесён в `pam_pmm.h` |
-| ~~`pmem_array_pmm.h`~~ | A | Удалён (Issue #145, План 2.2): используйте `PamManager::parray<T>` напрямую |
-| ~~`pvector_pmm.h`~~ | A | Удалён (Issue #167, План 2.6): используйте `PamManager::parray<T>` напрямую |
-| `pmap_pmm.h` | A | Персистная карта: `pmap_pmm<K,V>` — sorted array на `PamManager::parray<Entry>`, бинарный поиск O(log n); выбран вместо pmm::pmap (AVL-дерево), т.к. `rebuild_free_tree()` при загрузке файла сбрасывает AVL-поля пользовательских деревьев (Issue #166, План 2.3) |
-| ~~`pstring_pmm.h`~~ | A | Удалён (Issue #144, План 2.1): используйте `PamManager::pstring` напрямую |
-| `pstringview_pmm.h` | A | Тонкая обёртка: типовые алиасы `pmm_pstringview`/`pmm_pstringview_pptr`, hooks для персистентности AVL-корня, `pstringview_pmm_reset()`, AVL-обход для поиска; структура `pstringview_pmm` удалена (Issue #167, План 2.5) |
-| `pjson_pool_pmm.h` | C | Пул узлов: `pjson_pool_pmm` = `PamManager::ppool<node>` — чанковая аллокация O(1) через pmm::ppool, node_id-совместимый API (Issue #166, План 2.4) |
-| `pam_pmm.h` | A | Фасад ПАМ на PMM: `pam_pmm_init()`, `pam_pmm_create<T>()`, `pam_pmm_find()`, `pam_pmm_save()`, `pmm_resolve<T>()`, `pmm_resolve_const<T>()`, реестр именованных объектов; корневая структура `pam_pmm_root` через `PamManager::set_root()`/`get_root()` (Issue #163, План 1.2; Issue #169, План 1.1) |
-| `fptr_pmm.h` | A | Персистный указатель: `fptr_pmm<T>` — тонкая обёртка над `pptr<T>` с `New()`, `Delete()`, `find()` |
-| ~~`pallocator_pmm.h`~~ | A | Удалён (Issue #143, План 1.3): используйте `PamManager::pallocator<T>` напрямую |
+| `pam_pmm.h` | A | Фасад ПАМ на PMM: init, create, find, save, resolve; реестр именованных объектов |
+| `fptr_pmm.h` | A | Персистный указатель: `fptr_pmm<T>` — тонкая обёртка над `pptr<T>` |
+| `pmap_pmm.h` | B | Персистная карта: sorted array на `PamManager::parray<Entry>`, бинарный поиск O(log n) |
+| `pstringview_pmm.h` | B | Тонкая обёртка: hooks для персистентности AVL-корня, поиск по словарю строк |
+| `pjson_pool_pmm.h` | C | Пул узлов: `PamManager::ppool<node>` — чанковая аллокация O(1) |
+| `pjson_node.h` | C | Модель узлов JSON: `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; итераторы; `node_clone()` |
+| `pjson_codec.h` | C | Сериализация/десериализация: парсер/сериализатор с поддержкой `$ref`, `$base64`, Base64 кодек |
+| `pjson_db_helpers.h` | D | Вспомогательные функции: обход дерева, подсчёт узлов, поиск |
+| `pjson_db_pmm.h` | D | Менеджер персистной JSON-БД: path-адресация, `put`/`get`/`erase`, `$ref`, метрики, поиск, клонирование |
 | `deps/pmm/pmm.h` | A | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — бэкенд ПАП |
-| `pjson_node.h` | C | Модель узлов JSON: `node_tag`, `node_id`, `node`, `node_view`, `object_entry`; функции init/set/assign/push_back/insert; итераторы; коды ошибок; глубокое копирование (`node_clone()`) |
-| `pjson_codec.h` | C | Сериализация/десериализация: парсер/сериализатор для `node_id`-модели; `$ref`, `$base64`, Base64 кодек |
-| `pjson_db_pmm.h` | D | Менеджер персистной JSON-БД: единственный заголовок для конечного пользователя; path-адресация, `put`/`get`/`erase`/`exists`, `$ref`, метрики (`db_metrics_pmm`), поиск по строкам, глубокое копирование |
-| `pjson_db_helpers.h` | D | Вспомогательные функции для обхода дерева JSON |
 | `main.cpp` | — | Демонстрационная программа |
-| `tests/` | — | Тесты на Catch2 |
+| `tests/` | — | Тесты на Catch2 (630 тестов, ~360 000 assertion) |
 | `CMakeLists.txt` | — | Система сборки (CMake 3.16+, C++20) |
 
 ---
@@ -211,6 +230,20 @@ std::string json = db.dump("/data");
 // json == {"$base64":"AAEC"}
 ```
 
+### Парсинг и сериализация JSON
+
+```cpp
+// Парсинг JSON во вложенный путь
+db.parse_into("/config", R"({"host":"localhost","port":8080,"debug":true})");
+
+// Сериализация поддерева
+std::string json = db.dump( db.get("/config").id );
+// json == {"debug":true,"host":"localhost","port":8080}
+
+// Полный дамп корневого объекта
+std::string full = db.dump();
+```
+
 ### Метрики
 
 Метрики хранятся персистно в структуре `db_metrics_pmm` в ПАМ и обновляются при каждой мутации.
@@ -230,7 +263,6 @@ node_view str_count   = db.get("/$metrics/string_count_total"); // интерн�
 
 // Метрики ПАМ
 node_view bump        = db.get("/$metrics/pam_bump_offset");    // позиция bump-аллокатора
-node_view free_blocks = db.get("/$metrics/pam_free_list_size"); // свободных блоков в ПАМ
 node_view total_size  = db.get("/$metrics/pam_total_size");     // размер области данных ПАМ
 node_view slot_cnt    = db.get("/$metrics/pam_slot_count");     // аллоцированных слотов
 node_view named_cnt   = db.get("/$metrics/pam_named_count");    // именованных объектов
@@ -238,48 +270,27 @@ node_view named_cnt   = db.get("/$metrics/pam_named_count");    // именов�
 // Время сохранения
 node_view save_time   = db.get("/$metrics/last_save_time");     // Unix timestamp последнего save()
 
-// Явный пересчёт метрик (автоматически вызывается после каждой мутации)
-db.update_metrics();
-
 // Попытка записи в метрики — ошибка readonly
 db.put("/$metrics/node_count_total", 0); // ошибка! возвращает false
 ```
 
 ### Поиск по строкам
 
-На уровне ПАМ доступны функции словаря строк (после `#include "pam_pmm.h"`):
-
 ```cpp
-// Интернировать строку через ПАМ
-auto r = pam_intern_string("user_name");
-// r.chars_offset != 0, r.length == 9
-
-// Найти все строки, содержащие подстроку
-auto results = pam_search_strings("user");
-for (const auto& r : results) {
-    // r.value — std::string, r.chars_offset, r.length
-}
-
-// Перебрать весь словарь строк
-auto all = pam_all_strings();
-for (const auto& r : all) {
-    // r.value — интернированная строка
-}
-```
-
-На уровне pjson_db_pmm:
-
-```cpp
-// Найти все строки, содержащие подстроку (поиск по словарю интернированных ключей)
+// Поиск по словарю интернированных ключей (pstringview_pmm)
 auto results = db.search_strings("alice");
 
-// Перебрать весь словарь строк
-for (auto sv : db.all_strings()) {
-    // sv — pstringview_pmm
+// Поиск по pstring-ЗНАЧЕНИЯМ узлов (readwrite)
+auto val_results = db.search_node_strings("Alice");
+for (node_id id : val_results) {
+    std::string_view sv = node_view{id}.as_string(); // "Alice Smith" и т.п.
 }
+
+// Пустой pattern — все string-узлы в дереве
+auto all_vals = db.search_node_strings("");
 ```
 
-### Иерархический доступ и поиск по значениям
+### Иерархический доступ
 
 ```cpp
 // operator[] — доступ по пути; создаёт null-узел если путь не существует
@@ -291,16 +302,6 @@ node_view found = db.find("/config/host"); // node_view(0) если не най�
 // insert() — вставка JSON-значения по пути
 node_view inserted = db.insert("/config/port", "8080");
 node_view obj      = db.insert("/config/auth", R"({"enabled":true,"method":"jwt"})");
-
-// search_node_strings() — поиск по pstring-ЗНАЧЕНИЯМ узлов (readwrite)
-// (в отличие от search_strings(), который ищет по словарю КЛЮЧЕЙ pstringview_pmm)
-auto val_results = db.search_node_strings("Alice");
-for (node_id id : val_results) {
-    std::string_view sv = node_view{id}.as_string(); // "Alice Smith" и т.п.
-}
-
-// Пустой pattern — все string-узлы в дереве
-auto all_vals = db.search_node_strings("");
 ```
 
 ### Итерация по дереву JSON
@@ -324,129 +325,46 @@ for (auto [key, val] : db.get("/config").items())
 ### Обработка ошибок
 
 ```cpp
-// Узел не найден по пути
 node_view v = db.get("/nonexistent/path");
 if (v.is_error()) {
-    if (v.error() == node_error::not_found)
-        std::cerr << "Путь не найден\n";
+    std::cerr << "Ошибка: " << v.error_message() << "\n";
+    // "Ошибка: node not found"
 }
-
-// Навигация через скалярный узел
-db.put("/flag", true);
-node_view bad = db.get("/flag/sub");
-// bad.is_error() == true
-// bad.error() == node_error::wrong_type
-
-// Выход индекса массива за границы
-db.parse_into("/arr", "[1,2,3]");
-node_view oob = db.get("/arr/99");
-// oob.is_error() == true
-// oob.error() == node_error::index_out_of_range
-
-// Обнаружение цикла $ref
-db.put_ref("/a", "/b");
-db.put_ref("/b", "/a");
-db.resolve_all_refs();
-node_view cycle = db.get("/a");
-// cycle.is_error() == true
-// cycle.error() == node_error::ref_cycle
 
 // node_view{} — null, не ошибка
 node_view null_v{};
-// null_v.is_null() == true
-// null_v.is_error() == false
-// null_v.valid() == false
-
-// Создание ошибочного view вручную (фабрика)
-node_view err = node_view_error(node_error::not_found);
-// err.is_error() == true
-// err.error() == node_error::not_found
-// err.valid() == false
+// null_v.is_null() == true, null_v.is_error() == false
 ```
 
 #### Коды ошибок `node_error`
 
-| Код | Значение |
-|-----|----------|
-| `node_error::none` | Нет ошибки |
-| `node_error::not_found` | Узел не найден по пути |
-| `node_error::wrong_type` | Неверный тип при навигации (не объект / не массив) |
-| `node_error::index_out_of_range` | Индекс массива вне диапазона |
-| `node_error::readonly` | Попытка записи в readonly-пространство (`/$metrics`) |
-| `node_error::ref_cycle` | Обнаружен цикл или превышена глубина при разыменовании `$ref` |
-| `node_error::parse_error` | Ошибка парсинга JSON |
-
-#### Сообщения об ошибках
-
-Функция `node_error_message()` и метод `node_view::error_message()` возвращают человекочитаемое описание ошибки:
-
-```cpp
-// Получить сообщение для кода ошибки
-const char* msg = node_error_message(node_error::not_found);
-// msg == "node not found"
-
-// Получить сообщение через node_view
-node_view v = db.get("/nonexistent");
-if (v.is_error()) {
-    std::cerr << "Ошибка: " << v.error_message() << "\n";
-    // Вывод: "Ошибка: node not found"
-}
-
-// Для обычных и null node_view — "no error"
-node_view ok{};
-// ok.error_message() == "no error"
-```
-
-| Код ошибки | Сообщение |
-|------------|-----------|
-| `node_error::none` | `"no error"` |
-| `node_error::not_found` | `"node not found"` |
-| `node_error::wrong_type` | `"wrong node type for navigation"` |
-| `node_error::index_out_of_range` | `"array index out of range"` |
-| `node_error::readonly` | `"cannot modify read-only path"` |
-| `node_error::ref_cycle` | `"cyclic $ref detected or max depth exceeded"` |
-| `node_error::parse_error` | `"JSON parse error"` |
+| Код | Значение | Сообщение |
+|-----|----------|-----------|
+| `none` | Нет ошибки | `"no error"` |
+| `not_found` | Узел не найден по пути | `"node not found"` |
+| `wrong_type` | Неверный тип при навигации | `"wrong node type for navigation"` |
+| `index_out_of_range` | Индекс массива вне диапазона | `"array index out of range"` |
+| `readonly` | Попытка записи в `/$metrics` | `"cannot modify read-only path"` |
+| `ref_cycle` | Цикл или превышена глубина `$ref` | `"cyclic $ref detected or max depth exceeded"` |
+| `parse_error` | Ошибка парсинга JSON | `"JSON parse error"` |
 
 ### Глубокое копирование
 
-Функция `node_clone()` и метод `pjson_db_pmm::clone()` создают полную глубокую копию узла со всеми вложенными структурами:
-
 ```cpp
-// Клонирование по пути (высокоуровневый API)
 db.put("/original/name", "Alice");
 db.put("/original/age", 30);
 
-// Создать копию поддерева
+// Создать полную копию поддерева
 bool ok = db.clone("/original", "/copy");
-// ok == true
 
 // Копия независима от оригинала
 db.put("/copy/name", "Bob");
 // db.get("/original/name").as_string() == "Alice" — не изменился
-// db.get("/copy/name").as_string() == "Bob"
-
-// Клонирование вложенных структур
-db.parse_into("/data", R"({"users": [{"name": "Alice"}], "count": 1})");
-db.clone("/data", "/backup");
-// /backup содержит полную копию /data
-
-// Низкоуровневый API: клонирование по node_id
-node_id cloned = db.clone( db.get("/original").id );
-// cloned — node_id независимой копии
-
-// Или напрямую через node_clone()
-node_id copy_id = node_clone( src_id );
 ```
-
-**Особенности клонирования:**
-- `ref`-узлы копируются как ref: путь копируется, но `target = 0` (ссылка не разрешена в копии)
-- Строки (`pstring`) создаются как независимые копии
-- Массивы и объекты копируются рекурсивно
-- Нельзя клонировать из/в `/$metrics` (возвращает `false`)
 
 ### Пакетные операции (batch)
 
-При выполнении множества мутирующих операций (put, erase, parse_into) каждая операция по умолчанию пересчитывает метрики, что включает полный обход дерева. Пакетные операции позволяют отложить пересчёт до завершения всех операций.
+При массовых мутациях каждая операция по умолчанию пересчитывает метрики. Пакетные операции откладывают пересчёт:
 
 ```cpp
 // RAII-обёртка (рекомендуемый способ)
@@ -457,63 +375,27 @@ node_id copy_id = node_clone( src_id );
         db.put(path.c_str(), i);
     }
 } // метрики пересчитываются один раз здесь
-
-// Или ручное управление
-db.batch_begin();
-db.put("/a", 1);
-db.put("/b", 2);
-db.erase("/c");
-db.batch_end(); // метрики пересчитываются здесь
-
-// Проверка состояния
-bool active = db.in_batch(); // true внутри пакетной операции
-
-// Вложенные пакетные операции
-{
-    auto outer = db.batch();
-    db.put("/x", 1);
-    {
-        auto inner = db.batch();
-        db.put("/y", 2);
-    } // внутренний batch_end — метрики ещё не пересчитываются
-} // внешний batch_end — метрики пересчитываются один раз
 ```
-
-**Особенности:**
-- Вызовы `batch_begin()`/`batch_end()` могут быть вложенными; пересчёт выполняется только при возврате глубины к нулю
-- `batch_guard` — RAII-класс, вызывающий `batch_begin()` в конструкторе и `batch_end()` в деструкторе
-- Данные доступны для чтения сразу после записи, даже внутри пакетной операции
-- Метрики (`/$metrics/...`) могут быть неактуальны внутри пакетной операции
 
 ---
 
 ## Два типа строк в ПАП
 
-В персистном адресном пространстве существуют ровно два типа строк с принципиально разными свойствами:
-
 ### Readonly строки (`pstringview_pmm`) — словарь ключей
 
-Используются исключительно как **ключи `pmap_pmm`** (ключи объектов JSON, сегменты путей в `$ref`).
+Используются как **ключи объектов JSON** и **сегменты путей `$ref`**.
 
 - Хранятся в едином внутреннем словаре.
 - **Никогда не удаляются** — только накапливаются.
 - Одинаковые строки → один `chars_offset` (дедупликация).
 - Сравнение ключей: **O(1)** через `chars_offset`.
-- **Нет SSO**: любая строка, даже однобуквенная, хранится в ПАП.
 
 ### Readwrite строки (`PamManager::pstring`) — строковые значения JSON
 
-Используются исключительно как **JSON string-value узлы** (`node_tag::string`).
+Используются как **JSON string-value узлы** (`node_tag::string`).
 
 - Изменяемые: метод `assign()` позволяет заменить значение на месте в ПАП.
-- **Нет SSO**: строки хранятся в ПАП через смещение, что обеспечивает сквозной поиск.
-- Позволяют [jsonRVM](https://github.com/netkeep80/jsonRVM) работать непосредственно внутри базы данных, изменяя строковые значения узлов без пересоздания структуры.
-
-### Полнотекстовый поиск
-
-`pjson_db_pmm::search_strings(pattern)` охватывает **оба** типа:
-- Словарь `pstringview_pmm` (ключи объектов и пути).
-- Все `pstring`-значения в пуле узлов.
+- Позволяют [jsonRVM](https://github.com/netkeep80/jsonRVM) работать непосредственно внутри базы данных.
 
 ---
 
@@ -540,7 +422,7 @@ bool active = db.in_batch(); // true внутри пакетной операц�
 
 ### Управление памятью
 
-- **AVL-аллокатор**: PMM использует AVL-дерево свободных блоков (best-fit), обеспечивая эффективную утилизацию памяти.
+- **AVL-аллокатор**: PMM использует AVL-дерево свободных блоков (best-fit).
 - **Гранулярность**: 16-байтовые гранулы для CacheManagerConfig.
 - **Рост**: автоматическое расширение хранилища (25% для SingleThreadedHeap).
 - **Строки накапливаются**: словарь строк только растёт, строки не освобождаются.
@@ -554,32 +436,17 @@ bool active = db.in_batch(); // true внутри пакетной операц�
 
 ---
 
-## Оптимизация производительности
+## Известные ограничения
 
-### Предварительное резервирование
-
-Перед массовой загрузкой данных используйте `ReserveSlots(n)`:
-
-```cpp
-db.ReserveSlots(100000); // зарезервировать для 100k узлов
-db.parse_file("large_dataset.json");
-```
-
-Это устраняет многократные реаллокации и значительно ускоряет парсинг больших JSON-файлов.
-
-### Сброс состояния
-
-```cpp
-pam_pmm_reset(); // очистить всё ПАП и пересоздать менеджер
-```
-
-Быстрее, чем удаление 100k+ узлов по одному (O(n²)).
+- **Глобальное состояние PMM** — в одном процессе может быть открыта только одна БД (см. [plan.md](plan.md), Проблема 3)
+- **Нет escaping `/` в путях** — ключи объектов, содержащие `/`, недоступны через path-адресацию (см. [plan.md](plan.md), Проблема 7)
+- **Утечка временных узлов метрик** — каждый вызов `get("/$metrics/...")` аллоцирует временный узел (см. [plan.md](plan.md), Проблема 4)
+- **Не потокобезопасно** — CacheManagerConfig (по умолчанию) использует NoLock; для многопоточности нужен PersistentDataConfig
+- **Строки не освобождаются** — словарь `pstringview_pmm` только растёт
 
 ---
 
 ## Производительность
-
-Производительность `pjson_db_pmm` при работе с 10k–100k узлов (информационные тесты в `tests/test_pjson_db_perf.cpp`):
 
 | Операция | Кол-во | Время (ориентир) |
 |---|---|---|
@@ -589,75 +456,7 @@ pam_pmm_reset(); // очистить всё ПАП и пересоздать м�
 | `parse_into(JSON)` | 1k объектов | < 100 мс |
 | `erase()` | 10k | ~3–4 с |
 
-**Примечание:** `put()` и `erase()` имеют накладные расходы O(depth) на обход пути при каждой операции.
-Для массовой загрузки данных рекомендуется предварительно зарезервировать слоты через `ReserveSlots()`.
-
----
-
-## Состояние миграции на PMM
-
-Библиотека проходит миграцию на типы [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager). Подробности — в [plan.md](plan.md).
-
-### Выполненные задачи
-
-| Задача | Описание | Issue |
-|--------|----------|-------|
-| 1.2 | `pam_pmm.h` — корневой объект через `PamManager::set_root()`/`get_root()` | #163 |
-| 1.3 | Удалён `pallocator_pmm.h` — используется `PamManager::pallocator<T>` | #143 |
-| 1.4 | `fptr_pmm<T>` — тонкая обёртка над `pptr<T>` | #143 |
-| 2.1 | Заменён `pstring_pmm` на `PamManager::pstring` | #144 |
-| 2.2 | Заменён `pmem_array_pmm` на `PamManager::parray<T>` | #145 |
-| 2.3 | `pmap_pmm` — sorted array на `PamManager::parray<Entry>` | #166 |
-| 2.4 | `pjson_pool_pmm` → `PamManager::ppool<node>` | #166 |
-| 2.5 | Упрощён `pstringview_pmm.h` — удалена структура `pstringview_pmm` | #167 |
-| 2.6 | Удалён `pvector_pmm.h` | #167 |
-| 3.1 | `node` union — все типы используют PMM (`pstring`, `parray`) | #144, #145 |
-| 3.2 | `pjson_codec` — парсер/сериализатор обновлён | #144, #145 |
-| 3.3 | `pjson_db_pmm` — публичный API обновлён | #144, #145, #166 |
-| 1.1 | Удалён `pam_adapter.h` — конверсия через `pptr::byte_offset()` / `pptr_from_byte_offset<T>()` | #169 |
-| 4.1 | Регрессионное тестирование — 32 новых теста на граничные случаи PMM-типов | #170 |
-| 5.1–5.9 | Устранение дублирования кода — рефакторинг 9 паттернов | #171 |
-| 4.2 | Тестирование совместимости save/load — 13 тестов (690 assertion) | #172 |
-| 4.3 | Бенчмарки — покрытие всех основных операций (put/get/erase/parse/dump/clone/save/load) | #172 |
-| 4.4 | Стабильность node_id ссылок после resize array/object — 11 тестов (5330 assertion), подтверждена совместимость с jsonRVM | #194 |
-| 5.10 | Объединение `get()` и `_ensure_path()` в общий `_walk_path<CreateMode>()` — устранение дублирования цикла обхода пути | #182 |
-| 6.1–6.4 | Рефакторинг на `parray::insert/erase` — удалены ручные `memmove`/цикловые сдвиги в `pmap_pmm`, `pjson_node`, `pjson_db_pmm` (~43 строки) | #183 |
-| 7.1 | Унификация итераторов `node_view_iterator`/`object_iterator` через CRTP-базу `pjson_iterator_base` + шаблонный `pjson_range` (~22 строки) | #184 |
-
-### Статус миграции
-
-**Миграция завершена.** Все задачи этапов 1–7 выполнены. Миграция уровней A и B на типы PMM завершена.
-Тестирование: 630 тестов. Совместимость save/load подтверждена.
-Бенчмарки: все основные операции измерены. Все задачи 5.1–5.10, 6.1–6.4, 7.1 выполнены.
-
-### Устранение дублирования кода (Этап 5, Issue #128) ✅
-
-Проведён code review, выявлено 10 паттернов дублирования (~316 строк, 40 повторений).
-Выполнен рефакторинг задач 5.1–5.9 (Issue #171), задача 5.10 (Issue #182):
-
-- `_lower_bound()` — единая реализация бинарного поиска в `pmap_pmm` (4 → 1)
-- `find()` const/non-const — паттерн Скотта Мейерса (2 → 1)
-- `iterator_base<IsConst>` — шаблонный итератор (2 → 1 класс)
-- `_put_impl()` — шаблонный helper для put-методов (6+put_ref → 1 реализация)
-- `pjson_traverse_subtree()` — visitor-обход для рекурсивных операций (2 функции → visitor)
-- `node_init_null()` — замена ручной инициализации null-узла (2 дублирования → вызов)
-- Удалены делегирующие обёртки `pjson_pmm_count/search` (2 → прямые вызовы)
-- `pjson_resolve_or_null<T>()` — null-guard helper для pool функций (8 упрощений)
-- `parray_push_back_safe<T>()` — безопасный push_back с переразрешением (2 дублирования → 1)
-- `_walk_path<CreateMode>()` — общий обход пути для `get()` и `_ensure_path()` (2 → 1 реализация)
-
-Подробности — в [plan.md](plan.md), раздел «Этап 5».
-
-### Рефакторинг на parray::insert/erase (Этап 6, Issue #183) ✅
-
-После добавления `parray::insert(index, value)` и `parray::erase(index)` в PMM (PR #234),
-удалены ручные `memmove`/цикловые сдвиги в трёх файлах:
-
-- `pmap_pmm.h`: `_insert_impl()` — `push_back + memmove` → `insert()`, `erase()` — `memmove + pop_back` → `erase()`
-- `pjson_node.h`: `parray_insert_sorted_object_entry()` — `push_back + memmove` → `insert()`
-- `pjson_db_pmm.h`: `_object_erase()` и `_array_erase_at()` — ручные циклы сдвига + `_size--` → `erase()`
-
-Подробности — в [plan.md](plan.md), раздел «Этап 6».
+**Совет:** Для массовой загрузки данных используйте `batch()` и `ReserveSlots()`.
 
 ---
 
@@ -668,6 +467,12 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+---
+
+## План развития
+
+Подробный анализ текущих проблем реализации и план рефакторинга — в [plan.md](plan.md).
 
 ---
 
