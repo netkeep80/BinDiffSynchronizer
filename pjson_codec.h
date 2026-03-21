@@ -537,115 +537,6 @@ inline bool parse_object( ParseState& st, uintptr_t node_off )
         return true;
     }
 
-    // Временно собираем пары ключ-значение.
-    struct KV
-    {
-        std::string key;
-        std::string value_str; // Только для $ref и $base64
-        bool        is_string;
-    };
-    std::vector<KV> pairs;
-
-    std::string key_buf;
-    std::string val_buf;
-
-    for ( ;; )
-    {
-        skip_ws( st );
-        if ( !expect( st, '"' ) )
-            return false;
-        if ( !parse_string( st, key_buf ) )
-            return false;
-
-        skip_ws( st );
-        if ( !expect( st, ':' ) )
-            return false;
-        skip_ws( st );
-
-        // Для $ref и $base64 нужно проверить, является ли значение строкой.
-        bool is_string_val = ( peek( st ) == '"' );
-        if ( is_string_val )
-        {
-            advance( st );
-            if ( !parse_string( st, val_buf ) )
-                return false;
-            pairs.push_back( { key_buf, val_buf, true } );
-        }
-        else
-        {
-            pairs.push_back( { key_buf, "", false } );
-        }
-
-        skip_ws( st );
-        char c = peek( st );
-        if ( c == '}' )
-        {
-            advance( st );
-            break;
-        }
-        if ( c != ',' )
-            return false;
-        advance( st );
-    }
-
-    // Проверяем на специальные объекты: ровно 1 ключ.
-    if ( pairs.size() == 1 && pairs[0].is_string )
-    {
-        // $ref
-        if ( pairs[0].key == "$ref" )
-        {
-            node_set_ref( node_off, pairs[0].value_str.c_str() );
-            return true;
-        }
-
-        // $base64
-        if ( pairs[0].key == "$base64" )
-        {
-            std::vector<uint8_t> bytes;
-            if ( !base64_decode( pairs[0].value_str.c_str(), static_cast<uintptr_t>( pairs[0].value_str.size() ),
-                                 bytes ) )
-            {
-                // Некорректный base64 — создаём пустой binary.
-                node_set_binary( node_off );
-                return true;
-            }
-            node_set_binary( node_off );
-            for ( uint8_t b : bytes )
-                node_binary_push_back( node_off, b );
-            return true;
-        }
-    }
-
-    // Обычный объект.
-    node_set_object( node_off );
-
-    // Теперь нужно повторно распарсить значения, которые не были строками.
-    // Для этого восстанавливаем позицию и парсим заново.
-    // Это неоптимально, но простой подход для первой реализации.
-
-    // Альтернатива: создаём узлы сразу.
-    // Поскольку у нас уже есть pairs с ключами, а нестроковые значения
-    // не были сохранены, нам нужен другой подход.
-
-    // Пересоздаём парсер с начала объекта — это неэффективно.
-    // Лучше: сразу парсить в узлы и проверять на $ref/$base64 после.
-
-    // Для простоты реализации: перепарсим объект целиком.
-    // Сначала освободим node_off и пересоздадим.
-    return false; // Заглушка — перепишем логику ниже.
-}
-
-/// Улучшенная версия parse_object с корректной обработкой $ref/$base64.
-inline bool parse_object_v2( ParseState& st, uintptr_t node_off )
-{
-    skip_ws( st );
-    if ( peek( st ) == '}' )
-    {
-        advance( st );
-        node_set_object( node_off );
-        return true;
-    }
-
     // Первый проход: подсчитываем ключи и проверяем на $ref/$base64.
     std::string first_key;
     std::string first_val;
@@ -843,7 +734,7 @@ inline bool parse_value( ParseState& st, uintptr_t node_off )
     if ( c == '{' )
     {
         advance( st );
-        return parse_object_v2( st, node_off );
+        return parse_object( st, node_off );
     }
     if ( c == '-' || ( c >= '0' && c <= '9' ) )
     {
