@@ -116,6 +116,28 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
 
   private:
     /**
+     * @brief Бинарный поиск (lower_bound) по отсортированному массиву.
+     *
+     * @param raw Указатель на массив записей.
+     * @param sz  Количество элементов.
+     * @param k   Искомый ключ.
+     * @return Индекс первого элемента >= k.
+     */
+    static uintptr_t _lower_bound( const Entry* raw, uintptr_t sz, const K& k )
+    {
+        uintptr_t lo = 0, hi = sz;
+        while ( lo < hi )
+        {
+            uintptr_t mid = ( lo + hi ) / 2;
+            if ( Less{}( raw[mid].key, k ) )
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo;
+    }
+
+    /**
      * @brief Внутренняя реализация вставки, безопасная при росте PMM-пула.
      *
      * Когда pmap_pmm хранится внутри PMM-пула, операция push_back может
@@ -125,26 +147,14 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
      */
     void _insert_impl( const K& k, const V& v, uintptr_t self_off )
     {
-        uintptr_t sz = arr_.size();
-        uintptr_t lo = 0, hi = sz;
+        uintptr_t sz  = arr_.size();
+        uintptr_t idx = 0;
 
-        // Бинарный поиск (lower_bound)
         {
             const Entry* raw = arr_.data();
             if ( raw != nullptr )
-            {
-                while ( lo < hi )
-                {
-                    uintptr_t mid = ( lo + hi ) / 2;
-                    if ( Less{}( raw[mid].key, k ) )
-                        lo = mid + 1;
-                    else
-                        hi = mid;
-                }
-            }
+                idx = _lower_bound( raw, sz, k );
         }
-
-        uintptr_t idx = lo;
 
         // Проверяем, существует ли уже такой ключ
         {
@@ -198,26 +208,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
      */
     V* find( const K& k )
     {
-        if ( arr_.empty() )
-            return nullptr;
-
-        Entry* raw = arr_.data();
-        if ( raw == nullptr )
-            return nullptr;
-        uintptr_t lo = 0, hi = arr_.size();
-        while ( lo < hi )
-        {
-            uintptr_t mid = ( lo + hi ) / 2;
-            if ( Less{}( raw[mid].key, k ) )
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-
-        if ( lo < arr_.size() && !Less{}( k, raw[lo].key ) && !Less{}( raw[lo].key, k ) )
-            return &raw[lo].value;
-
-        return nullptr;
+        return const_cast<V*>( static_cast<const pmap_pmm*>( this )->find( k ) );
     }
 
     /**
@@ -231,17 +222,11 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         const Entry* raw = arr_.data();
         if ( raw == nullptr )
             return nullptr;
-        uintptr_t lo = 0, hi = arr_.size();
-        while ( lo < hi )
-        {
-            uintptr_t mid = ( lo + hi ) / 2;
-            if ( Less{}( raw[mid].key, k ) )
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
 
-        if ( lo < arr_.size() && !Less{}( k, raw[lo].key ) && !Less{}( raw[lo].key, k ) )
+        uintptr_t sz = arr_.size();
+        uintptr_t lo = _lower_bound( raw, sz, k );
+
+        if ( lo < sz && !Less{}( k, raw[lo].key ) && !Less{}( raw[lo].key, k ) )
             return &raw[lo].value;
 
         return nullptr;
@@ -261,21 +246,14 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         Entry* raw = arr_.data();
         if ( raw == nullptr )
             return false;
-        uintptr_t lo = 0, hi = arr_.size();
-        while ( lo < hi )
-        {
-            uintptr_t mid = ( lo + hi ) / 2;
-            if ( Less{}( raw[mid].key, k ) )
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
 
-        if ( lo >= arr_.size() || Less{}( k, raw[lo].key ) || Less{}( raw[lo].key, k ) )
+        uintptr_t sz = arr_.size();
+        uintptr_t lo = _lower_bound( raw, sz, k );
+
+        if ( lo >= sz || Less{}( k, raw[lo].key ) || Less{}( raw[lo].key, k ) )
             return false;
 
         // Сдвигаем элементы [lo+1..size-1] влево
-        uintptr_t sz = arr_.size();
         if ( lo + 1 < sz )
             std::memmove( raw + lo, raw + lo + 1, ( sz - lo - 1 ) * sizeof( Entry ) );
 
@@ -323,84 +301,52 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @brief Итератор для pmap_pmm.
+     * @brief Шаблонный итератор для pmap_pmm (const/non-const).
      */
-    class iterator
+    template <bool IsConst>
+    class iterator_base
     {
-        pmap_pmm<K, V>* _pm;
-        uintptr_t       _idx;
+        using MapPtr = std::conditional_t<IsConst, const pmap_pmm*, pmap_pmm*>;
+        using Ref    = std::conditional_t<IsConst, const Entry&, Entry&>;
+        using Ptr    = std::conditional_t<IsConst, const Entry*, Entry*>;
+
+        MapPtr    _pm;
+        uintptr_t _idx;
 
       public:
-        iterator( pmap_pmm<K, V>* pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
+        iterator_base( MapPtr pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
 
-        Entry& operator*()
+        Ref operator*() const
         {
-            Entry* raw = _pm->arr_.data();
+            auto* raw = _pm->arr_.data();
             return raw[_idx];
         }
 
-        Entry* operator->()
+        Ptr operator->() const
         {
-            Entry* raw = _pm->arr_.data();
+            auto* raw = _pm->arr_.data();
             return &raw[_idx];
         }
 
-        iterator& operator++()
+        iterator_base& operator++()
         {
             ++_idx;
             return *this;
         }
 
-        iterator operator++( int )
+        iterator_base operator++( int )
         {
-            iterator tmp = *this;
+            iterator_base tmp = *this;
             ++_idx;
             return tmp;
         }
 
-        bool operator==( const iterator& o ) const { return _idx == o._idx; }
-        bool operator!=( const iterator& o ) const { return _idx != o._idx; }
+        bool operator==( const iterator_base& o ) const { return _idx == o._idx; }
+        bool operator!=( const iterator_base& o ) const { return _idx != o._idx; }
     };
 
-    /**
-     * @brief Константный итератор для pmap_pmm.
-     */
-    class const_iterator
-    {
-        const pmap_pmm<K, V>* _pm;
-        uintptr_t             _idx;
-
-      public:
-        const_iterator( const pmap_pmm<K, V>* pm, uintptr_t idx ) : _pm( pm ), _idx( idx ) {}
-
-        const Entry& operator*() const
-        {
-            const Entry* raw = _pm->arr_.data();
-            return raw[_idx];
-        }
-
-        const Entry* operator->() const
-        {
-            const Entry* raw = _pm->arr_.data();
-            return &raw[_idx];
-        }
-
-        const_iterator& operator++()
-        {
-            ++_idx;
-            return *this;
-        }
-
-        const_iterator operator++( int )
-        {
-            const_iterator tmp = *this;
-            ++_idx;
-            return tmp;
-        }
-
-        bool operator==( const const_iterator& o ) const { return _idx == o._idx; }
-        bool operator!=( const const_iterator& o ) const { return _idx != o._idx; }
-    };
+    using iterator       = iterator_base<false>;
+    using const_iterator = iterator_base<true>;
 
     iterator       begin() { return iterator( this, 0 ); }
     iterator       end() { return iterator( this, arr_.size() ); }

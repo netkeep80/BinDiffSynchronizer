@@ -69,6 +69,28 @@ inline node_id node_ptr_to_id( const node* ptr ) noexcept
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Вспомогательная функция: resolve_pool
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Разрешить смещение пула в указатель. Возвращает nullptr если off == 0 или невалидно.
+template <typename T>
+inline T* pjson_resolve_or_null( uintptr_t off )
+{
+    if ( off == 0 )
+        return nullptr;
+    return pmm_resolve<T>( off );
+}
+
+/// Константная версия resolve_or_null.
+template <typename T>
+inline const T* pjson_resolve_const_or_null( uintptr_t off )
+{
+    if ( off == 0 )
+        return nullptr;
+    return pmm_resolve_const<T>( off );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Функции управления пулом
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -82,9 +104,7 @@ inline node_id node_ptr_to_id( const node* ptr ) noexcept
  */
 inline void pjson_pool_pmm_init( uintptr_t pool_off )
 {
-    if ( pool_off == 0 )
-        return;
-    pjson_pool_pmm* pool = pmm_resolve<pjson_pool_pmm>( pool_off );
+    pjson_pool_pmm* pool = pjson_resolve_or_null<pjson_pool_pmm>( pool_off );
     if ( pool != nullptr )
         new ( pool ) pjson_pool_pmm();
 }
@@ -101,10 +121,7 @@ inline void pjson_pool_pmm_init( uintptr_t pool_off )
  */
 inline node_id pjson_pool_pmm_alloc( uintptr_t pool_off )
 {
-    if ( pool_off == 0 )
-        return 0;
-
-    pjson_pool_pmm* pool = pmm_resolve<pjson_pool_pmm>( pool_off );
+    pjson_pool_pmm* pool = pjson_resolve_or_null<pjson_pool_pmm>( pool_off );
     if ( pool == nullptr )
         return 0;
 
@@ -133,14 +150,14 @@ inline node_id pjson_pool_pmm_alloc( uintptr_t pool_off )
  */
 inline void pjson_pool_pmm_free( uintptr_t pool_off, node_id id )
 {
-    if ( pool_off == 0 || id == 0 )
+    if ( id == 0 )
         return;
 
-    pjson_pool_pmm* pool = pmm_resolve<pjson_pool_pmm>( pool_off );
+    pjson_pool_pmm* pool = pjson_resolve_or_null<pjson_pool_pmm>( pool_off );
     if ( pool == nullptr )
         return;
 
-    node* n = pmm_resolve<node>( id );
+    node* n = pjson_resolve_or_null<node>( id );
     if ( n == nullptr )
         return;
 
@@ -157,9 +174,7 @@ inline void pjson_pool_pmm_free( uintptr_t pool_off, node_id id )
  */
 inline node* pjson_pool_pmm_get( node_id id )
 {
-    if ( id == 0 )
-        return nullptr;
-    return pmm_resolve<node>( id );
+    return pjson_resolve_or_null<node>( id );
 }
 
 /**
@@ -167,9 +182,7 @@ inline node* pjson_pool_pmm_get( node_id id )
  */
 inline const node* pjson_pool_pmm_get_const( node_id id )
 {
-    if ( id == 0 )
-        return nullptr;
-    return pmm_resolve_const<node>( id );
+    return pjson_resolve_const_or_null<node>( id );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -181,9 +194,7 @@ inline const node* pjson_pool_pmm_get_const( node_id id )
  */
 inline uintptr_t pjson_pool_pmm_total_count( uintptr_t pool_off )
 {
-    if ( pool_off == 0 )
-        return 0;
-    const pjson_pool_pmm* pool = pmm_resolve_const<pjson_pool_pmm>( pool_off );
+    const pjson_pool_pmm* pool = pjson_resolve_const_or_null<pjson_pool_pmm>( pool_off );
     return ( pool != nullptr ) ? pool->total_capacity() : 0;
 }
 
@@ -192,9 +203,7 @@ inline uintptr_t pjson_pool_pmm_total_count( uintptr_t pool_off )
  */
 inline uintptr_t pjson_pool_pmm_free_in_pool( uintptr_t pool_off )
 {
-    if ( pool_off == 0 )
-        return 0;
-    const pjson_pool_pmm* pool = pmm_resolve_const<pjson_pool_pmm>( pool_off );
+    const pjson_pool_pmm* pool = pjson_resolve_const_or_null<pjson_pool_pmm>( pool_off );
     return ( pool != nullptr ) ? pool->free_count() : 0;
 }
 
@@ -203,9 +212,7 @@ inline uintptr_t pjson_pool_pmm_free_in_pool( uintptr_t pool_off )
  */
 inline uintptr_t pjson_pool_pmm_used_count( uintptr_t pool_off )
 {
-    if ( pool_off == 0 )
-        return 0;
-    const pjson_pool_pmm* pool = pmm_resolve_const<pjson_pool_pmm>( pool_off );
+    const pjson_pool_pmm* pool = pjson_resolve_const_or_null<pjson_pool_pmm>( pool_off );
     return ( pool != nullptr ) ? pool->allocated_count() : 0;
 }
 
@@ -223,10 +230,7 @@ inline uintptr_t pjson_pool_pmm_used_count( uintptr_t pool_off )
  */
 inline void pjson_pool_pmm_free_pool( uintptr_t pool_off )
 {
-    if ( pool_off == 0 )
-        return;
-
-    pjson_pool_pmm* pool = pmm_resolve<pjson_pool_pmm>( pool_off );
+    pjson_pool_pmm* pool = pjson_resolve_or_null<pjson_pool_pmm>( pool_off );
     if ( pool == nullptr )
         return;
 
@@ -259,11 +263,11 @@ inline uintptr_t pjson_pool_pmm_create()
  */
 inline void pjson_pool_pmm_destroy( uintptr_t pool_off )
 {
-    if ( pool_off == 0 )
-        return;
-
     // Сначала освобождаем все чанки.
     pjson_pool_pmm_free_pool( pool_off );
+
+    if ( pool_off == 0 )
+        return;
 
     // Затем освобождаем саму структуру пула.
     auto pool_pptr = PamManager::pptr_from_byte_offset<pjson_pool_pmm>( pool_off );

@@ -57,12 +57,15 @@ inline bool pjson_next_seg_is_numeric( const char* p )
 }
 
 // ===========================================================================
-// Вспомогательные функции: подсчёт узлов (для метрик)
+// Обобщённый обход поддерева (visitor pattern)
 // ===========================================================================
 
-/// Рекурсивный обход поддерева для подсчёта узлов по типам.
-inline void pjson_count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64_t& ref_cnt, uint64_t& array_cnt,
-                                          uint64_t& object_cnt, uint64_t& binary_bytes )
+/// Рекурсивный обход поддерева JSON-дерева с visitor-паттерном.
+/// Visitor должен реализовать метод visit(node_id, const node_view&).
+/// Рекурсия выполняется для array (по элементам) и object (по значениям).
+/// ref-узлы не рекурсируются (избегаем дублирования и циклов).
+template <typename Visitor>
+inline void pjson_traverse_subtree( node_id id, Visitor&& vis )
 {
     if ( id == 0 )
         return;
@@ -70,70 +73,93 @@ inline void pjson_count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64
     if ( !v.valid() )
         return;
 
-    ++node_cnt;
+    vis.visit( id, v );
 
-    switch ( v.tag() )
+    if ( v.is_array() )
     {
-    case node_tag::array:
-        ++array_cnt;
+        uintptr_t sz = v.size();
+        for ( uintptr_t i = 0; i < sz; ++i )
         {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view elem = v.at( i );
-                if ( elem.valid() )
-                    pjson_count_nodes_in_subtree( elem.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-            }
+            node_view elem = v.at( i );
+            if ( elem.valid() )
+                pjson_traverse_subtree( elem.id, vis );
         }
-        break;
-    case node_tag::object:
-        ++object_cnt;
+    }
+    else if ( v.is_object() )
+    {
+        uintptr_t sz = v.size();
+        for ( uintptr_t i = 0; i < sz; ++i )
         {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view val = v.value_at( i );
-                if ( val.valid() )
-                    pjson_count_nodes_in_subtree( val.id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-            }
+            node_view val = v.value_at( i );
+            if ( val.valid() )
+                pjson_traverse_subtree( val.id, vis );
         }
-        break;
-    case node_tag::ref:
-        ++ref_cnt;
-        // Не обходим цель ref (избегаем дублирования счёта).
-        break;
-    case node_tag::binary:
-        // Считаем байты из binary_val.size().
+    }
+}
+
+// ===========================================================================
+// Вспомогательные функции: подсчёт узлов (для метрик)
+// ===========================================================================
+
+/// Visitor для подсчёта узлов по типам.
+struct pjson_count_visitor
+{
+    uint64_t& node_cnt;
+    uint64_t& ref_cnt;
+    uint64_t& array_cnt;
+    uint64_t& object_cnt;
+    uint64_t& binary_bytes;
+
+    void visit( node_id id, const node_view& v )
+    {
+        ++node_cnt;
+        switch ( v.tag() )
+        {
+        case node_tag::array:
+            ++array_cnt;
+            break;
+        case node_tag::object:
+            ++object_cnt;
+            break;
+        case node_tag::ref:
+            ++ref_cnt;
+            break;
+        case node_tag::binary:
         {
             const node* n = pmm_resolve<node>( id );
             if ( n != nullptr )
                 binary_bytes += static_cast<uint64_t>( n->binary_val.size() );
+            break;
         }
-        break;
-    default:
-        break;
+        default:
+            break;
+        }
     }
+};
+
+/// Рекурсивный обход поддерева для подсчёта узлов по типам.
+inline void pjson_count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64_t& ref_cnt, uint64_t& array_cnt,
+                                          uint64_t& object_cnt, uint64_t& binary_bytes )
+{
+    pjson_count_visitor vis{ node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes };
+    pjson_traverse_subtree( id, vis );
 }
 
 // ===========================================================================
 // Вспомогательные функции: поиск по строковым узлам
 // ===========================================================================
 
-/// Рекурсивный обход поддерева для поиска string-узлов (pstring),
-/// чьё значение содержит подстроку pattern.
-inline void pjson_search_node_strings_in_subtree( node_id id, const char* pattern, std::vector<node_id>& results )
+/// Visitor для поиска string-узлов, чьё значение содержит подстроку pattern.
+struct pjson_search_strings_visitor
 {
-    if ( id == 0 )
-        return;
-    const node_view v{ id };
-    if ( !v.valid() )
-        return;
+    const char*            pattern;
+    std::vector<node_id>& results;
 
-    switch ( v.tag() )
+    void visit( node_id id, const node_view& v )
     {
-    case node_tag::string:
-    {
-        // Проверяем, содержит ли pstring-значение подстроку pattern.
+        if ( v.tag() != node_tag::string )
+            return;
+
         std::string_view sv = v.as_string();
         if ( pattern[0] == '\0' )
         {
@@ -147,36 +173,15 @@ inline void pjson_search_node_strings_in_subtree( node_id id, const char* patter
             if ( s != nullptr && std::strstr( s, pattern ) != nullptr )
                 results.push_back( id );
         }
-        break;
     }
-    case node_tag::array:
-    {
-        uintptr_t sz = v.size();
-        for ( uintptr_t i = 0; i < sz; ++i )
-        {
-            node_view elem = v.at( i );
-            if ( elem.valid() )
-                pjson_search_node_strings_in_subtree( elem.id, pattern, results );
-        }
-        break;
-    }
-    case node_tag::object:
-    {
-        uintptr_t sz = v.size();
-        for ( uintptr_t i = 0; i < sz; ++i )
-        {
-            node_view val = v.value_at( i );
-            if ( val.valid() )
-                pjson_search_node_strings_in_subtree( val.id, pattern, results );
-        }
-        break;
-    }
-    case node_tag::ref:
-        // Не обходим цель ref (избегаем дублирования).
-        break;
-    default:
-        break;
-    }
+};
+
+/// Рекурсивный обход поддерева для поиска string-узлов (pstring),
+/// чьё значение содержит подстроку pattern.
+inline void pjson_search_node_strings_in_subtree( node_id id, const char* pattern, std::vector<node_id>& results )
+{
+    pjson_search_strings_visitor vis{ pattern, results };
+    pjson_traverse_subtree( id, vis );
 }
 
 // ===========================================================================
