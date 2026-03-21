@@ -51,6 +51,7 @@
  *   - `storage_backend`  — бэкенд хранилища (HeapStorage, StaticStorage, MMapStorage)
  *   - `free_block_tree`  — политика дерева свободных блоков (AvlFreeTree)
  *   - `lock_policy`      — политика многопоточности (NoLock, SharedMutexLock)
+ *   - `logging_policy`   — политика логирования (NoLogging, StderrLogging) (Issue #202, Phase 4.2)
  *   - `granule_size`     — размер гранулы в байтах
  *   - `max_memory_gb`    — максимальный объём памяти в ГБ
  *   - `grow_numerator` / `grow_denominator` — коэффициент роста хранилища
@@ -375,7 +376,44 @@ inline constexpr std::size_t kDefaultGrowDenominator = 4;
  *
  * @see plan_issue87.md "Phase 4: FreeBlockTree as template policy"
  * @see block_state.h — BlockState machine (Issue #93, #106)
- * @version 1.4 (Issue #175 — index variables use index_type; ManagerHeader templated)
+ * @see avl_tree_mixin.h — shared AVL operations via BlockPPtr adapter (Issue #188)
+ * @version 1.5 (Issue #188 — deduplicate AVL operations via BlockPPtr adapter)
+ */
+
+/**
+ * @file pmm/avl_tree_mixin.h
+ * @brief Shared AVL tree helper functions for pmap, pstringview and pvector (Issue #155, #162, #188).
+ *
+ * Provides a set of free static template functions implementing the core AVL
+ * tree operations (height, balance factor, rotations, rebalancing, insert, find,
+ * remove) that are shared between pmap<_K,_V,ManagerT>, pstringview<ManagerT>
+ * and pvector<T,ManagerT>.
+ *
+ * All rotation and rebalance functions accept an optional NodeUpdateFn callback
+ * that is invoked after structural changes to update derived node attributes.
+ * By default avl_update_height is used (height-only). pvector passes a custom
+ * callback that also updates the order-statistic weight field (Issue #188).
+ *
+ * Template parameter PPtr must support:
+ *   - is_null()
+ *   - tree_node() returning a TreeNode& with get_left/set_left/get_right/set_right/
+ *     get_parent/set_parent/get_height/set_height
+ *   - offset()
+ *   - PPtr::manager_type::address_traits::no_block sentinel
+ *
+ * Also provides BlockPPtr<AddressTraitsT> — a lightweight adapter that wraps
+ * raw (base_ptr, index) pairs and delegates to BlockStateBase<AT> static methods,
+ * enabling AvlFreeTree to reuse the shared AVL operations instead of maintaining
+ * its own duplicate rotation/rebalancing code (Issue #188).
+ *
+ * Additionally provides AvlInorderIterator<NodePPtr> — a shared in-order
+ * iterator template used by both pmap and pvector (Issue #188).
+ *
+ * @see pmap.h — pmap<_K,_V,ManagerT> (Issue #153)
+ * @see pstringview.h — pstringview<ManagerT> (Issue #151)
+ * @see pvector.h — pvector<T,ManagerT> (Issue #186, #188)
+ * @see free_block_tree.h — AvlFreeTree<AT> uses BlockPPtr adapter (Issue #188)
+ * @version 0.5 (Issue #188 — BlockPPtr adapter for free_block_tree, AvlInorderIterator)
  */
 
 /**
@@ -1524,6 +1562,31 @@ void recover_block_state( void* raw_blk, typename AddressTraitsT::index_type own
 namespace pmm
 {
 
+// ─── Error codes (Issue #201, Phase 4.1) ──────────────────────────────────────
+
+/**
+ * @brief Error codes for PersistMemoryManager operations (Issue #201, Phase 4.1).
+ *
+ * Provides detailed error information instead of bare bool/nullptr.
+ * Use `PersistMemoryManager::last_error()` to query the most recent error.
+ */
+enum class PmmError : std::uint8_t
+{
+    Ok              = 0,  ///< Operation succeeded
+    NotInitialized  = 1,  ///< Manager is not initialized
+    InvalidSize     = 2,  ///< Invalid size argument (zero, too small, etc.)
+    Overflow        = 3,  ///< Arithmetic overflow in size/granule computation
+    OutOfMemory     = 4,  ///< Allocation failed — not enough free space
+    ExpandFailed    = 5,  ///< Backend expand() failed
+    InvalidMagic    = 6,  ///< Magic number mismatch on load()
+    CrcMismatch     = 7,  ///< CRC32 mismatch on load (corrupted image)
+    SizeMismatch    = 8,  ///< Stored total_size does not match backend
+    GranuleMismatch = 9,  ///< Stored granule_size does not match address_traits
+    BackendError    = 10, ///< Backend returned null or invalid state
+    InvalidPointer  = 11, ///< Pointer is null or out of bounds
+    BlockLocked     = 12, ///< Block is permanently locked (cannot deallocate)
+};
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /// @brief Granule size in bytes (Issue #59, #83). All alignment/granularity expressed via this constant.
@@ -1596,17 +1659,23 @@ namespace detail
 // Software CRC32 (ISO 3309 / ITU-T V.42 polynomial 0xEDB88320).
 // Header-only, no external dependencies.  Used by io.h save/load functions.
 
+/// @brief CRC32 single byte accumulation (Issue #188 deduplication).
+/// Extracts the inner loop from compute_crc32 and compute_image_crc32.
+inline std::uint32_t crc32_accumulate_byte( std::uint32_t crc, std::uint8_t byte ) noexcept
+{
+    crc ^= byte;
+    for ( int bit = 0; bit < 8; ++bit )
+        crc = ( crc >> 1 ) ^ ( 0xEDB88320U & ( ~( crc & 1U ) + 1U ) );
+    return crc;
+}
+
 /// @brief Compute CRC32 over a byte range.
 /// Uses the standard Ethernet/zlib polynomial (0xEDB88320, reflected).
 inline std::uint32_t compute_crc32( const std::uint8_t* data, std::size_t length ) noexcept
 {
     std::uint32_t crc = 0xFFFFFFFFU;
     for ( std::size_t i = 0; i < length; ++i )
-    {
-        crc ^= data[i];
-        for ( int bit = 0; bit < 8; ++bit )
-            crc = ( crc >> 1 ) ^ ( 0xEDB88320U & ( ~( crc & 1U ) + 1U ) );
-    }
+        crc = crc32_accumulate_byte( crc, data[i] );
     return crc ^ 0xFFFFFFFFU;
 }
 
@@ -1696,25 +1765,13 @@ inline std::uint32_t compute_image_crc32( const std::uint8_t* data, std::size_t 
     // CRC everything before the crc32 field
     std::uint32_t crc = 0xFFFFFFFFU;
     for ( std::size_t i = 0; i < kCrcOffset && i < length; ++i )
-    {
-        crc ^= data[i];
-        for ( int bit = 0; bit < 8; ++bit )
-            crc = ( crc >> 1 ) ^ ( 0xEDB88320U & ( ~( crc & 1U ) + 1U ) );
-    }
+        crc = crc32_accumulate_byte( crc, data[i] );
     // Skip the crc32 field (treat as 4 zero bytes)
     for ( std::size_t i = 0; i < kCrcSize; ++i )
-    {
-        crc ^= 0x00U;
-        for ( int bit = 0; bit < 8; ++bit )
-            crc = ( crc >> 1 ) ^ ( 0xEDB88320U & ( ~( crc & 1U ) + 1U ) );
-    }
+        crc = crc32_accumulate_byte( crc, 0x00U );
     // CRC everything after the crc32 field
     for ( std::size_t i = kAfterCrc; i < length; ++i )
-    {
-        crc ^= data[i];
-        for ( int bit = 0; bit < 8; ++bit )
-            crc = ( crc >> 1 ) ^ ( 0xEDB88320U & ( ~( crc & 1U ) + 1U ) );
-    }
+        crc = crc32_accumulate_byte( crc, data[i] );
     return crc ^ 0xFFFFFFFFU;
 }
 
@@ -1961,6 +2018,27 @@ inline bool is_valid_block( const std::uint8_t* base, const ManagerHeader<pmm::D
     return true;
 }
 
+/// @brief Resolve a granule index to a raw pointer (Issue #188 deduplication).
+/// Eliminates repeated `base + idx * granule_size` patterns across parray, pstring, ppool, pstringview.
+/// @return nullptr if idx is zero (null sentinel).
+template <typename AddressTraitsT>
+inline void* resolve_granule_ptr( std::uint8_t* base, typename AddressTraitsT::index_type idx ) noexcept
+{
+    if ( idx == static_cast<typename AddressTraitsT::index_type>( 0 ) )
+        return nullptr;
+    return base + static_cast<std::size_t>( idx ) * AddressTraitsT::granule_size;
+}
+
+/// @brief Convert a raw pointer to a granule index (Issue #188 deduplication).
+/// Eliminates repeated `(ptr - base) / granule_size` patterns across parray, pstring, ppool, pstringview.
+template <typename AddressTraitsT>
+inline typename AddressTraitsT::index_type ptr_to_granule_idx( const std::uint8_t* base, const void* ptr ) noexcept
+{
+    using IndexT         = typename AddressTraitsT::index_type;
+    std::size_t byte_off = static_cast<const std::uint8_t*>( ptr ) - base;
+    return static_cast<IndexT>( byte_off / AddressTraitsT::granule_size );
+}
+
 /// @brief Compute user data address for block (block + sizeof(Block<A>), Issue #106, #112, #141).
 /// Single canonical implementation — use this instead of duplicating the cast in each call site.
 template <typename AddressTraitsT = pmm::DefaultAddressTraits>
@@ -2027,10 +2105,618 @@ inline typename AddressTraitsT::index_type required_block_granules_t( std::size_
 
 } // namespace pmm
 
-#include <cassert>
+#include <cstddef>
+#include <cstdint>
+
+namespace pmm
+{
+namespace detail
+{
+
+/// @cond INTERNAL
+
+/// @brief Sentinel value for "no node" in TreeNode fields.
+template <typename PPtr> static constexpr auto pptr_no_block() noexcept
+{
+    return PPtr::manager_type::address_traits::no_block;
+}
+
+/// @brief Construct a sibling PPtr from an existing one with a different index.
+/// For regular pptr, returns PPtr(idx). For BlockPPtr, propagates base_ptr.
+template <typename PPtr> static PPtr pptr_make( PPtr /*source*/, typename PPtr::index_type idx ) noexcept
+{
+    return PPtr( idx );
+}
+
+/// @brief Get left child as PPtr (translates no_block sentinel to null PPtr).
+template <typename PPtr> static PPtr pptr_get_left( PPtr p ) noexcept
+{
+    auto idx = p.tree_node().get_left();
+    return ( idx == pptr_no_block<PPtr>() ) ? PPtr() : pptr_make( p, idx );
+}
+
+/// @brief Get right child as PPtr (translates no_block sentinel to null PPtr).
+template <typename PPtr> static PPtr pptr_get_right( PPtr p ) noexcept
+{
+    auto idx = p.tree_node().get_right();
+    return ( idx == pptr_no_block<PPtr>() ) ? PPtr() : pptr_make( p, idx );
+}
+
+/// @brief Get parent as PPtr (translates no_block sentinel to null PPtr).
+template <typename PPtr> static PPtr pptr_get_parent( PPtr p ) noexcept
+{
+    auto idx = p.tree_node().get_parent();
+    return ( idx == pptr_no_block<PPtr>() ) ? PPtr() : pptr_make( p, idx );
+}
+
+/// @brief Set left child from PPtr (translates null PPtr to no_block sentinel).
+template <typename PPtr> static void pptr_set_left( PPtr p, PPtr child ) noexcept
+{
+    auto idx = child.is_null() ? pptr_no_block<PPtr>() : child.offset();
+    p.tree_node().set_left( idx );
+}
+
+/// @brief Set right child from PPtr (translates null PPtr to no_block sentinel).
+template <typename PPtr> static void pptr_set_right( PPtr p, PPtr child ) noexcept
+{
+    auto idx = child.is_null() ? pptr_no_block<PPtr>() : child.offset();
+    p.tree_node().set_right( idx );
+}
+
+/// @brief Set parent from PPtr (translates null PPtr to no_block sentinel).
+template <typename PPtr> static void pptr_set_parent( PPtr p, PPtr parent ) noexcept
+{
+    auto idx = parent.is_null() ? pptr_no_block<PPtr>() : parent.offset();
+    p.tree_node().set_parent( idx );
+}
+
+/// @brief Get height of node (0 if null).
+template <typename PPtr> static std::int16_t avl_height( PPtr p ) noexcept
+{
+    if ( p.is_null() )
+        return 0;
+    return p.tree_node().get_height();
+}
+
+/// @brief Update height of node from its children.
+template <typename PPtr> static void avl_update_height( PPtr p ) noexcept
+{
+    if ( p.is_null() )
+        return;
+    std::int16_t lh = avl_height( pptr_get_left( p ) );
+    std::int16_t rh = avl_height( pptr_get_right( p ) );
+    std::int16_t h  = static_cast<std::int16_t>( 1 + ( lh > rh ? lh : rh ) );
+    p.tree_node().set_height( h );
+}
+
+/// @brief Balance factor: height(left) - height(right).
+template <typename PPtr> static std::int16_t avl_balance_factor( PPtr p ) noexcept
+{
+    if ( p.is_null() )
+        return 0;
+    std::int16_t lh = avl_height( pptr_get_left( p ) );
+    std::int16_t rh = avl_height( pptr_get_right( p ) );
+    return static_cast<std::int16_t>( lh - rh );
+}
+
+/// @brief Update parent → child link (or root if parent is null).
+/// @param root_idx Reference to the tree's root index, updated when parent is null.
+template <typename PPtr, typename IndexType>
+static void avl_set_child( PPtr parent, PPtr old_child, PPtr new_child, IndexType& root_idx ) noexcept
+{
+    if ( parent.is_null() )
+    {
+        root_idx = new_child.offset();
+        return;
+    }
+    PPtr left_of_parent = pptr_get_left( parent );
+    if ( left_of_parent == old_child )
+        pptr_set_left( parent, new_child );
+    else
+        pptr_set_right( parent, new_child );
+}
+
+/// @brief Default node-update functor: updates height only (used by pmap, pstringview).
+struct AvlUpdateHeightOnly
+{
+    template <typename PPtr> void operator()( PPtr p ) const noexcept { avl_update_height( p ); }
+};
+
+/**
+ * @brief Right rotation around y; returns new subtree root (x).
+ *
+ *     y            x
+ *    / \          / \
+ *   x   C  -->  A    y
+ *  / \               / \
+ * A   B             B   C
+ *
+ * @param update_node  Callable(PPtr) invoked on y then x after structural change.
+ *                     Default: AvlUpdateHeightOnly (updates height only).
+ */
+template <typename PPtr, typename IndexType, typename NodeUpdateFn = AvlUpdateHeightOnly>
+static PPtr avl_rotate_right( PPtr y, IndexType& root_idx, NodeUpdateFn update_node = {} ) noexcept
+{
+    PPtr x     = pptr_get_left( y );
+    PPtr b     = pptr_get_right( x );
+    PPtr y_par = pptr_get_parent( y );
+
+    pptr_set_right( x, y );
+    pptr_set_parent( y, x );
+
+    pptr_set_left( y, b );
+    if ( !b.is_null() )
+        pptr_set_parent( b, y );
+
+    pptr_set_parent( x, y_par );
+
+    avl_set_child( y_par, y, x, root_idx );
+
+    update_node( y );
+    update_node( x );
+    return x;
+}
+
+/**
+ * @brief Left rotation around x; returns new subtree root (y).
+ *
+ *   x               y
+ *  / \             / \
+ * A   y   -->    x    C
+ *    / \        / \
+ *   B   C      A   B
+ *
+ * @param update_node  Callable(PPtr) invoked on x then y after structural change.
+ *                     Default: AvlUpdateHeightOnly (updates height only).
+ */
+template <typename PPtr, typename IndexType, typename NodeUpdateFn = AvlUpdateHeightOnly>
+static PPtr avl_rotate_left( PPtr x, IndexType& root_idx, NodeUpdateFn update_node = {} ) noexcept
+{
+    PPtr y     = pptr_get_right( x );
+    PPtr b     = pptr_get_left( y );
+    PPtr x_par = pptr_get_parent( x );
+
+    pptr_set_left( y, x );
+    pptr_set_parent( x, y );
+
+    pptr_set_right( x, b );
+    if ( !b.is_null() )
+        pptr_set_parent( b, x );
+
+    pptr_set_parent( y, x_par );
+
+    avl_set_child( x_par, x, y, root_idx );
+
+    update_node( x );
+    update_node( y );
+    return y;
+}
+
+/// @brief Rebalance from node p upward to root.
+/// @param update_node  Callable(PPtr) for node attribute update after rotations.
+///                     Default: AvlUpdateHeightOnly (height only).
+template <typename PPtr, typename IndexType, typename NodeUpdateFn = AvlUpdateHeightOnly>
+static void avl_rebalance_up( PPtr p, IndexType& root_idx, NodeUpdateFn update_node = {} ) noexcept
+{
+    while ( !p.is_null() )
+    {
+        update_node( p );
+        std::int16_t bf = avl_balance_factor( p );
+        if ( bf > 1 )
+        {
+            PPtr left = pptr_get_left( p );
+            if ( avl_balance_factor( left ) < 0 )
+                avl_rotate_left( left, root_idx, update_node );
+            p = avl_rotate_right( p, root_idx, update_node );
+        }
+        else if ( bf < -1 )
+        {
+            PPtr right = pptr_get_right( p );
+            if ( avl_balance_factor( right ) > 0 )
+                avl_rotate_right( right, root_idx, update_node );
+            p = avl_rotate_left( p, root_idx, update_node );
+        }
+        p = pptr_get_parent( p );
+    }
+}
+
+/// @brief Find the minimum (leftmost) node in the subtree rooted at p (Issue #188).
+template <typename PPtr> static PPtr avl_min_node( PPtr p ) noexcept
+{
+    while ( !p.is_null() )
+    {
+        PPtr left = pptr_get_left( p );
+        if ( left.is_null() )
+            break;
+        p = left;
+    }
+    return p;
+}
+
+/// @brief Find the maximum (rightmost) node in the subtree rooted at p (Issue #188).
+template <typename PPtr> static PPtr avl_max_node( PPtr p ) noexcept
+{
+    while ( !p.is_null() )
+    {
+        PPtr right = pptr_get_right( p );
+        if ( right.is_null() )
+            break;
+        p = right;
+    }
+    return p;
+}
+
+/// @brief Remove target node from AVL tree and rebalance (Issue #188).
+///
+/// Standard BST removal with in-order successor replacement, followed by
+/// AVL rebalancing from the lowest affected node upward.
+///
+/// @param target      The node to remove (must be in the tree).
+/// @param root_idx    Reference to the tree root index.
+/// @param update_node Callable(PPtr) for node attribute update after rotations.
+///                    Default: AvlUpdateHeightOnly (height only).
+template <typename PPtr, typename IndexType, typename NodeUpdateFn = AvlUpdateHeightOnly>
+static void avl_remove( PPtr target, IndexType& root_idx, NodeUpdateFn update_node = {} ) noexcept
+{
+    PPtr left_p  = pptr_get_left( target );
+    PPtr right_p = pptr_get_right( target );
+    PPtr par_p   = pptr_get_parent( target );
+
+    if ( left_p.is_null() && right_p.is_null() )
+    {
+        // Leaf node — just detach.
+        avl_set_child( par_p, target, PPtr(), root_idx );
+        if ( !par_p.is_null() )
+            avl_rebalance_up( par_p, root_idx, update_node );
+    }
+    else if ( left_p.is_null() )
+    {
+        // Only right child.
+        pptr_set_parent( right_p, par_p );
+        avl_set_child( par_p, target, right_p, root_idx );
+        if ( !par_p.is_null() )
+            avl_rebalance_up( par_p, root_idx, update_node );
+        else
+            update_node( right_p );
+    }
+    else if ( right_p.is_null() )
+    {
+        // Only left child.
+        pptr_set_parent( left_p, par_p );
+        avl_set_child( par_p, target, left_p, root_idx );
+        if ( !par_p.is_null() )
+            avl_rebalance_up( par_p, root_idx, update_node );
+        else
+            update_node( left_p );
+    }
+    else
+    {
+        // Two children — replace with in-order successor.
+        PPtr successor = avl_min_node( right_p );
+
+        auto succ_par_idx = successor.tree_node().get_parent();
+        PPtr succ_rgt     = pptr_get_right( successor );
+
+        if ( succ_par_idx == target.offset() )
+        {
+            // Successor is direct right child of target.
+            pptr_set_left( successor, left_p );
+            pptr_set_parent( left_p, successor );
+            // successor keeps its right subtree
+            pptr_set_parent( successor, par_p );
+            avl_set_child( par_p, target, successor, root_idx );
+            avl_rebalance_up( successor, root_idx, update_node );
+        }
+        else
+        {
+            // Successor is deeper — detach it first.
+            PPtr succ_par( succ_par_idx );
+            if ( !succ_rgt.is_null() )
+            {
+                pptr_set_parent( succ_rgt, succ_par );
+                pptr_set_left( succ_par, succ_rgt );
+            }
+            else
+            {
+                pptr_set_left( succ_par, PPtr() );
+            }
+
+            // Put successor in target's place.
+            pptr_set_left( successor, left_p );
+            pptr_set_parent( left_p, successor );
+            pptr_set_right( successor, right_p );
+            pptr_set_parent( right_p, successor );
+            pptr_set_parent( successor, par_p );
+            avl_set_child( par_p, target, successor, root_idx );
+
+            avl_rebalance_up( succ_par, root_idx, update_node );
+        }
+    }
+}
+
+/// @brief Search the AVL tree for a node matching the given key.
+///
+/// Traverses the tree starting from root_idx, using compare_less to determine
+/// the direction at each node. When compare_less(cur, key) is true the search
+/// goes right; when compare_less(key, cur) is true it goes left; otherwise the
+/// node is considered a match and is returned.
+///
+/// @param root_idx     Index of the tree root (0 = empty tree).
+/// @param compare_less Callable(PPtr cur) -> int: returns negative if key < cur,
+///                     zero if key == cur, positive if key > cur.
+/// @param resolve      Callable(PPtr) -> NodeObjPtr: resolves pptr to raw pointer.
+///                     Must return nullptr when the pointer is invalid.
+/// @return PPtr to the matching node, or a null PPtr if not found.
+template <typename PPtr, typename IndexType, typename CompareThreeWayFn, typename ResolveFn>
+static PPtr avl_find( IndexType root_idx, CompareThreeWayFn&& compare_three_way, ResolveFn&& resolve ) noexcept
+{
+    PPtr cur( root_idx );
+    while ( !cur.is_null() )
+    {
+        if ( resolve( cur ) == nullptr )
+            break;
+        int cmp = compare_three_way( cur );
+        if ( cmp == 0 )
+            return cur;
+        else if ( cmp < 0 )
+            cur = pptr_get_left( cur );
+        else
+            cur = pptr_get_right( cur );
+    }
+    return PPtr(); // not found
+}
+
+/// @brief In-order successor: next node in sorted order (Issue #188 deduplication).
+/// Shared between pvector::iterator and pmap::iterator — eliminates ~50 lines of duplication.
+template <typename PPtr> static PPtr avl_inorder_successor( PPtr cur ) noexcept
+{
+    if ( cur.is_null() )
+        return PPtr();
+
+    // If there is a right child, go to its leftmost node.
+    PPtr right = pptr_get_right( cur );
+    if ( !right.is_null() )
+        return avl_min_node( right );
+
+    // Otherwise, go up until we come from a left child.
+    while ( true )
+    {
+        PPtr parent = pptr_get_parent( cur );
+        if ( parent.is_null() )
+            return PPtr(); // reached root from right — end of traversal
+        PPtr parent_left = pptr_get_left( parent );
+        if ( !parent_left.is_null() && parent_left.offset() == cur.offset() )
+            return parent; // cur was left child — parent is successor
+        cur = parent;
+    }
+}
+
+/// @brief Initialize AVL tree node fields to empty state (Issue #188 deduplication).
+/// Sets left, right, parent to sentinel and height to 1.
+/// Shared between pvector::push_back, pmap::insert, pstringview::_intern.
+template <typename PPtr> static void avl_init_node( PPtr p ) noexcept
+{
+    auto& tn = p.tree_node();
+    tn.set_left( pptr_no_block<PPtr>() );
+    tn.set_right( pptr_no_block<PPtr>() );
+    tn.set_parent( pptr_no_block<PPtr>() );
+    tn.set_height( static_cast<std::int16_t>( 1 ) );
+}
+
+/// @brief Count nodes in subtree rooted at p (Issue #188 deduplication).
+/// Shared between pmap::size() and any other container that needs subtree counting.
+template <typename PPtr> static std::size_t avl_subtree_count( PPtr p ) noexcept
+{
+    if ( p.is_null() )
+        return 0;
+    return 1 + avl_subtree_count( pptr_get_left( p ) ) + avl_subtree_count( pptr_get_right( p ) );
+}
+
+/// @brief Recursively deallocate all nodes in subtree (Issue #188 deduplication).
+/// @tparam PPtr   Persistent pointer type.
+/// @tparam DeallocFn  Callable(PPtr) that deallocates a single node.
+template <typename PPtr, typename DeallocFn> static void avl_clear_subtree( PPtr p, DeallocFn&& dealloc ) noexcept
+{
+    if ( p.is_null() )
+        return;
+    PPtr left_p  = pptr_get_left( p );
+    PPtr right_p = pptr_get_right( p );
+    avl_clear_subtree( left_p, dealloc );
+    avl_clear_subtree( right_p, dealloc );
+    dealloc( p );
+}
+
+/// @brief Insert new_node into the AVL tree with the given root.
+/// The caller must resolve the comparison ordering via go_left callback.
+/// @param new_node    The node to insert (must not be null, not already in tree).
+/// @param root_idx    Reference to the tree root index.
+/// @param go_left     Callable(cur_node_ptr) -> bool: returns true if new_node < cur.
+/// @param resolve     Callable(pptr) -> NodeObjPtr: resolves pptr to raw object pointer.
+/// @param update_node Callable(PPtr) for node attribute update after rotations (Issue #188).
+///                    Default: AvlUpdateHeightOnly (height only).
+template <typename PPtr, typename IndexType, typename GoLeftFn, typename ResolveFn,
+          typename NodeUpdateFn = AvlUpdateHeightOnly>
+static void avl_insert( PPtr new_node, IndexType& root_idx, GoLeftFn&& go_left, ResolveFn&& resolve,
+                        NodeUpdateFn update_node = {} ) noexcept
+{
+    if ( new_node.is_null() )
+        return;
+    if ( resolve( new_node ) == nullptr )
+        return;
+
+    if ( root_idx == static_cast<IndexType>( 0 ) )
+    {
+        pptr_set_left( new_node, PPtr() );
+        pptr_set_right( new_node, PPtr() );
+        pptr_set_parent( new_node, PPtr() );
+        new_node.tree_node().set_height( static_cast<std::int16_t>( 1 ) );
+        root_idx = new_node.offset();
+        return;
+    }
+
+    PPtr cur( root_idx );
+    PPtr parent;
+    bool left = false;
+
+    while ( !cur.is_null() )
+    {
+        if ( resolve( cur ) == nullptr )
+            break;
+        parent = cur;
+        left   = go_left( cur );
+        if ( left )
+            cur = pptr_get_left( cur );
+        else
+            cur = pptr_get_right( cur );
+    }
+
+    pptr_set_parent( new_node, parent );
+    if ( left )
+        pptr_set_left( parent, new_node );
+    else
+        pptr_set_right( parent, new_node );
+
+    avl_rebalance_up( parent, root_idx, update_node );
+}
+
+// ─── BlockPPtr: adapter for free_block_tree to reuse shared AVL operations ───
+
+/**
+ * @brief Fake "manager type" that provides address_traits for BlockPPtr (Issue #188).
+ *
+ * BlockPPtr needs PPtr::manager_type::address_traits::no_block for the sentinel.
+ * This minimal struct provides exactly that, without coupling to a real manager.
+ */
+template <typename AddressTraitsT> struct BlockPPtrManagerTag
+{
+    using address_traits = AddressTraitsT;
+};
+
+/**
+ * @brief Proxy object returned by BlockPPtr::tree_node() (Issue #188).
+ *
+ * Wraps a raw void* block pointer and delegates get/set calls to
+ * BlockStateBase<AT> static methods, matching the TreeNode interface
+ * expected by avl_tree_mixin functions.
+ */
+template <typename AddressTraitsT> struct BlockTreeNodeProxy
+{
+    using index_type = typename AddressTraitsT::index_type;
+    void* _blk;
+
+    explicit BlockTreeNodeProxy( void* blk ) noexcept : _blk( blk ) {}
+
+    index_type   get_left() const noexcept { return BlockStateBase<AddressTraitsT>::get_left_offset( _blk ); }
+    index_type   get_right() const noexcept { return BlockStateBase<AddressTraitsT>::get_right_offset( _blk ); }
+    index_type   get_parent() const noexcept { return BlockStateBase<AddressTraitsT>::get_parent_offset( _blk ); }
+    std::int16_t get_height() const noexcept { return BlockStateBase<AddressTraitsT>::get_avl_height( _blk ); }
+
+    void set_left( index_type v ) noexcept { BlockStateBase<AddressTraitsT>::set_left_offset_of( _blk, v ); }
+    void set_right( index_type v ) noexcept { BlockStateBase<AddressTraitsT>::set_right_offset_of( _blk, v ); }
+    void set_parent( index_type v ) noexcept { BlockStateBase<AddressTraitsT>::set_parent_offset_of( _blk, v ); }
+    void set_height( std::int16_t v ) noexcept { BlockStateBase<AddressTraitsT>::set_avl_height_of( _blk, v ); }
+};
+
+/**
+ * @brief Lightweight adapter making (base_ptr, block_index) behave like PPtr (Issue #188).
+ *
+ * Enables AvlFreeTree to delegate rotation, rebalancing, and min_node operations
+ * to the shared AVL functions in avl_tree_mixin.h, eliminating ~120 lines of
+ * duplicate code from free_block_tree.h.
+ *
+ * Satisfies the PPtr concept expected by avl_tree_mixin functions:
+ *   - is_null(), offset(), tree_node(), operator==
+ *   - manager_type::address_traits::no_block sentinel
+ *   - Default and index-based construction
+ *
+ * @tparam AddressTraitsT  Address space traits (e.g. DefaultAddressTraits).
+ */
+template <typename AddressTraitsT> struct BlockPPtr
+{
+    using manager_type = BlockPPtrManagerTag<AddressTraitsT>;
+    using index_type   = typename AddressTraitsT::index_type;
+
+    std::uint8_t* _base;
+    index_type    _idx;
+
+    /// Null construction.
+    BlockPPtr() noexcept : _base( nullptr ), _idx( AddressTraitsT::no_block ) {}
+
+    /// Construct from base pointer and block index.
+    BlockPPtr( std::uint8_t* base, index_type idx ) noexcept : _base( base ), _idx( idx ) {}
+
+    bool       is_null() const noexcept { return _idx == AddressTraitsT::no_block; }
+    index_type offset() const noexcept { return _idx; }
+
+    bool operator==( const BlockPPtr& other ) const noexcept { return _idx == other._idx; }
+    bool operator!=( const BlockPPtr& other ) const noexcept { return _idx != other._idx; }
+
+    /// Returns a proxy that delegates TreeNode-like get/set calls to BlockStateBase.
+    BlockTreeNodeProxy<AddressTraitsT> tree_node() const noexcept
+    {
+        return BlockTreeNodeProxy<AddressTraitsT>( block_at<AddressTraitsT>( _base, _idx ) );
+    }
+};
+
+/// @brief pptr_make overload for BlockPPtr: propagates base_ptr from source to new index.
+template <typename AddressTraitsT>
+static BlockPPtr<AddressTraitsT> pptr_make( BlockPPtr<AddressTraitsT>           source,
+                                            typename AddressTraitsT::index_type idx ) noexcept
+{
+    return BlockPPtr<AddressTraitsT>( source._base, idx );
+}
+
+// ─── AvlInorderIterator: shared in-order iterator for pmap and pvector ───────
+
+/**
+ * @brief Shared in-order AVL tree iterator template (Issue #188).
+ *
+ * Eliminates identical iterator structs in pmap and pvector (~35 lines each).
+ * Both containers can use this template directly or as a base.
+ *
+ * @tparam NodePPtr  Persistent pointer type to tree nodes (e.g. pptr<node_type, ManagerT>).
+ */
+template <typename NodePPtr> struct AvlInorderIterator
+{
+    using index_type = typename NodePPtr::index_type;
+    using value_type = typename NodePPtr::element_type;
+    using pointer    = NodePPtr;
+
+    static constexpr index_type no_block = NodePPtr::manager_type::address_traits::no_block;
+
+    index_type _current_idx;
+
+    AvlInorderIterator() noexcept : _current_idx( static_cast<index_type>( 0 ) ) {}
+    explicit AvlInorderIterator( index_type idx ) noexcept : _current_idx( idx ) {}
+
+    bool operator==( const AvlInorderIterator& other ) const noexcept { return _current_idx == other._current_idx; }
+    bool operator!=( const AvlInorderIterator& other ) const noexcept { return _current_idx != other._current_idx; }
+
+    NodePPtr operator*() const noexcept
+    {
+        if ( _current_idx == static_cast<index_type>( 0 ) || _current_idx == no_block )
+            return NodePPtr();
+        return NodePPtr( _current_idx );
+    }
+
+    AvlInorderIterator& operator++() noexcept
+    {
+        if ( _current_idx == static_cast<index_type>( 0 ) || _current_idx == no_block )
+            return *this;
+
+        NodePPtr next = avl_inorder_successor( NodePPtr( _current_idx ) );
+        _current_idx  = next.is_null() ? static_cast<index_type>( 0 ) : next.offset();
+        return *this;
+    }
+};
+
+/// @endcond
+
+} // namespace detail
+} // namespace pmm
+
 #include <concepts>
 #include <cstdint>
-#include <limits>
 #include <type_traits>
 
 namespace pmm
@@ -2088,8 +2774,8 @@ template <typename Policy> inline constexpr bool is_free_block_tree_policy_v = F
  *
  * Issue #106/#112: Uses Block<AddressTraitsT> layout (BlockHeader struct removed).
  * Issue #126: Fields reordered — weight moved to first TreeNode field.
- * Fields: prev_offset(0), next_offset(4), weight(8), left_offset(12), right_offset(16),
- *         parent_offset(20), root_offset(24), avl_height(28), node_type(30).
+ * Issue #188: Rotation, rebalancing, and min_node operations delegate to shared
+ *   AVL functions via BlockPPtr adapter, eliminating ~120 lines of duplicate code.
  *
  * @tparam AddressTraitsT  Address space traits (compatible with DefaultAddressTraits).
  */
@@ -2099,6 +2785,7 @@ template <typename AddressTraitsT = DefaultAddressTraits> struct AvlFreeTree
     using index_type     = typename AddressTraitsT::index_type;
     using BlockT         = Block<AddressTraitsT>;
     using BlockState     = BlockStateBase<AddressTraitsT>;
+    using BPPtr          = detail::BlockPPtr<AddressTraitsT>;
 
     AvlFreeTree()                                = delete;
     AvlFreeTree( const AvlFreeTree& )            = delete;
@@ -2140,7 +2827,8 @@ template <typename AddressTraitsT = DefaultAddressTraits> struct AvlFreeTree
             BlockState::set_left_offset_of( detail::block_at<AddressTraitsT>( base, parent ), blk_idx );
         else
             BlockState::set_right_offset_of( detail::block_at<AddressTraitsT>( base, parent ), blk_idx );
-        rebalance_up( base, hdr, parent );
+        // Issue #188: delegate rebalancing to shared AVL function via BlockPPtr adapter.
+        detail::avl_rebalance_up( BPPtr( base, parent ), hdr->free_tree_root );
     }
 
     /// @brief Remove block from AVL tree of free blocks.
@@ -2166,10 +2854,12 @@ template <typename AddressTraitsT = DefaultAddressTraits> struct AvlFreeTree
         }
         else
         {
-            index_type succ_idx    = min_node( base, right );
-            void*      succ        = detail::block_at<AddressTraitsT>( base, succ_idx );
-            index_type succ_parent = BlockState::get_parent_offset( succ );
-            index_type succ_right  = BlockState::get_right_offset( succ );
+            // Issue #188: delegate min_node to shared AVL function via BlockPPtr.
+            BPPtr      succ        = detail::avl_min_node( BPPtr( base, right ) );
+            index_type succ_idx    = succ.offset();
+            void*      succ_raw    = detail::block_at<AddressTraitsT>( base, succ_idx );
+            index_type succ_parent = BlockState::get_parent_offset( succ_raw );
+            index_type succ_right  = BlockState::get_right_offset( succ_raw );
 
             if ( succ_parent != blk_idx )
             {
@@ -2177,7 +2867,7 @@ template <typename AddressTraitsT = DefaultAddressTraits> struct AvlFreeTree
                 if ( succ_right != AddressTraitsT::no_block )
                     BlockState::set_parent_offset_of( detail::block_at<AddressTraitsT>( base, succ_right ),
                                                       succ_parent );
-                BlockState::set_right_offset_of( succ, right );
+                BlockState::set_right_offset_of( succ_raw, right );
                 BlockState::set_parent_offset_of( detail::block_at<AddressTraitsT>( base, right ), succ_idx );
                 rebal = succ_parent;
             }
@@ -2185,17 +2875,19 @@ template <typename AddressTraitsT = DefaultAddressTraits> struct AvlFreeTree
             {
                 rebal = succ_idx;
             }
-            BlockState::set_left_offset_of( succ, left );
+            BlockState::set_left_offset_of( succ_raw, left );
             BlockState::set_parent_offset_of( detail::block_at<AddressTraitsT>( base, left ), succ_idx );
-            BlockState::set_parent_offset_of( succ, parent );
+            BlockState::set_parent_offset_of( succ_raw, parent );
             set_child( base, hdr, parent, blk_idx, succ_idx );
-            update_height( base, succ_idx );
+            // Issue #188: delegate height update to shared AVL function via BlockPPtr.
+            detail::avl_update_height( BPPtr( base, succ_idx ) );
         }
         BlockState::set_left_offset_of( blk, AddressTraitsT::no_block );
         BlockState::set_right_offset_of( blk, AddressTraitsT::no_block );
         BlockState::set_parent_offset_of( blk, AddressTraitsT::no_block );
         BlockState::set_avl_height_of( blk, 0 );
-        rebalance_up( base, hdr, rebal );
+        // Issue #188: delegate rebalancing to shared AVL function via BlockPPtr adapter.
+        detail::avl_rebalance_up( BPPtr( base, rebal ), hdr->free_tree_root );
     }
 
     /// @brief Find smallest block >= needed granules (best-fit, O(log n)).
@@ -2228,29 +2920,6 @@ template <typename AddressTraitsT = DefaultAddressTraits> struct AvlFreeTree
     }
 
   private:
-    static std::int32_t height( std::uint8_t* base, index_type idx )
-    {
-        return ( idx == AddressTraitsT::no_block ) ? 0
-                                                   : static_cast<std::int32_t>( BlockState::get_avl_height(
-                                                         detail::block_at<AddressTraitsT>( base, idx ) ) );
-    }
-
-    static void update_height( std::uint8_t* base, index_type node_idx )
-    {
-        void*        node = detail::block_at<AddressTraitsT>( base, node_idx );
-        std::int32_t h    = 1 + ( std::max )( height( base, BlockState::get_left_offset( node ) ),
-                                           height( base, BlockState::get_right_offset( node ) ) );
-        assert( h <= std::numeric_limits<std::int16_t>::max() ); // tree height must fit in int16_t
-        BlockState::set_avl_height_of( node, static_cast<std::int16_t>( h ) );
-    }
-
-    static std::int32_t balance_factor( std::uint8_t* base, index_type node_idx )
-    {
-        const void* node = detail::block_at<AddressTraitsT>( base, node_idx );
-        return height( base, BlockState::get_left_offset( node ) ) -
-               height( base, BlockState::get_right_offset( node ) );
-    }
-
     /// @brief Update parent → child link in tree.
     static void set_child( std::uint8_t* base, detail::ManagerHeader<AddressTraitsT>* hdr, index_type parent,
                            index_type old_child, index_type new_child )
@@ -2265,87 +2934,6 @@ template <typename AddressTraitsT = DefaultAddressTraits> struct AvlFreeTree
             BlockState::set_left_offset_of( p, new_child );
         else
             BlockState::set_right_offset_of( p, new_child );
-    }
-
-    static index_type rotate_right( std::uint8_t* base, detail::ManagerHeader<AddressTraitsT>* hdr, index_type y_idx )
-    {
-        void*      y        = detail::block_at<AddressTraitsT>( base, y_idx );
-        index_type x_idx    = BlockState::get_left_offset( y );
-        void*      x        = detail::block_at<AddressTraitsT>( base, x_idx );
-        index_type t2       = BlockState::get_right_offset( x );
-        index_type y_parent = BlockState::get_parent_offset( y );
-
-        BlockState::set_right_offset_of( x, y_idx );
-        BlockState::set_left_offset_of( y, t2 );
-        // x takes y's old parent; y's new parent is x.
-        BlockState::set_parent_offset_of( x, y_parent );
-        BlockState::set_parent_offset_of( y, x_idx );
-        if ( t2 != AddressTraitsT::no_block )
-            BlockState::set_parent_offset_of( detail::block_at<AddressTraitsT>( base, t2 ), y_idx );
-        set_child( base, hdr, y_parent, y_idx, x_idx );
-        update_height( base, y_idx );
-        update_height( base, x_idx );
-        return x_idx;
-    }
-
-    static index_type rotate_left( std::uint8_t* base, detail::ManagerHeader<AddressTraitsT>* hdr, index_type x_idx )
-    {
-        void*      x        = detail::block_at<AddressTraitsT>( base, x_idx );
-        index_type y_idx    = BlockState::get_right_offset( x );
-        void*      y        = detail::block_at<AddressTraitsT>( base, y_idx );
-        index_type t2       = BlockState::get_left_offset( y );
-        index_type x_parent = BlockState::get_parent_offset( x );
-
-        BlockState::set_left_offset_of( y, x_idx );
-        BlockState::set_right_offset_of( x, t2 );
-        // y takes x's old parent; x's new parent is y.
-        BlockState::set_parent_offset_of( y, x_parent );
-        BlockState::set_parent_offset_of( x, y_idx );
-        if ( t2 != AddressTraitsT::no_block )
-            BlockState::set_parent_offset_of( detail::block_at<AddressTraitsT>( base, t2 ), x_idx );
-        set_child( base, hdr, x_parent, x_idx, y_idx );
-        update_height( base, x_idx );
-        update_height( base, y_idx );
-        return y_idx;
-    }
-
-    static void rebalance_up( std::uint8_t* base, detail::ManagerHeader<AddressTraitsT>* hdr, index_type node_idx )
-    {
-        index_type cur = node_idx;
-        while ( cur != AddressTraitsT::no_block )
-        {
-            update_height( base, cur );
-            std::int32_t bf = balance_factor( base, cur );
-            if ( bf > 1 )
-            {
-                void*      node     = detail::block_at<AddressTraitsT>( base, cur );
-                index_type left_idx = BlockState::get_left_offset( node );
-                if ( balance_factor( base, left_idx ) < 0 )
-                    rotate_left( base, hdr, left_idx );
-                cur = rotate_right( base, hdr, cur );
-            }
-            else if ( bf < -1 )
-            {
-                void*      node      = detail::block_at<AddressTraitsT>( base, cur );
-                index_type right_idx = BlockState::get_right_offset( node );
-                if ( balance_factor( base, right_idx ) > 0 )
-                    rotate_right( base, hdr, right_idx );
-                cur = rotate_left( base, hdr, cur );
-            }
-            cur = BlockState::get_parent_offset( detail::block_at<AddressTraitsT>( base, cur ) );
-        }
-    }
-
-    static index_type min_node( std::uint8_t* base, index_type node_idx )
-    {
-        while ( node_idx != AddressTraitsT::no_block )
-        {
-            index_type left = BlockState::get_left_offset( detail::block_at<AddressTraitsT>( base, node_idx ) );
-            if ( left == AddressTraitsT::no_block )
-                break;
-            node_idx = left;
-        }
-        return node_idx;
     }
 };
 
@@ -2573,6 +3161,131 @@ static_assert( is_storage_backend_v<HeapStorage<>>, "HeapStorage must satisfy St
 } // namespace pmm
 
 /**
+ * @file pmm/logging_policy.h
+ * @brief Политики логирования для PersistMemoryManager (Issue #202, Phase 4.2).
+ *
+ * Содержит:
+ *   - pmm::logging::NoLogging       — заглушка без логирования (по умолчанию, нулевые накладные расходы)
+ *   - pmm::logging::StderrLogging   — логирование ошибок и событий в stderr
+ *
+ * Хуки вызываются менеджером при ключевых событиях:
+ *   - on_allocation_failure(user_size, err) — не удалось выделить память
+ *   - on_expand(old_size, new_size)         — бэкенд расширен
+ *   - on_corruption_detected(err)           — обнаружено повреждение данных (InvalidMagic, CrcMismatch и т.д.)
+ *   - on_create(initial_size)               — менеджер успешно создан
+ *   - on_destroy()                          — менеджер сброшен
+ *   - on_load()                             — менеджер загружен из образа
+ *
+ * Все методы — static noexcept. Политика NoLogging полностью оптимизируется
+ * компилятором (все методы пустые inline), обеспечивая нулевые накладные расходы
+ * для конфигураций без логирования.
+ *
+ * Пример пользовательской политики:
+ * @code
+ *   struct MyLogging {
+ *       static void on_allocation_failure(std::size_t user_size, pmm::PmmError err) noexcept {
+ *           spdlog::warn("pmm: allocate({}) failed: {}", user_size, static_cast<int>(err));
+ *       }
+ *       static void on_expand(std::size_t old_size, std::size_t new_size) noexcept {
+ *           spdlog::info("pmm: expanded {} -> {}", old_size, new_size);
+ *       }
+ *       static void on_corruption_detected(pmm::PmmError err) noexcept {
+ *           spdlog::error("pmm: corruption: {}", static_cast<int>(err));
+ *       }
+ *       static void on_create(std::size_t size) noexcept {}
+ *       static void on_destroy() noexcept {}
+ *       static void on_load() noexcept {}
+ *   };
+ * @endcode
+ *
+ * @see config.h — политики блокировок (аналогичный паттерн)
+ * @see persist_memory_manager.h — PersistMemoryManager (вызывает хуки)
+ * @version 1.0 (Issue #202, Phase 4.2)
+ */
+
+#include <cstddef>
+#include <cstdio>
+
+namespace pmm
+{
+namespace logging
+{
+
+/// @brief Политика без логирования (нулевые накладные расходы, по умолчанию).
+///
+/// Все методы — пустые inline, полностью оптимизируются компилятором.
+struct NoLogging
+{
+    /// @brief Вызывается при неудачной аллокации.
+    /// @param user_size Запрошенный размер в байтах.
+    /// @param err Код ошибки (OutOfMemory, Overflow, InvalidSize, NotInitialized).
+    static void on_allocation_failure( std::size_t /*user_size*/, PmmError /*err*/ ) noexcept {}
+
+    /// @brief Вызывается после успешного расширения бэкенда.
+    /// @param old_size Старый размер в байтах.
+    /// @param new_size Новый размер в байтах.
+    static void on_expand( std::size_t /*old_size*/, std::size_t /*new_size*/ ) noexcept {}
+
+    /// @brief Вызывается при обнаружении повреждения данных.
+    /// @param err Код ошибки (InvalidMagic, CrcMismatch, SizeMismatch, GranuleMismatch).
+    static void on_corruption_detected( PmmError /*err*/ ) noexcept {}
+
+    /// @brief Вызывается после успешного создания менеджера.
+    /// @param initial_size Начальный размер в байтах.
+    static void on_create( std::size_t /*initial_size*/ ) noexcept {}
+
+    /// @brief Вызывается при сбросе менеджера (destroy()).
+    static void on_destroy() noexcept {}
+
+    /// @brief Вызывается после успешной загрузки образа (load()).
+    static void on_load() noexcept {}
+};
+
+/// @brief Политика логирования в stderr.
+///
+/// Выводит ошибки и ключевые события менеджера в стандартный поток ошибок.
+/// Полезна для отладки и диагностики.
+///
+/// @code
+///   using MyConfig = pmm::BasicConfig<
+///       pmm::DefaultAddressTraits,
+///       pmm::config::NoLock,
+///       5, 4, 64,
+///       pmm::logging::StderrLogging  // включить логирование в stderr
+///   >;
+///   using MyMgr = pmm::PersistMemoryManager<MyConfig>;
+/// @endcode
+struct StderrLogging
+{
+    static void on_allocation_failure( std::size_t user_size, PmmError err ) noexcept
+    {
+        std::fprintf( stderr, "[pmm] allocation_failure: size=%zu error=%d\n", user_size, static_cast<int>( err ) );
+    }
+
+    static void on_expand( std::size_t old_size, std::size_t new_size ) noexcept
+    {
+        std::fprintf( stderr, "[pmm] expand: %zu -> %zu\n", old_size, new_size );
+    }
+
+    static void on_corruption_detected( PmmError err ) noexcept
+    {
+        std::fprintf( stderr, "[pmm] corruption_detected: error=%d\n", static_cast<int>( err ) );
+    }
+
+    static void on_create( std::size_t initial_size ) noexcept
+    {
+        std::fprintf( stderr, "[pmm] create: size=%zu\n", initial_size );
+    }
+
+    static void on_destroy() noexcept { std::fprintf( stderr, "[pmm] destroy\n" ); }
+
+    static void on_load() noexcept { std::fprintf( stderr, "[pmm] load\n" ); }
+};
+
+} // namespace logging
+} // namespace pmm
+
+/**
  * @file pmm/static_storage.h
  * @brief StaticStorage — статический бэкенд хранилища ПАП (Issue #87 Phase 5).
  *
@@ -2694,6 +3407,7 @@ static_assert( ValidPmmAddressTraits<LargeAddressTraits>, "LargeAddressTraits mu
  * @tparam GrowNum         Числитель коэффициента роста хранилища (по умолчанию 5)
  * @tparam GrowDen         Знаменатель коэффициента роста хранилища (по умолчанию 4, т.е. рост 25%)
  * @tparam MaxMemoryGB     Максимальный объём памяти в ГБ (0 = без ограничения)
+ * @tparam LoggingPolicyT  Политика логирования (logging::NoLogging по умолчанию) (Issue #202, Phase 4.2)
  *
  * Пример создания собственной конфигурации:
  * @code
@@ -2705,11 +3419,19 @@ static_assert( ValidPmmAddressTraits<LargeAddressTraits>, "LargeAddressTraits mu
  *       32     // max 32 GB
  *   >;
  *   using MyManager = pmm::PersistMemoryManager<MyConfig>;
+ *
+ *   // Менеджер с логированием в stderr
+ *   using DebugConfig = pmm::BasicConfig<
+ *       pmm::DefaultAddressTraits,
+ *       pmm::config::NoLock,
+ *       5, 4, 64,
+ *       pmm::logging::StderrLogging
+ *   >;
  * @endcode
  */
 template <typename AddressTraitsT = DefaultAddressTraits, typename LockPolicyT = config::NoLock,
           std::size_t GrowNum = config::kDefaultGrowNumerator, std::size_t GrowDen = config::kDefaultGrowDenominator,
-          std::size_t MaxMemoryGB = 64>
+          std::size_t MaxMemoryGB = 64, typename LoggingPolicyT = logging::NoLogging>
 struct BasicConfig
 {
     static_assert( ValidPmmAddressTraits<AddressTraitsT>,
@@ -2719,8 +3441,39 @@ struct BasicConfig
     using storage_backend                         = HeapStorage<AddressTraitsT>;
     using free_block_tree                         = AvlFreeTree<AddressTraitsT>;
     using lock_policy                             = LockPolicyT;
+    using logging_policy                          = LoggingPolicyT;
     static constexpr std::size_t granule_size     = AddressTraitsT::granule_size;
     static constexpr std::size_t max_memory_gb    = MaxMemoryGB;
+    static constexpr std::size_t grow_numerator   = GrowNum;
+    static constexpr std::size_t grow_denominator = GrowDen;
+};
+
+// ─── StaticConfig — базовый шаблон для static-конфигураций (Issue #188) ───────
+
+/**
+ * @brief Базовый шаблон конфигурации менеджера со StaticStorage (Issue #188).
+ *
+ * Устраняет дублирование между SmallEmbeddedStaticConfig и EmbeddedStaticConfig.
+ * Аналогичен BasicConfig, но использует StaticStorage вместо HeapStorage.
+ *
+ * @tparam AddressTraitsT  Тип адресного пространства.
+ * @tparam BufferSize      Размер статического буфера в байтах (кратно granule_size).
+ * @tparam GrowNum         Числитель коэффициента роста (по умолчанию 3).
+ * @tparam GrowDen         Знаменатель коэффициента роста (по умолчанию 2).
+ */
+template <typename AddressTraitsT, std::size_t BufferSize, std::size_t GrowNum = 3, std::size_t GrowDen = 2>
+struct StaticConfig
+{
+    static_assert( ValidPmmAddressTraits<AddressTraitsT>,
+                   "StaticConfig: AddressTraitsT must satisfy ValidPmmAddressTraits" );
+
+    using address_traits                          = AddressTraitsT;
+    using storage_backend                         = StaticStorage<BufferSize, AddressTraitsT>;
+    using free_block_tree                         = AvlFreeTree<AddressTraitsT>;
+    using lock_policy                             = config::NoLock;
+    using logging_policy                          = logging::NoLogging;
+    static constexpr std::size_t granule_size     = AddressTraitsT::granule_size;
+    static constexpr std::size_t max_memory_gb    = 0; // Нет расширения — StaticStorage
     static constexpr std::size_t grow_numerator   = GrowNum;
     static constexpr std::size_t grow_denominator = GrowDen;
 };
@@ -2739,40 +3492,11 @@ struct BasicConfig
  *   - Нет блокировок (NoLock) — только однопоточный контекст
  *   - Не расширяется (StaticStorage::expand() всегда false)
  *
- * Замечание (Issue #146): SmallAddressTraits допустима с потерями:
- *   Block<uint16_t>=18B, ceil(18/16)=2 гранулы выделяется под заголовок = 14 байт/блок потерь.
- *
- * Статические проверки:
- *   - granule_size >= kMinGranuleSize (16 >= 4) ✓
- *   - granule_size — степень двойки ✓
- *   - BufferSize кратно granule_size ✓ (проверяется в StaticStorage)
- *
- * Типичный сценарий: ARM Cortex-M, AVR, ESP32, сильно ограниченные embedded-системы.
+ * Issue #188: now an alias for StaticConfig<SmallAddressTraits, BufferSize>.
  *
  * @tparam BufferSize Размер статического буфера в байтах (кратно 16, максимум ~1 МБ).
- *                    По умолчанию 1024 байт (1 КБ).
- *
- * @code
- *   using SmallMgr = pmm::PersistMemoryManager<pmm::SmallEmbeddedStaticConfig<1024>>;
- *   SmallMgr::create(1024);
- *   void* ptr = SmallMgr::allocate(32);
- *   // sizeof(SmallMgr::pptr<int>) == 2  (16-bit индекс)
- * @endcode
  */
-template <std::size_t BufferSize = 1024> struct SmallEmbeddedStaticConfig
-{
-    // Issue #166: ValidPmmAddressTraits<SmallAddressTraits> is already verified at namespace scope (line 123).
-    // No redundant static_assert needed here.
-
-    using address_traits                          = SmallAddressTraits;
-    using storage_backend                         = StaticStorage<BufferSize, SmallAddressTraits>;
-    using free_block_tree                         = AvlFreeTree<SmallAddressTraits>;
-    using lock_policy                             = config::NoLock;
-    static constexpr std::size_t granule_size     = SmallAddressTraits::granule_size;
-    static constexpr std::size_t max_memory_gb    = 0; // Нет расширения — StaticStorage
-    static constexpr std::size_t grow_numerator   = 3;
-    static constexpr std::size_t grow_denominator = 2;
-};
+template <std::size_t BufferSize = 1024> using SmallEmbeddedStaticConfig = StaticConfig<SmallAddressTraits, BufferSize>;
 
 /**
  * @brief Конфигурация embedded-менеджера со статическим фиксированным буфером.
@@ -2783,35 +3507,11 @@ template <std::size_t BufferSize = 1024> struct SmallEmbeddedStaticConfig
  *   - Нет блокировок (NoLock) — только однопоточный контекст
  *   - Не расширяется (StaticStorage::expand() всегда false)
  *
- * Статические проверки (Issue #146, #166):
- *   - ValidPmmAddressTraits<DefaultAddressTraits> проверяется на уровне namespace (не дублируется здесь)
- *   - BufferSize кратно granule_size ✓ (проверяется в StaticStorage)
- *
- * Типичный сценарий: встраиваемые системы без heap, Linux bare-metal, фиксированный пул.
+ * Issue #188: now an alias for StaticConfig<DefaultAddressTraits, BufferSize>.
  *
  * @tparam BufferSize Размер статического буфера в байтах (кратно 16).
- *                    По умолчанию 4096 байт (4 КБ).
- *
- * @code
- *   using EmbMgr = pmm::PersistMemoryManager<pmm::EmbeddedStaticConfig<8192>>;
- *   EmbMgr::create(8192);
- *   void* ptr = EmbMgr::allocate(64);
- * @endcode
  */
-template <std::size_t BufferSize = 4096> struct EmbeddedStaticConfig
-{
-    // Issue #166: ValidPmmAddressTraits<DefaultAddressTraits> is already verified at namespace scope (line 122).
-    // No redundant static_assert needed here.
-
-    using address_traits                          = DefaultAddressTraits;
-    using storage_backend                         = StaticStorage<BufferSize, DefaultAddressTraits>;
-    using free_block_tree                         = AvlFreeTree<DefaultAddressTraits>;
-    using lock_policy                             = config::NoLock;
-    static constexpr std::size_t granule_size     = DefaultAddressTraits::granule_size;
-    static constexpr std::size_t max_memory_gb    = 0; // Нет расширения — StaticStorage
-    static constexpr std::size_t grow_numerator   = 3;
-    static constexpr std::size_t grow_denominator = 2;
-};
+template <std::size_t BufferSize = 4096> using EmbeddedStaticConfig = StaticConfig<DefaultAddressTraits, BufferSize>;
 
 // ─── Desktop / динамические конфигурации ─────────────────────────────────────
 
@@ -2909,52 +3609,12 @@ using LargeDBConfig = BasicConfig<LargeAddressTraits, config::SharedMutexLock, 2
 
 /**
  * @file pmm/persist_memory_manager.h
- * @brief PersistMemoryManager — унифицированный статический менеджер ПАП (Issue #110).
+ * @brief PersistMemoryManager — unified static persistent memory manager (Issue #110).
  *
- * Заменяет пару AbstractPersistMemoryManager + StaticMemoryManager единым
- * полностью статическим классом, поддерживающим мультитон через InstanceId.
+ * All-static class with multiton support via InstanceId. Configuration via ConfigT:
+ * address_traits, storage_backend, free_block_tree, lock_policy.
  *
- * Ключевые особенности:
- *   - Все члены (`_backend`, `_initialized`, `_mutex`) объявлены `static inline` (C++17)
- *   - Все методы объявлены `static` — не нужно создавать экземпляры
- *   - Конфигурация полностью задаётся через `ConfigT`:
- *       - `address_traits`  — тип адресного пространства
- *       - `storage_backend` — бэкенд хранилища (HeapStorage, StaticStorage, MMapStorage)
- *       - `free_block_tree` — политика дерева свободных блоков (AvlFreeTree)
- *       - `lock_policy`     — политика многопоточности (NoLock, SharedMutexLock)
- *   - Параметр `InstanceId` позволяет создавать несколько независимых
- *     экземпляров одной конфигурации (мультитон по ID)
- *   - `pptr<T, PersistMemoryManager<...>>::resolve()` не требует аргументов —
- *     он обращается к `PersistMemoryManager::resolve<T>(p)` напрямую
- *
- * Пример использования:
- * @code
- *   // Определяем два независимых менеджера одной конфигурации
- *   using Cache   = pmm::PersistMemoryManager<pmm::CacheManagerConfig, 0>;
- *   using Buffer  = pmm::PersistMemoryManager<pmm::CacheManagerConfig, 1>;
- *
- *   Cache::create(64 * 1024);
- *   Buffer::create(32 * 1024);
- *
- *   // allocate_typed<T>() — сырое выделение без конструктора.
- *   // create_typed<T>(args...) — выделение + placement new (Issue #172).
- *   Cache::pptr<int> cp = Cache::create_typed<int>(42);  // конструктор int(42)
- *   Buffer::pptr<int> bp = Buffer::create_typed<int>();  // default init
- *
- *   // Разыменование без аргументов — используется operator* и operator->
- *   *cp = 42;
- *   *bp = 100;
- *
- *   Cache::destroy_typed(cp);   // деструктор + освобождение (Issue #172)
- *   Buffer::destroy_typed(bp);
- *   Cache::destroy();
- *   Buffer::destroy();
- * @endcode
- *
- * @see manager_configs.h — готовые конфигурации менеджеров
- * @see pmm_presets.h — готовые псевдонимы для типичных сценариев
- * @see pptr.h — pptr<T, ManagerT> (с поддержкой статического resolve())
- * @version 0.1 (Issue #110 — унификация архитектуры)
+ * @see manager_configs.h, pmm_presets.h, pptr.h
  */
 
 // Issue #172: require C++20 — this library uses concepts, std::atomic, and other C++20 features.
@@ -3359,6 +4019,93 @@ class AllocatorPolicy
         hdr->free_count  = free_count;
         hdr->alloc_count = alloc_count;
         hdr->used_size   = used_gran;
+    }
+
+    // ─── Issue #210: reallocate_typed helpers ─────────────────────────────────
+
+    /// @brief In-place shrink: update weight, split remainder into free block + coalesce.
+    static void realloc_shrink( std::uint8_t* base, detail::ManagerHeader<AddressTraitsT>* hdr, index_type blk_idx,
+                                void* blk_raw, index_type old_data_gran, index_type new_data_gran ) noexcept
+    {
+        static constexpr index_type kBlkHdrGran = detail::kBlockHeaderGranules_t<AddressTraitsT>;
+        index_type                  remainder   = old_data_gran - new_data_gran;
+        if ( remainder >= kBlkHdrGran + 1 )
+        {
+            index_type new_free_idx = blk_idx + kBlkHdrGran + new_data_gran;
+            void*      new_free_blk = detail::block_at<AddressTraitsT>( base, new_free_idx );
+            index_type old_next     = BlockState::get_next_offset( blk_raw );
+            auto*      old_next_blk =
+                ( old_next != AddressTraitsT::no_block ) ? detail::block_at<AddressTraitsT>( base, old_next ) : nullptr;
+            std::memset( new_free_blk, 0, sizeof( BlockT ) );
+            BlockState::init_fields( new_free_blk, blk_idx, old_next, 1, 0, 0 );
+            BlockState::set_next_offset_of( blk_raw, new_free_idx );
+            if ( old_next_blk != nullptr )
+                BlockState::set_prev_offset_of( old_next_blk, new_free_idx );
+            else
+                hdr->last_block_offset = new_free_idx;
+            BlockState::set_weight_of( blk_raw, new_data_gran );
+            hdr->block_count++;
+            hdr->free_count++;
+            hdr->used_size += kBlkHdrGran;
+            hdr->used_size -= ( old_data_gran - new_data_gran );
+            coalesce( base, hdr, new_free_idx );
+        }
+        else
+        {
+            BlockState::set_weight_of( blk_raw, new_data_gran );
+            hdr->used_size -= ( old_data_gran - new_data_gran );
+        }
+    }
+
+    /// @brief Try in-place grow by absorbing adjacent free block. Returns true on success.
+    static bool realloc_grow( std::uint8_t* base, detail::ManagerHeader<AddressTraitsT>* hdr, index_type blk_idx,
+                              void* blk_raw, index_type old_data_gran, index_type new_data_gran ) noexcept
+    {
+        static constexpr index_type kBlkHdrGran = detail::kBlockHeaderGranules_t<AddressTraitsT>;
+        index_type                  next_idx    = BlockState::get_next_offset( blk_raw );
+        if ( next_idx == AddressTraitsT::no_block )
+            return false;
+        void* next_blk = detail::block_at<AddressTraitsT>( base, next_idx );
+        if ( BlockState::get_weight( next_blk ) != 0 )
+            return false;
+        index_type next_total =
+            detail::block_total_granules( base, hdr, detail::block_at<AddressTraitsT>( base, next_idx ) );
+        index_type available = old_data_gran + next_total;
+        if ( available < new_data_gran )
+            return false;
+        FreeBlockTreeT::remove( base, hdr, next_idx );
+        index_type next_next = BlockState::get_next_offset( next_blk );
+        BlockState::set_next_offset_of( blk_raw, next_next );
+        if ( next_next != AddressTraitsT::no_block )
+            BlockState::set_prev_offset_of( detail::block_at<AddressTraitsT>( base, next_next ), blk_idx );
+        else
+            hdr->last_block_offset = blk_idx;
+        std::memset( next_blk, 0, sizeof( BlockT ) );
+        hdr->block_count--;
+        hdr->free_count--;
+        if ( hdr->used_size >= kBlkHdrGran )
+            hdr->used_size -= kBlkHdrGran;
+        index_type rem = available - new_data_gran;
+        if ( rem >= kBlkHdrGran + 1 )
+        {
+            index_type rem_idx      = blk_idx + kBlkHdrGran + new_data_gran;
+            void*      rem_blk      = detail::block_at<AddressTraitsT>( base, rem_idx );
+            index_type blk_new_next = BlockState::get_next_offset( blk_raw );
+            std::memset( rem_blk, 0, sizeof( BlockT ) );
+            BlockState::init_fields( rem_blk, blk_idx, blk_new_next, 1, 0, 0 );
+            BlockState::set_next_offset_of( blk_raw, rem_idx );
+            if ( blk_new_next != AddressTraitsT::no_block )
+                BlockState::set_prev_offset_of( detail::block_at<AddressTraitsT>( base, blk_new_next ), rem_idx );
+            else
+                hdr->last_block_offset = rem_idx;
+            hdr->block_count++;
+            hdr->free_count++;
+            hdr->used_size += kBlkHdrGran;
+            FreeBlockTreeT::insert( base, hdr, rem_idx );
+        }
+        BlockState::set_weight_of( blk_raw, new_data_gran );
+        hdr->used_size += ( new_data_gran - old_data_gran );
+        return true;
     }
 };
 
@@ -3823,9 +4570,8 @@ template <typename T, typename ManagerT> struct parray
     {
         if ( _data_idx != static_cast<index_type>( 0 ) )
         {
-            std::uint8_t* base = ManagerT::backend().base_ptr();
-            void*         raw  = base + static_cast<std::size_t>( _data_idx ) * ManagerT::address_traits::granule_size;
-            ManagerT::deallocate( raw );
+            ManagerT::deallocate( detail::resolve_granule_ptr<typename ManagerT::address_traits>(
+                ManagerT::backend().base_ptr(), _data_idx ) );
             _data_idx = static_cast<index_type>( 0 );
         }
         _size     = 0;
@@ -3857,13 +4603,11 @@ template <typename T, typename ManagerT> struct parray
     // --- Internal helpers -------------------------------------------------------
 
     /// @brief Resolve the granule index to a raw pointer to the data block.
+    /// Issue #188: delegates to shared resolve_granule_ptr.
     T* resolve_data() const noexcept
     {
-        if ( _data_idx == static_cast<index_type>( 0 ) )
-            return nullptr;
-        std::uint8_t* base = ManagerT::backend().base_ptr();
-        return reinterpret_cast<T*>( base +
-                                     static_cast<std::size_t>( _data_idx ) * ManagerT::address_traits::granule_size );
+        return reinterpret_cast<T*>( detail::resolve_granule_ptr<typename ManagerT::address_traits>(
+            ManagerT::backend().base_ptr(), _data_idx ) );
     }
 
     /**
@@ -3898,10 +4642,9 @@ template <typename T, typename ManagerT> struct parray
         if ( new_raw == nullptr )
             return false;
 
-        // Compute new index.
+        // Compute new index (Issue #188: shared ptr_to_granule_idx).
         std::uint8_t* base        = ManagerT::backend().base_ptr();
-        std::size_t   byte_off    = static_cast<std::uint8_t*>( new_raw ) - base;
-        index_type    new_dat_idx = static_cast<index_type>( byte_off / ManagerT::address_traits::granule_size );
+        index_type    new_dat_idx = detail::ptr_to_granule_idx<typename ManagerT::address_traits>( base, new_raw );
 
         // Copy old data.
         if ( _size > 0 && _data_idx != static_cast<index_type>( 0 ) )
@@ -3911,12 +4654,9 @@ template <typename T, typename ManagerT> struct parray
                 std::memcpy( new_raw, old_data, static_cast<std::size_t>( _size ) * sizeof( T ) );
         }
 
-        // Free old block.
+        // Free old block (Issue #188: shared resolve_granule_ptr).
         if ( _data_idx != static_cast<index_type>( 0 ) )
-        {
-            void* old_raw = base + static_cast<std::size_t>( _data_idx ) * ManagerT::address_traits::granule_size;
-            ManagerT::deallocate( old_raw );
-        }
+            ManagerT::deallocate( detail::resolve_granule_ptr<typename ManagerT::address_traits>( base, _data_idx ) );
 
         _data_idx = new_dat_idx;
         _capacity = new_cap;
@@ -4006,444 +4746,6 @@ template <typename T, typename ManagerT> struct parray
  * @version 0.4 (Issue #196 — erase, size, iterator, clear)
  */
 
-/**
- * @file pmm/avl_tree_mixin.h
- * @brief Shared AVL tree helper functions for pmap, pstringview and pvector (Issue #155, #162, #188).
- *
- * Provides a set of free static template functions implementing the core AVL
- * tree operations (height, balance factor, rotations, rebalancing, insert, find,
- * remove) that are shared between pmap<_K,_V,ManagerT>, pstringview<ManagerT>
- * and pvector<T,ManagerT>.
- *
- * All rotation and rebalance functions accept an optional NodeUpdateFn callback
- * that is invoked after structural changes to update derived node attributes.
- * By default avl_update_height is used (height-only). pvector passes a custom
- * callback that also updates the order-statistic weight field (Issue #188).
- *
- * Template parameter PPtr must support:
- *   - is_null()
- *   - tree_node() returning a TreeNode& with get_left/set_left/get_right/set_right/
- *     get_parent/set_parent/get_height/set_height
- *   - offset()
- *   - PPtr::manager_type::address_traits::no_block sentinel
- *
- * @see pmap.h — pmap<_K,_V,ManagerT> (Issue #153)
- * @see pstringview.h — pstringview<ManagerT> (Issue #151)
- * @see pvector.h — pvector<T,ManagerT> (Issue #186, #188)
- * @version 0.4 (Issue #188 — NodeUpdateFn hook, avl_remove, avl_min_node for pvector deduplication)
- */
-
-#include <cstdint>
-
-namespace pmm
-{
-namespace detail
-{
-
-/// @cond INTERNAL
-
-/// @brief Sentinel value for "no node" in TreeNode fields.
-template <typename PPtr> static constexpr auto pptr_no_block() noexcept
-{
-    return PPtr::manager_type::address_traits::no_block;
-}
-
-/// @brief Get left child as PPtr (translates no_block sentinel to null PPtr).
-template <typename PPtr> static PPtr pptr_get_left( PPtr p ) noexcept
-{
-    auto idx = p.tree_node().get_left();
-    return ( idx == pptr_no_block<PPtr>() ) ? PPtr() : PPtr( idx );
-}
-
-/// @brief Get right child as PPtr (translates no_block sentinel to null PPtr).
-template <typename PPtr> static PPtr pptr_get_right( PPtr p ) noexcept
-{
-    auto idx = p.tree_node().get_right();
-    return ( idx == pptr_no_block<PPtr>() ) ? PPtr() : PPtr( idx );
-}
-
-/// @brief Get parent as PPtr (translates no_block sentinel to null PPtr).
-template <typename PPtr> static PPtr pptr_get_parent( PPtr p ) noexcept
-{
-    auto idx = p.tree_node().get_parent();
-    return ( idx == pptr_no_block<PPtr>() ) ? PPtr() : PPtr( idx );
-}
-
-/// @brief Set left child from PPtr (translates null PPtr to no_block sentinel).
-template <typename PPtr> static void pptr_set_left( PPtr p, PPtr child ) noexcept
-{
-    auto idx = child.is_null() ? pptr_no_block<PPtr>() : child.offset();
-    p.tree_node().set_left( idx );
-}
-
-/// @brief Set right child from PPtr (translates null PPtr to no_block sentinel).
-template <typename PPtr> static void pptr_set_right( PPtr p, PPtr child ) noexcept
-{
-    auto idx = child.is_null() ? pptr_no_block<PPtr>() : child.offset();
-    p.tree_node().set_right( idx );
-}
-
-/// @brief Set parent from PPtr (translates null PPtr to no_block sentinel).
-template <typename PPtr> static void pptr_set_parent( PPtr p, PPtr parent ) noexcept
-{
-    auto idx = parent.is_null() ? pptr_no_block<PPtr>() : parent.offset();
-    p.tree_node().set_parent( idx );
-}
-
-/// @brief Get height of node (0 if null).
-template <typename PPtr> static std::int16_t avl_height( PPtr p ) noexcept
-{
-    if ( p.is_null() )
-        return 0;
-    return p.tree_node().get_height();
-}
-
-/// @brief Update height of node from its children.
-template <typename PPtr> static void avl_update_height( PPtr p ) noexcept
-{
-    if ( p.is_null() )
-        return;
-    std::int16_t lh = avl_height( pptr_get_left( p ) );
-    std::int16_t rh = avl_height( pptr_get_right( p ) );
-    std::int16_t h  = static_cast<std::int16_t>( 1 + ( lh > rh ? lh : rh ) );
-    p.tree_node().set_height( h );
-}
-
-/// @brief Balance factor: height(left) - height(right).
-template <typename PPtr> static std::int16_t avl_balance_factor( PPtr p ) noexcept
-{
-    if ( p.is_null() )
-        return 0;
-    std::int16_t lh = avl_height( pptr_get_left( p ) );
-    std::int16_t rh = avl_height( pptr_get_right( p ) );
-    return static_cast<std::int16_t>( lh - rh );
-}
-
-/// @brief Update parent → child link (or root if parent is null).
-/// @param root_idx Reference to the tree's root index, updated when parent is null.
-template <typename PPtr, typename IndexType>
-static void avl_set_child( PPtr parent, PPtr old_child, PPtr new_child, IndexType& root_idx ) noexcept
-{
-    if ( parent.is_null() )
-    {
-        root_idx = new_child.offset();
-        return;
-    }
-    PPtr left_of_parent = pptr_get_left( parent );
-    if ( left_of_parent == old_child )
-        pptr_set_left( parent, new_child );
-    else
-        pptr_set_right( parent, new_child );
-}
-
-/// @brief Default node-update functor: updates height only (used by pmap, pstringview).
-struct AvlUpdateHeightOnly
-{
-    template <typename PPtr> void operator()( PPtr p ) const noexcept { avl_update_height( p ); }
-};
-
-/**
- * @brief Right rotation around y; returns new subtree root (x).
- *
- *     y            x
- *    / \          / \
- *   x   C  -->  A    y
- *  / \               / \
- * A   B             B   C
- *
- * @param update_node  Callable(PPtr) invoked on y then x after structural change.
- *                     Default: AvlUpdateHeightOnly (updates height only).
- */
-template <typename PPtr, typename IndexType, typename NodeUpdateFn = AvlUpdateHeightOnly>
-static PPtr avl_rotate_right( PPtr y, IndexType& root_idx, NodeUpdateFn update_node = {} ) noexcept
-{
-    PPtr x     = pptr_get_left( y );
-    PPtr b     = pptr_get_right( x );
-    PPtr y_par = pptr_get_parent( y );
-
-    pptr_set_right( x, y );
-    pptr_set_parent( y, x );
-
-    pptr_set_left( y, b );
-    if ( !b.is_null() )
-        pptr_set_parent( b, y );
-
-    pptr_set_parent( x, y_par );
-
-    avl_set_child( y_par, y, x, root_idx );
-
-    update_node( y );
-    update_node( x );
-    return x;
-}
-
-/**
- * @brief Left rotation around x; returns new subtree root (y).
- *
- *   x               y
- *  / \             / \
- * A   y   -->    x    C
- *    / \        / \
- *   B   C      A   B
- *
- * @param update_node  Callable(PPtr) invoked on x then y after structural change.
- *                     Default: AvlUpdateHeightOnly (updates height only).
- */
-template <typename PPtr, typename IndexType, typename NodeUpdateFn = AvlUpdateHeightOnly>
-static PPtr avl_rotate_left( PPtr x, IndexType& root_idx, NodeUpdateFn update_node = {} ) noexcept
-{
-    PPtr y     = pptr_get_right( x );
-    PPtr b     = pptr_get_left( y );
-    PPtr x_par = pptr_get_parent( x );
-
-    pptr_set_left( y, x );
-    pptr_set_parent( x, y );
-
-    pptr_set_right( x, b );
-    if ( !b.is_null() )
-        pptr_set_parent( b, x );
-
-    pptr_set_parent( y, x_par );
-
-    avl_set_child( x_par, x, y, root_idx );
-
-    update_node( x );
-    update_node( y );
-    return y;
-}
-
-/// @brief Rebalance from node p upward to root.
-/// @param update_node  Callable(PPtr) for node attribute update after rotations.
-///                     Default: AvlUpdateHeightOnly (height only).
-template <typename PPtr, typename IndexType, typename NodeUpdateFn = AvlUpdateHeightOnly>
-static void avl_rebalance_up( PPtr p, IndexType& root_idx, NodeUpdateFn update_node = {} ) noexcept
-{
-    while ( !p.is_null() )
-    {
-        update_node( p );
-        std::int16_t bf = avl_balance_factor( p );
-        if ( bf > 1 )
-        {
-            PPtr left = pptr_get_left( p );
-            if ( avl_balance_factor( left ) < 0 )
-                avl_rotate_left( left, root_idx, update_node );
-            p = avl_rotate_right( p, root_idx, update_node );
-        }
-        else if ( bf < -1 )
-        {
-            PPtr right = pptr_get_right( p );
-            if ( avl_balance_factor( right ) > 0 )
-                avl_rotate_right( right, root_idx, update_node );
-            p = avl_rotate_left( p, root_idx, update_node );
-        }
-        p = pptr_get_parent( p );
-    }
-}
-
-/// @brief Find the minimum (leftmost) node in the subtree rooted at p (Issue #188).
-template <typename PPtr> static PPtr avl_min_node( PPtr p ) noexcept
-{
-    while ( !p.is_null() )
-    {
-        PPtr left = pptr_get_left( p );
-        if ( left.is_null() )
-            break;
-        p = left;
-    }
-    return p;
-}
-
-/// @brief Find the maximum (rightmost) node in the subtree rooted at p (Issue #188).
-template <typename PPtr> static PPtr avl_max_node( PPtr p ) noexcept
-{
-    while ( !p.is_null() )
-    {
-        PPtr right = pptr_get_right( p );
-        if ( right.is_null() )
-            break;
-        p = right;
-    }
-    return p;
-}
-
-/// @brief Remove target node from AVL tree and rebalance (Issue #188).
-///
-/// Standard BST removal with in-order successor replacement, followed by
-/// AVL rebalancing from the lowest affected node upward.
-///
-/// @param target      The node to remove (must be in the tree).
-/// @param root_idx    Reference to the tree root index.
-/// @param update_node Callable(PPtr) for node attribute update after rotations.
-///                    Default: AvlUpdateHeightOnly (height only).
-template <typename PPtr, typename IndexType, typename NodeUpdateFn = AvlUpdateHeightOnly>
-static void avl_remove( PPtr target, IndexType& root_idx, NodeUpdateFn update_node = {} ) noexcept
-{
-    PPtr left_p  = pptr_get_left( target );
-    PPtr right_p = pptr_get_right( target );
-    PPtr par_p   = pptr_get_parent( target );
-
-    if ( left_p.is_null() && right_p.is_null() )
-    {
-        // Leaf node — just detach.
-        avl_set_child( par_p, target, PPtr(), root_idx );
-        if ( !par_p.is_null() )
-            avl_rebalance_up( par_p, root_idx, update_node );
-    }
-    else if ( left_p.is_null() )
-    {
-        // Only right child.
-        pptr_set_parent( right_p, par_p );
-        avl_set_child( par_p, target, right_p, root_idx );
-        if ( !par_p.is_null() )
-            avl_rebalance_up( par_p, root_idx, update_node );
-        else
-            update_node( right_p );
-    }
-    else if ( right_p.is_null() )
-    {
-        // Only left child.
-        pptr_set_parent( left_p, par_p );
-        avl_set_child( par_p, target, left_p, root_idx );
-        if ( !par_p.is_null() )
-            avl_rebalance_up( par_p, root_idx, update_node );
-        else
-            update_node( left_p );
-    }
-    else
-    {
-        // Two children — replace with in-order successor.
-        PPtr successor = avl_min_node( right_p );
-
-        auto succ_par_idx = successor.tree_node().get_parent();
-        PPtr succ_rgt     = pptr_get_right( successor );
-
-        if ( succ_par_idx == target.offset() )
-        {
-            // Successor is direct right child of target.
-            pptr_set_left( successor, left_p );
-            pptr_set_parent( left_p, successor );
-            // successor keeps its right subtree
-            pptr_set_parent( successor, par_p );
-            avl_set_child( par_p, target, successor, root_idx );
-            avl_rebalance_up( successor, root_idx, update_node );
-        }
-        else
-        {
-            // Successor is deeper — detach it first.
-            PPtr succ_par( succ_par_idx );
-            if ( !succ_rgt.is_null() )
-            {
-                pptr_set_parent( succ_rgt, succ_par );
-                pptr_set_left( succ_par, succ_rgt );
-            }
-            else
-            {
-                pptr_set_left( succ_par, PPtr() );
-            }
-
-            // Put successor in target's place.
-            pptr_set_left( successor, left_p );
-            pptr_set_parent( left_p, successor );
-            pptr_set_right( successor, right_p );
-            pptr_set_parent( right_p, successor );
-            pptr_set_parent( successor, par_p );
-            avl_set_child( par_p, target, successor, root_idx );
-
-            avl_rebalance_up( succ_par, root_idx, update_node );
-        }
-    }
-}
-
-/// @brief Search the AVL tree for a node matching the given key.
-///
-/// Traverses the tree starting from root_idx, using compare_less to determine
-/// the direction at each node. When compare_less(cur, key) is true the search
-/// goes right; when compare_less(key, cur) is true it goes left; otherwise the
-/// node is considered a match and is returned.
-///
-/// @param root_idx     Index of the tree root (0 = empty tree).
-/// @param compare_less Callable(PPtr cur) -> int: returns negative if key < cur,
-///                     zero if key == cur, positive if key > cur.
-/// @param resolve      Callable(PPtr) -> NodeObjPtr: resolves pptr to raw pointer.
-///                     Must return nullptr when the pointer is invalid.
-/// @return PPtr to the matching node, or a null PPtr if not found.
-template <typename PPtr, typename IndexType, typename CompareThreeWayFn, typename ResolveFn>
-static PPtr avl_find( IndexType root_idx, CompareThreeWayFn&& compare_three_way, ResolveFn&& resolve ) noexcept
-{
-    PPtr cur( root_idx );
-    while ( !cur.is_null() )
-    {
-        if ( resolve( cur ) == nullptr )
-            break;
-        int cmp = compare_three_way( cur );
-        if ( cmp == 0 )
-            return cur;
-        else if ( cmp < 0 )
-            cur = pptr_get_left( cur );
-        else
-            cur = pptr_get_right( cur );
-    }
-    return PPtr(); // not found
-}
-
-/// @brief Insert new_node into the AVL tree with the given root.
-/// The caller must resolve the comparison ordering via go_left callback.
-/// @param new_node    The node to insert (must not be null, not already in tree).
-/// @param root_idx    Reference to the tree root index.
-/// @param go_left     Callable(cur_node_ptr) -> bool: returns true if new_node < cur.
-/// @param resolve     Callable(pptr) -> NodeObjPtr: resolves pptr to raw object pointer.
-/// @param update_node Callable(PPtr) for node attribute update after rotations (Issue #188).
-///                    Default: AvlUpdateHeightOnly (height only).
-template <typename PPtr, typename IndexType, typename GoLeftFn, typename ResolveFn,
-          typename NodeUpdateFn = AvlUpdateHeightOnly>
-static void avl_insert( PPtr new_node, IndexType& root_idx, GoLeftFn&& go_left, ResolveFn&& resolve,
-                        NodeUpdateFn update_node = {} ) noexcept
-{
-    if ( new_node.is_null() )
-        return;
-    if ( resolve( new_node ) == nullptr )
-        return;
-
-    if ( root_idx == static_cast<IndexType>( 0 ) )
-    {
-        pptr_set_left( new_node, PPtr() );
-        pptr_set_right( new_node, PPtr() );
-        pptr_set_parent( new_node, PPtr() );
-        new_node.tree_node().set_height( static_cast<std::int16_t>( 1 ) );
-        root_idx = new_node.offset();
-        return;
-    }
-
-    PPtr cur( root_idx );
-    PPtr parent;
-    bool left = false;
-
-    while ( !cur.is_null() )
-    {
-        if ( resolve( cur ) == nullptr )
-            break;
-        parent = cur;
-        left   = go_left( cur );
-        if ( left )
-            cur = pptr_get_left( cur );
-        else
-            cur = pptr_get_right( cur );
-    }
-
-    pptr_set_parent( new_node, parent );
-    if ( left )
-        pptr_set_left( parent, new_node );
-    else
-        pptr_set_right( parent, new_node );
-
-    avl_rebalance_up( parent, root_idx, update_node );
-}
-
-/// @endcond
-
-} // namespace detail
-} // namespace pmm
-
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -4524,7 +4826,7 @@ template <typename _K, typename _V, typename ManagerT> struct pmap
     {
         if ( _root_idx == static_cast<index_type>( 0 ) )
             return 0;
-        return _subtree_count( node_pptr( _root_idx ) );
+        return detail::avl_subtree_count( node_pptr( _root_idx ) );
     }
 
     // ─── Операции со словарём ─────────────────────────────────────────────────
@@ -4564,12 +4866,8 @@ template <typename _K, typename _V, typename ManagerT> struct pmap
         obj->key   = key;
         obj->value = val;
 
-        // Инициализируем AVL-поля нового узла (no_block = нет связи).
-        auto& tn = new_node.tree_node();
-        tn.set_left( no_block );
-        tn.set_right( no_block );
-        tn.set_parent( no_block );
-        tn.set_height( static_cast<std::int16_t>( 1 ) );
+        // Инициализируем AVL-поля нового узла (Issue #188: shared avl_init_node).
+        detail::avl_init_node( new_node );
 
         // Вставляем в AVL-дерево.
         _avl_insert( new_node );
@@ -4621,7 +4919,8 @@ template <typename _K, typename _V, typename ManagerT> struct pmap
     void clear() noexcept
     {
         if ( _root_idx != static_cast<index_type>( 0 ) )
-            _clear_subtree( node_pptr( _root_idx ) );
+            detail::avl_clear_subtree( node_pptr( _root_idx ),
+                                       []( node_pptr p ) { ManagerT::template deallocate_typed<node_type>( p ); } );
         _root_idx = static_cast<index_type>( 0 );
     }
 
@@ -4634,79 +4933,9 @@ template <typename _K, typename _V, typename ManagerT> struct pmap
 
     // ─── Итератор (Issue #196) ───────────────────────────────────────────────
 
-    /**
-     * @brief Итератор для обхода словаря в порядке ключей (in-order).
-     *
-     * Реализует in-order обход AVL-дерева (левый -> корень -> правый),
-     * что соответствует порядку возрастания ключей.
-     */
-    struct iterator
-    {
-        using value_type = node_type;
-        using pointer    = node_pptr;
-
-        index_type _current_idx; ///< Текущий узел (no_block/0 = конец).
-
-        iterator() noexcept : _current_idx( static_cast<index_type>( 0 ) ) {}
-        explicit iterator( index_type idx ) noexcept : _current_idx( idx ) {}
-
-        bool operator==( const iterator& other ) const noexcept { return _current_idx == other._current_idx; }
-        bool operator!=( const iterator& other ) const noexcept { return _current_idx != other._current_idx; }
-
-        /// @brief Разыменование — возвращает pptr на текущий узел.
-        node_pptr operator*() const noexcept
-        {
-            if ( _current_idx == static_cast<index_type>( 0 ) || _current_idx == no_block )
-                return node_pptr();
-            return node_pptr( _current_idx );
-        }
-
-        /// @brief Переход к следующему элементу (in-order successor).
-        iterator& operator++() noexcept
-        {
-            if ( _current_idx == static_cast<index_type>( 0 ) || _current_idx == no_block )
-                return *this;
-
-            node_pptr cur( _current_idx );
-
-            // Если есть правый потомок — идём в его крайний левый узел.
-            auto right_idx = cur.tree_node().get_right();
-            if ( right_idx != no_block )
-            {
-                node_pptr right( right_idx );
-                while ( true )
-                {
-                    auto left_idx = right.tree_node().get_left();
-                    if ( left_idx == no_block )
-                        break;
-                    right = node_pptr( left_idx );
-                }
-                _current_idx = right.offset();
-                return *this;
-            }
-
-            // Иначе — идём вверх, пока не окажемся левым потомком.
-            while ( true )
-            {
-                auto parent_idx = cur.tree_node().get_parent();
-                if ( parent_idx == no_block )
-                {
-                    // Достигли корня снизу справа — конец обхода.
-                    _current_idx = static_cast<index_type>( 0 );
-                    return *this;
-                }
-                node_pptr parent( parent_idx );
-                auto      parent_left = parent.tree_node().get_left();
-                if ( parent_left == cur.offset() )
-                {
-                    // cur — левый потомок: parent — следующий.
-                    _current_idx = parent_idx;
-                    return *this;
-                }
-                cur = parent;
-            }
-        }
-    };
+    /// @brief Итератор для обхода словаря в порядке ключей (in-order).
+    /// Issue #188: uses shared AvlInorderIterator template to eliminate duplication.
+    using iterator = detail::AvlInorderIterator<node_pptr>;
 
     /// @brief Начало итерации (самый левый узел = наименьший ключ).
     iterator begin() const noexcept
@@ -4754,30 +4983,8 @@ template <typename _K, typename _V, typename ManagerT> struct pmap
             []( node_pptr p ) -> node_type* { return ManagerT::template resolve<node_type>( p ); } );
     }
 
-    /// @brief Подсчитать количество узлов в поддереве (Issue #196).
-    static std::size_t _subtree_count( node_pptr p ) noexcept
-    {
-        if ( p.is_null() )
-            return 0;
-        std::size_t count   = 1;
-        auto        left_p  = detail::pptr_get_left( p );
-        auto        right_p = detail::pptr_get_right( p );
-        count += _subtree_count( left_p );
-        count += _subtree_count( right_p );
-        return count;
-    }
-
-    /// @brief Рекурсивно деаллоцировать все узлы поддерева (Issue #196).
-    static void _clear_subtree( node_pptr p ) noexcept
-    {
-        if ( p.is_null() )
-            return;
-        auto left_p  = detail::pptr_get_left( p );
-        auto right_p = detail::pptr_get_right( p );
-        _clear_subtree( left_p );
-        _clear_subtree( right_p );
-        ManagerT::template deallocate_typed<node_type>( p );
-    }
+    // Issue #188: _subtree_count and _clear_subtree replaced by shared
+    // detail::avl_subtree_count and detail::avl_clear_subtree.
 };
 
 } // namespace pmm
@@ -4977,9 +5184,10 @@ template <typename T, typename ManagerT> struct ppool
                 return nullptr;
         }
 
-        // Pop from free-list.
-        std::uint8_t* base     = ManagerT::backend().base_ptr();
-        std::uint8_t* slot_raw = base + static_cast<std::size_t>( _free_head_idx ) * granule_size;
+        // Pop from free-list (Issue #188: shared resolve_granule_ptr).
+        std::uint8_t* slot_raw =
+            reinterpret_cast<std::uint8_t*>( detail::resolve_granule_ptr<typename ManagerT::address_traits>(
+                ManagerT::backend().base_ptr(), _free_head_idx ) );
 
         // Read the next free index from the slot.
         index_type next_free;
@@ -5007,12 +5215,11 @@ template <typename T, typename ManagerT> struct ppool
         if ( ptr == nullptr )
             return;
 
-        std::uint8_t* base     = ManagerT::backend().base_ptr();
         std::uint8_t* slot_raw = reinterpret_cast<std::uint8_t*>( ptr );
 
-        // Compute the granule index of this slot.
-        std::size_t byte_off = static_cast<std::size_t>( slot_raw - base );
-        index_type  slot_idx = static_cast<index_type>( byte_off / granule_size );
+        // Compute the granule index of this slot (Issue #188: shared ptr_to_granule_idx).
+        index_type slot_idx =
+            detail::ptr_to_granule_idx<typename ManagerT::address_traits>( ManagerT::backend().base_ptr(), slot_raw );
 
         // Push onto free-list: store current free_head in the slot.
         std::memcpy( slot_raw, &_free_head_idx, sizeof( index_type ) );
@@ -5029,13 +5236,13 @@ template <typename T, typename ManagerT> struct ppool
      */
     void free_all() noexcept
     {
-        std::uint8_t* base = ManagerT::backend().base_ptr();
-
-        // Walk the chunk list and deallocate each chunk.
-        index_type chunk_idx = _chunk_head_idx;
+        // Walk the chunk list and deallocate each chunk (Issue #188: shared resolve_granule_ptr).
+        std::uint8_t* base      = ManagerT::backend().base_ptr();
+        index_type    chunk_idx = _chunk_head_idx;
         while ( chunk_idx != static_cast<index_type>( 0 ) )
         {
-            std::uint8_t* chunk_raw = base + static_cast<std::size_t>( chunk_idx ) * granule_size;
+            std::uint8_t* chunk_raw = reinterpret_cast<std::uint8_t*>(
+                detail::resolve_granule_ptr<typename ManagerT::address_traits>( base, chunk_idx ) );
 
             // Read the next chunk index from the chunk header.
             index_type next_chunk;
@@ -5085,9 +5292,8 @@ template <typename T, typename ManagerT> struct ppool
         std::uint8_t* chunk_raw = static_cast<std::uint8_t*>( raw );
         std::uint8_t* base      = ManagerT::backend().base_ptr();
 
-        // Compute chunk granule index.
-        std::size_t chunk_byte_off = static_cast<std::size_t>( chunk_raw - base );
-        index_type  chunk_idx      = static_cast<index_type>( chunk_byte_off / granule_size );
+        // Compute chunk granule index (Issue #188: shared ptr_to_granule_idx).
+        index_type chunk_idx = detail::ptr_to_granule_idx<typename ManagerT::address_traits>( base, chunk_raw );
 
         // Write chunk header: link to previous chunk head.
         // Zero the full header granule first, then write the index.
@@ -5101,9 +5307,8 @@ template <typename T, typename ManagerT> struct ppool
 
         for ( std::size_t i = 0; i < n_objects; ++i )
         {
-            std::uint8_t* slot          = slots_start + i * slot_bytes;
-            std::size_t   slot_byte_off = static_cast<std::size_t>( slot - base );
-            index_type    slot_idx      = static_cast<index_type>( slot_byte_off / granule_size );
+            std::uint8_t* slot     = slots_start + i * slot_bytes;
+            index_type    slot_idx = detail::ptr_to_granule_idx<typename ManagerT::address_traits>( base, slot );
 
             // Store current free_head in the slot (push onto free-list).
             std::memset( slot, 0, slot_bytes );
@@ -5151,7 +5356,7 @@ template <typename T, typename ManagerT> struct ppool
  *
  * @see persist_memory_manager.h — PersistMemoryManager (статическая модель, Issue #110)
  * @see tree_node.h — TreeNode<A> с публичными методами (Issue #138)
- * @version 0.8 (Issue #164 — удалены избыточные методы tree_node)
+ * @version 0.9 (Issue #211 — Phase 4.4: byte_offset() for pptr ↔ byte offset conversion)
  */
 
 #include <cstddef>
@@ -5238,6 +5443,17 @@ class pptr
 
     /// @brief Получить гранульный индекс (для сохранения/восстановления).
     constexpr index_type offset() const noexcept { return _idx; }
+
+    /// @brief Получить байтовое смещение из гранульного индекса (Issue #211, Phase 4.4).
+    ///
+    /// Возвращает `offset() * granule_size`. Упрощает интеграцию с внешними системами,
+    /// работающими с байтовыми адресами (например, BinDiffSynchronizer pam_adapter).
+    ///
+    /// @return Байтовое смещение в управляемой области. Для null pptr возвращает 0.
+    constexpr std::size_t byte_offset() const noexcept
+    {
+        return static_cast<std::size_t>( _idx ) * ManagerT::address_traits::granule_size;
+    }
 
     /// @brief Сравнение персистентных указателей одного типа по индексу.
     constexpr bool operator==( const pptr& other ) const noexcept { return _idx == other._idx; }
@@ -5535,9 +5751,8 @@ template <typename ManagerT> struct pstring
     {
         if ( _data_idx != static_cast<index_type>( 0 ) )
         {
-            std::uint8_t* base = ManagerT::backend().base_ptr();
-            void*         raw  = base + static_cast<std::size_t>( _data_idx ) * ManagerT::address_traits::granule_size;
-            ManagerT::deallocate( raw );
+            ManagerT::deallocate( detail::resolve_granule_ptr<typename ManagerT::address_traits>(
+                ManagerT::backend().base_ptr(), _data_idx ) );
             _data_idx = static_cast<index_type>( 0 );
         }
         _length   = 0;
@@ -5579,13 +5794,11 @@ template <typename ManagerT> struct pstring
     // ─── Внутренние помощники ─────────────────────────────────────────────────
 
     /// @brief Разрешить гранульный индекс данных в сырой указатель.
+    /// Issue #188: delegates to shared resolve_granule_ptr.
     char* resolve_data() const noexcept
     {
-        if ( _data_idx == static_cast<index_type>( 0 ) )
-            return nullptr;
-        std::uint8_t* base = ManagerT::backend().base_ptr();
-        return reinterpret_cast<char*>( base + static_cast<std::size_t>( _data_idx ) *
-                                                   ManagerT::address_traits::granule_size );
+        return reinterpret_cast<char*>( detail::resolve_granule_ptr<typename ManagerT::address_traits>(
+            ManagerT::backend().base_ptr(), _data_idx ) );
     }
 
     /**
@@ -5617,10 +5830,9 @@ template <typename ManagerT> struct pstring
         if ( new_raw == nullptr )
             return false;
 
-        // Создаём новый индекс.
+        // Создаём новый индекс (Issue #188: shared ptr_to_granule_idx).
         std::uint8_t* base        = ManagerT::backend().base_ptr();
-        std::size_t   byte_off    = static_cast<std::uint8_t*>( new_raw ) - base;
-        index_type    new_dat_idx = static_cast<index_type>( byte_off / ManagerT::address_traits::granule_size );
+        index_type    new_dat_idx = detail::ptr_to_granule_idx<typename ManagerT::address_traits>( base, new_raw );
 
         // Копируем старые данные.
         if ( _length > 0 && _data_idx != static_cast<index_type>( 0 ) )
@@ -5635,12 +5847,9 @@ template <typename ManagerT> struct pstring
             static_cast<char*>( new_raw )[0] = '\0';
         }
 
-        // Освобождаем старый блок.
+        // Освобождаем старый блок (Issue #188: shared resolve_granule_ptr).
         if ( _data_idx != static_cast<index_type>( 0 ) )
-        {
-            void* old_raw = base + static_cast<std::size_t>( _data_idx ) * ManagerT::address_traits::granule_size;
-            ManagerT::deallocate( old_raw );
-        }
+            ManagerT::deallocate( detail::resolve_granule_ptr<typename ManagerT::address_traits>( base, _data_idx ) );
 
         _data_idx = new_dat_idx;
         _capacity = new_cap;
@@ -5812,13 +6021,9 @@ template <typename T, typename ManagerT> struct pvector
 
         obj->value = val;
 
-        // Инициализируем поля нового узла.
-        auto& tn = new_node.tree_node();
-        tn.set_left( no_block );
-        tn.set_right( no_block );
-        tn.set_parent( no_block );
-        tn.set_height( static_cast<std::int16_t>( 1 ) );
-        tn.set_weight( static_cast<index_type>( 1 ) ); // поддерево размером 1
+        // Инициализируем поля нового узла (Issue #188: shared avl_init_node).
+        detail::avl_init_node( new_node );
+        new_node.tree_node().set_weight( static_cast<index_type>( 1 ) ); // поддерево размером 1
 
         _avl_insert_rightmost( new_node );
 
@@ -5854,16 +6059,7 @@ template <typename T, typename ManagerT> struct pvector
     {
         if ( _root_idx == static_cast<index_type>( 0 ) )
             return node_pptr();
-        // Самый левый узел
-        node_pptr cur( _root_idx );
-        while ( true )
-        {
-            auto left_idx = cur.tree_node().get_left();
-            if ( left_idx == no_block )
-                break;
-            cur = node_pptr( left_idx );
-        }
-        return cur;
+        return detail::avl_min_node( node_pptr( _root_idx ) );
     }
 
     /**
@@ -5875,16 +6071,7 @@ template <typename T, typename ManagerT> struct pvector
     {
         if ( _root_idx == static_cast<index_type>( 0 ) )
             return node_pptr();
-        // Самый правый узел
-        node_pptr cur( _root_idx );
-        while ( true )
-        {
-            auto right_idx = cur.tree_node().get_right();
-            if ( right_idx == no_block )
-                break;
-            cur = node_pptr( right_idx );
-        }
-        return cur;
+        return detail::avl_max_node( node_pptr( _root_idx ) );
     }
 
     /**
@@ -5899,15 +6086,8 @@ template <typename T, typename ManagerT> struct pvector
         if ( _root_idx == static_cast<index_type>( 0 ) )
             return false;
 
-        // Находим крайний правый узел.
-        node_pptr target( _root_idx );
-        while ( true )
-        {
-            auto right_idx = target.tree_node().get_right();
-            if ( right_idx == no_block )
-                break;
-            target = node_pptr( right_idx );
-        }
+        // Находим крайний правый узел (Issue #188: shared avl_max_node).
+        node_pptr target = detail::avl_max_node( node_pptr( _root_idx ) );
 
         _avl_remove( target );
         ManagerT::template deallocate_typed<node_type>( target );
@@ -5963,95 +6143,18 @@ template <typename T, typename ManagerT> struct pvector
 
     // ─── Итератор ─────────────────────────────────────────────────────────────
 
-    /**
-     * @brief Простой итератор для обхода вектора в порядке индексов (in-order).
-     *
-     * Реализует in-order обход AVL-дерева (левый → корень → правый),
-     * что соответствует порядку элементов вектора.
-     */
-    struct iterator
-    {
-        using value_type = node_type;
-        using pointer    = node_pptr;
-
-        index_type _current_idx; ///< Текущий узел (no_block/0 = конец).
-
-        iterator() noexcept : _current_idx( static_cast<index_type>( 0 ) ) {}
-        explicit iterator( index_type idx ) noexcept : _current_idx( idx ) {}
-
-        bool operator==( const iterator& other ) const noexcept { return _current_idx == other._current_idx; }
-        bool operator!=( const iterator& other ) const noexcept { return _current_idx != other._current_idx; }
-
-        /// @brief Разыменование — возвращает pptr на текущий узел.
-        node_pptr operator*() const noexcept
-        {
-            if ( _current_idx == static_cast<index_type>( 0 ) || _current_idx == no_block )
-                return node_pptr();
-            return node_pptr( _current_idx );
-        }
-
-        /// @brief Переход к следующему элементу (in-order successor).
-        iterator& operator++() noexcept
-        {
-            if ( _current_idx == static_cast<index_type>( 0 ) || _current_idx == no_block )
-                return *this;
-
-            node_pptr cur( _current_idx );
-
-            // Если есть правый потомок — идём в его крайний левый узел.
-            auto right_idx = cur.tree_node().get_right();
-            if ( right_idx != no_block )
-            {
-                node_pptr right( right_idx );
-                while ( true )
-                {
-                    auto left_idx = right.tree_node().get_left();
-                    if ( left_idx == no_block )
-                        break;
-                    right = node_pptr( left_idx );
-                }
-                _current_idx = right.offset();
-                return *this;
-            }
-
-            // Иначе — идём вверх, пока не окажемся левым потомком.
-            while ( true )
-            {
-                auto parent_idx = cur.tree_node().get_parent();
-                if ( parent_idx == no_block )
-                {
-                    // Достигли корня снизу справа — конец обхода.
-                    _current_idx = static_cast<index_type>( 0 );
-                    return *this;
-                }
-                node_pptr parent( parent_idx );
-                auto      parent_left = parent.tree_node().get_left();
-                if ( parent_left == cur.offset() )
-                {
-                    // cur — левый потомок: parent — следующий.
-                    _current_idx = parent_idx;
-                    return *this;
-                }
-                cur = parent;
-            }
-        }
-    };
+    /// @brief Простой итератор для обхода вектора в порядке индексов (in-order).
+    /// Issue #188: uses shared AvlInorderIterator template to eliminate duplication.
+    using iterator = detail::AvlInorderIterator<node_pptr>;
 
     /// @brief Начало итерации (самый левый узел = первый элемент).
+    /// Issue #188: delegates to shared avl_min_node.
     iterator begin() const noexcept
     {
         if ( _root_idx == static_cast<index_type>( 0 ) )
             return iterator();
-        // Самый левый узел.
-        node_pptr cur( _root_idx );
-        while ( true )
-        {
-            auto left_idx = cur.tree_node().get_left();
-            if ( left_idx == no_block )
-                break;
-            cur = node_pptr( left_idx );
-        }
-        return iterator( cur.offset() );
+        node_pptr min = detail::avl_min_node( node_pptr( _root_idx ) );
+        return iterator( min.offset() );
     }
 
     /// @brief Конец итерации (sentinel = 0).
@@ -6377,22 +6480,17 @@ template <typename ManagerT> struct pstringview
         if ( raw == nullptr )
             return psview_pptr();
 
-        // Создаём pptr вручную из raw указателя.
-        std::uint8_t* base     = ManagerT::backend().base_ptr();
-        std::size_t   byte_off = static_cast<std::uint8_t*>( raw ) - base;
-        psview_pptr   new_node( static_cast<index_type>( byte_off / ManagerT::address_traits::granule_size ) );
+        // Создаём pptr вручную из raw указателя (Issue #188: shared ptr_to_granule_idx).
+        std::uint8_t* base = ManagerT::backend().base_ptr();
+        psview_pptr   new_node( detail::ptr_to_granule_idx<typename ManagerT::address_traits>( base, raw ) );
 
         pstringview* obj = static_cast<pstringview*>( raw );
         obj->length      = len;
         // Копируем строку включая null-terminator.
         std::memcpy( obj->str, s, static_cast<std::size_t>( len ) + 1 );
 
-        // Инициализируем AVL-поля нового узла (пустые ссылки, высота 1).
-        auto& tn = new_node.tree_node();
-        tn.set_left( static_cast<index_type>( 0 ) );
-        tn.set_right( static_cast<index_type>( 0 ) );
-        tn.set_parent( static_cast<index_type>( 0 ) );
-        tn.set_height( static_cast<std::int16_t>( 1 ) );
+        // Инициализируем AVL-поля нового узла (Issue #188: shared avl_init_node).
+        detail::avl_init_node( new_node );
 
         // Блокируем блок pstringview навечно (Issue #151, Issue #126).
         ManagerT::lock_block_permanent( obj );
@@ -6473,6 +6571,19 @@ namespace pmm
  *
  * @note Используйте `destroy()` перед повторной инициализацией и между тестами.
  */
+// ─── Issue #202, Phase 4.2: detect logging_policy in config ──────────────────
+namespace detail
+{
+template <typename C, typename = void> struct config_logging_policy
+{
+    using type = logging::NoLogging; ///< Default: no logging (backward compatible).
+};
+template <typename C> struct config_logging_policy<C, std::void_t<typename C::logging_policy>>
+{
+    using type = typename C::logging_policy;
+};
+} // namespace detail
+
 template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> class PersistMemoryManager
 {
   public:
@@ -6482,6 +6593,7 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     using storage_backend = typename ConfigT::storage_backend;
     using free_block_tree = typename ConfigT::free_block_tree;
     using thread_policy   = typename ConfigT::lock_policy;
+    using logging_policy  = typename detail::config_logging_policy<ConfigT>::type; ///< Issue #202, Phase 4.2
     using allocator       = AllocatorPolicy<free_block_tree, address_traits>;
     using index_type      = typename address_traits::index_type;
 
@@ -6595,6 +6707,17 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
      */
     template <typename T> using ppool = pmm::ppool<T, manager_type>;
 
+    // ─── Error code API (Issue #201, Phase 4.1) ───────────────────────────────
+
+    /// @brief Return the error code from the last operation (thread-local per manager specialization).
+    static PmmError last_error() noexcept { return _last_error; }
+
+    /// @brief Clear the last error code to PmmError::Ok.
+    static void clear_error() noexcept { _last_error = PmmError::Ok; }
+
+    /// @brief Set the last error code (for use by utility functions like io.h).
+    static void set_last_error( PmmError err ) noexcept { _last_error = err; }
+
     // ─── Статические методы управления жизненным циклом ──────────────────────
 
     /**
@@ -6610,12 +6733,18 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     {
         typename thread_policy::unique_lock_type lock( _mutex );
         if ( initial_size < detail::kMinMemorySize )
+        {
+            _last_error = PmmError::InvalidSize;
             return false;
+        }
         // Issue #146: use address_traits::granule_size instead of hardcoded kGranuleSize.
         // Issue #172: guard against overflow when initial_size is close to size_t max.
         static constexpr std::size_t kGranSzCreate = address_traits::granule_size;
         if ( initial_size > std::numeric_limits<std::size_t>::max() - ( kGranSzCreate - 1 ) )
-            return false; // overflow in alignment computation
+        {
+            _last_error = PmmError::Overflow;
+            return false;
+        }
         std::size_t aligned = ( ( initial_size + kGranSzCreate - 1 ) / kGranSzCreate ) * kGranSzCreate;
         if ( _backend.base_ptr() == nullptr || _backend.total_size() < aligned )
         {
@@ -6623,11 +6752,23 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
             std::size_t additional =
                 ( _backend.total_size() < aligned ) ? ( aligned - _backend.total_size() ) : aligned;
             if ( !_backend.expand( additional ) )
+            {
+                _last_error = PmmError::ExpandFailed;
                 return false;
+            }
         }
         if ( _backend.base_ptr() == nullptr || _backend.total_size() < aligned )
+        {
+            _last_error = PmmError::BackendError;
             return false;
-        return init_layout( _backend.base_ptr(), _backend.total_size() );
+        }
+        bool ok = init_layout( _backend.base_ptr(), _backend.total_size() );
+        if ( ok )
+        {
+            _last_error = PmmError::Ok;
+            logging_policy::on_create( _backend.total_size() );
+        }
+        return ok;
     }
 
     /**
@@ -6639,8 +6780,17 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     {
         typename thread_policy::unique_lock_type lock( _mutex );
         if ( _backend.base_ptr() == nullptr || _backend.total_size() < detail::kMinMemorySize )
+        {
+            _last_error = ( _backend.base_ptr() == nullptr ) ? PmmError::BackendError : PmmError::InvalidSize;
             return false;
-        return init_layout( _backend.base_ptr(), _backend.total_size() );
+        }
+        bool ok = init_layout( _backend.base_ptr(), _backend.total_size() );
+        if ( ok )
+        {
+            _last_error = PmmError::Ok;
+            logging_policy::on_create( _backend.total_size() );
+        }
+        return ok;
     }
 
     /**
@@ -6652,20 +6802,39 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     {
         typename thread_policy::unique_lock_type lock( _mutex );
         if ( _backend.base_ptr() == nullptr || _backend.total_size() < detail::kMinMemorySize )
+        {
+            _last_error = ( _backend.base_ptr() == nullptr ) ? PmmError::BackendError : PmmError::InvalidSize;
             return false;
+        }
         std::uint8_t*                          base = _backend.base_ptr();
         detail::ManagerHeader<address_traits>* hdr  = get_header( base );
-        if ( hdr->magic != kMagic || hdr->total_size != _backend.total_size() )
+        if ( hdr->magic != kMagic )
+        {
+            _last_error = PmmError::InvalidMagic;
+            logging_policy::on_corruption_detected( PmmError::InvalidMagic );
             return false;
+        }
+        if ( hdr->total_size != _backend.total_size() )
+        {
+            _last_error = PmmError::SizeMismatch;
+            logging_policy::on_corruption_detected( PmmError::SizeMismatch );
+            return false;
+        }
         // Issue #146: compare stored granule size against address_traits::granule_size.
         if ( hdr->granule_size != static_cast<std::uint16_t>( address_traits::granule_size ) )
+        {
+            _last_error = PmmError::GranuleMismatch;
+            logging_policy::on_corruption_detected( PmmError::GranuleMismatch );
             return false;
+        }
         hdr->owns_memory     = false;
         hdr->prev_total_size = 0;
         allocator::repair_linked_list( base, hdr );
         allocator::recompute_counters( base, hdr );
         allocator::rebuild_free_tree( base, hdr );
         _initialized = true;
+        _last_error  = PmmError::Ok;
+        logging_policy::on_load();
         return true;
     }
 
@@ -6684,6 +6853,7 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
         if ( hdr != nullptr )
             hdr->magic = 0;
         _initialized = false;
+        logging_policy::on_destroy();
     }
 
     /// @brief Проверить, инициализирован ли менеджер.
@@ -6700,8 +6870,18 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     static void* allocate( std::size_t user_size ) noexcept
     {
         typename thread_policy::unique_lock_type lock( _mutex );
-        if ( !_initialized || user_size == 0 )
+        if ( !_initialized )
+        {
+            _last_error = PmmError::NotInitialized;
+            logging_policy::on_allocation_failure( user_size, PmmError::NotInitialized );
             return nullptr;
+        }
+        if ( user_size == 0 )
+        {
+            _last_error = PmmError::InvalidSize;
+            logging_policy::on_allocation_failure( user_size, PmmError::InvalidSize );
+            return nullptr;
+        }
 
         std::uint8_t*                          base = _backend.base_ptr();
         detail::ManagerHeader<address_traits>* hdr  = get_header( base );
@@ -6711,22 +6891,38 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
             data_gran = 1;
         // Issue #43 Phase 1.3: Overflow protection — check before adding header granules.
         if ( data_gran > std::numeric_limits<index_type>::max() - kBlockHdrGranules )
+        {
+            _last_error = PmmError::Overflow;
+            logging_policy::on_allocation_failure( user_size, PmmError::Overflow );
             return nullptr;
+        }
         index_type needed = kBlockHdrGranules + data_gran;
         index_type idx    = free_block_tree::find_best_fit( base, hdr, needed );
 
         if ( idx != address_traits::no_block )
+        {
+            _last_error = PmmError::Ok;
             return allocator::allocate_from_block( base, hdr, idx, user_size );
+        }
 
         // Попытка расширить (если бэкенд поддерживает)
         if ( !do_expand( user_size ) )
+        {
+            _last_error = PmmError::OutOfMemory;
+            logging_policy::on_allocation_failure( user_size, PmmError::OutOfMemory );
             return nullptr;
+        }
 
         base = _backend.base_ptr();
         hdr  = get_header( base );
         idx  = free_block_tree::find_best_fit( base, hdr, needed );
         if ( idx != address_traits::no_block )
+        {
+            _last_error = PmmError::Ok;
             return allocator::allocate_from_block( base, hdr, idx, user_size );
+        }
+        _last_error = PmmError::OutOfMemory;
+        logging_policy::on_allocation_failure( user_size, PmmError::OutOfMemory );
         return nullptr;
     }
 
@@ -6860,6 +7056,134 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
         deallocate( raw );
     }
 
+    // ─── Нативное перераспределение (Issue #210, Phase 4.3) ────────────────────
+
+    /// @brief Перераспределить массив из old_count объектов T до new_count.
+    /// T должен быть trivially copyable. При неудаче старый блок сохраняется.
+    /// @see docs/phase4_api.md §4.3
+    template <typename T>
+    static pptr<T> reallocate_typed( pptr<T> p, std::size_t old_count, std::size_t new_count ) noexcept
+    {
+        static_assert( std::is_trivially_copyable_v<T>,
+                       "reallocate_typed<T>: T must be trivially copyable for safe memcpy reallocation." );
+        if ( new_count == 0 )
+        {
+            _last_error = PmmError::InvalidSize;
+            return pptr<T>();
+        }
+        if ( p.is_null() )
+            return allocate_typed<T>( new_count );
+        if ( sizeof( T ) > 0 && new_count > ( std::numeric_limits<std::size_t>::max )() / sizeof( T ) )
+        {
+            _last_error = PmmError::Overflow;
+            return pptr<T>();
+        }
+        std::size_t                              new_user_size = sizeof( T ) * new_count;
+        typename thread_policy::unique_lock_type lock( _mutex );
+        if ( !_initialized )
+        {
+            _last_error = PmmError::NotInitialized;
+            return pptr<T>();
+        }
+        std::uint8_t*                          base = _backend.base_ptr();
+        detail::ManagerHeader<address_traits>* hdr  = get_header( base );
+        // blk_idx = pptr.offset - floor(sizeof(Block) / granule)
+        static constexpr index_type kBlkHdrFloorGran =
+            static_cast<index_type>( sizeof( Block<address_traits> ) / address_traits::granule_size );
+        index_type blk_idx       = static_cast<index_type>( p.offset() - kBlkHdrFloorGran );
+        void*      blk_raw       = detail::block_at<address_traits>( base, blk_idx );
+        index_type old_data_gran = BlockStateBase<address_traits>::get_weight( blk_raw );
+        index_type new_data_gran = detail::bytes_to_granules_t<address_traits>( new_user_size );
+        if ( new_data_gran == 0 )
+            new_data_gran = 1;
+        if ( new_data_gran == old_data_gran )
+        {
+            _last_error = PmmError::Ok;
+            return p;
+        }
+        // Skip in-place paths when resolve() overlaps block header (SmallAT).
+        static constexpr bool kBlockAligned = ( sizeof( Block<address_traits> ) % address_traits::granule_size == 0 );
+
+        if constexpr ( kBlockAligned )
+        {
+            if ( new_data_gran < old_data_gran )
+            {
+                allocator::realloc_shrink( base, hdr, blk_idx, blk_raw, old_data_gran, new_data_gran );
+                _last_error = PmmError::Ok;
+                return p;
+            }
+            if ( new_data_gran > old_data_gran )
+            {
+                if ( allocator::realloc_grow( base, hdr, blk_idx, blk_raw, old_data_gran, new_data_gran ) )
+                {
+                    _last_error = PmmError::Ok;
+                    return p;
+                }
+            }
+        }
+        // Fallback: allocate new + memmove + free old (under same lock).
+        static constexpr index_type kBlkHdrFloorGranFb =
+            static_cast<index_type>( sizeof( Block<address_traits> ) / address_traits::granule_size );
+        index_type new_data_gran_alloc = detail::bytes_to_granules_t<address_traits>( new_user_size );
+        if ( new_data_gran_alloc == 0 )
+            new_data_gran_alloc = 1;
+        if ( new_data_gran_alloc > std::numeric_limits<index_type>::max() - kBlockHdrGranules )
+        {
+            _last_error = PmmError::Overflow;
+            return pptr<T>();
+        }
+        index_type needed  = kBlockHdrGranules + new_data_gran_alloc;
+        index_type new_idx = free_block_tree::find_best_fit( base, hdr, needed );
+        if ( new_idx == address_traits::no_block )
+        {
+            if ( !do_expand( new_user_size ) )
+            {
+                _last_error = PmmError::OutOfMemory;
+                logging_policy::on_allocation_failure( new_user_size, PmmError::OutOfMemory );
+                return pptr<T>();
+            }
+            base    = _backend.base_ptr();
+            hdr     = get_header( base );
+            new_idx = free_block_tree::find_best_fit( base, hdr, needed );
+            if ( new_idx == address_traits::no_block )
+            {
+                _last_error = PmmError::OutOfMemory;
+                logging_policy::on_allocation_failure( new_user_size, PmmError::OutOfMemory );
+                return pptr<T>();
+            }
+        }
+        void* new_raw = allocator::allocate_from_block( base, hdr, new_idx, new_user_size );
+        if ( new_raw == nullptr )
+        {
+            _last_error = PmmError::OutOfMemory;
+            return pptr<T>();
+        }
+        pptr<T>     new_p   = make_pptr_from_raw<T>( new_raw );
+        void*       new_dst = base + static_cast<std::size_t>( new_p.offset() ) * address_traits::granule_size;
+        void*       old_src = base + static_cast<std::size_t>( p.offset() ) * address_traits::granule_size;
+        std::size_t copy_sz = ( new_count < old_count ? new_count : old_count ) * sizeof( T );
+        std::memmove( new_dst, old_src, copy_sz );
+        // Free old block
+        index_type old_blk_idx = static_cast<index_type>( p.offset() - kBlkHdrFloorGranFb );
+        void*      old_blk_raw = detail::block_at<address_traits>( base, old_blk_idx );
+        index_type freed_w     = BlockStateBase<address_traits>::get_weight( old_blk_raw );
+        if ( BlockStateBase<address_traits>::get_node_type( old_blk_raw ) != pmm::kNodeReadOnly )
+        {
+            auto* old_alloc = AllocatedBlock<address_traits>::cast_from_raw( old_blk_raw );
+            if ( old_alloc != nullptr )
+            {
+                old_alloc->mark_as_free();
+                hdr->alloc_count--;
+                hdr->free_count++;
+                if ( hdr->used_size >= freed_w )
+                    hdr->used_size -= freed_w;
+                allocator::coalesce( base, hdr, old_blk_idx );
+            }
+        }
+        _last_error = PmmError::Ok;
+        return new_p;
+    }
+
     // ─── Типизированный API с вызовом конструктора/деструктора (Issue #172) ───
 
     /**
@@ -6953,6 +7277,28 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
         return ( base_elem == nullptr ) ? nullptr : base_elem + i;
     }
 
+    /// @brief Создать pptr<T> из байтового смещения (Issue #211, Phase 4.4).
+    /// Обратная операция к pptr::byte_offset(). Смещение должно быть кратно granule_size.
+    /// @tparam T Тип данных.  @param byte_off Байтовое смещение.
+    /// @return pptr<T> или пустой pptr при ошибке (InvalidPointer / Overflow).
+    template <typename T> static pptr<T> pptr_from_byte_offset( std::size_t byte_off ) noexcept
+    {
+        if ( byte_off == 0 )
+            return pptr<T>(); // 0 byte offset → null pptr
+        if ( byte_off % address_traits::granule_size != 0 )
+        {
+            _last_error = PmmError::InvalidPointer;
+            return pptr<T>();
+        }
+        std::size_t idx = byte_off / address_traits::granule_size;
+        if ( idx > static_cast<std::size_t>( std::numeric_limits<index_type>::max() ) )
+        {
+            _last_error = PmmError::Overflow;
+            return pptr<T>();
+        }
+        return pptr<T>( static_cast<index_type>( idx ) );
+    }
+
     /**
      * @brief Проверить, что pptr указывает на валидную область внутри кучи (Issue #43 Phase 1.2).
      *
@@ -6972,22 +7318,9 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     }
 
     // ─── Root object API (Issue #200, Phase 3.7) ──────────────────────────────
-    //
-    // A single root pointer stored in ManagerHeader. The user can store a pptr<T>
-    // to any object (e.g. pmap<pstringview, pptr<void>>) and retrieve it later,
-    // including after save/load cycles. This enables object discovery by name
-    // without external bookkeeping.
 
-    /**
-     * @brief Установить корневой объект в ManagerHeader.
-     *
-     * Корневой объект — единственный именованный указатель, сохраняемый в заголовке
-     * менеджера. Через него пользователь может хранить реестр (например,
-     * `pmap<pstringview, pptr<void>>`) и находить объекты по имени после загрузки.
-     *
-     * @tparam T Тип объекта.
-     * @param p Персистентный указатель на корневой объект. Пустой pptr сбрасывает корень.
-     */
+    /// @brief Установить корневой объект в ManagerHeader (Issue #200, Phase 3.7).
+    /// @tparam T Тип объекта.  @param p Персистентный указатель; пустой pptr сбрасывает корень.
     template <typename T> static void set_root( pptr<T> p ) noexcept
     {
         typename thread_policy::unique_lock_type lock( _mutex );
@@ -7015,17 +7348,8 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     }
 
     // ─── Методы доступа к полям AVL-узла блока (Issue #125) ─────────────────
-    //
-    // Note (Issue #141): These 10 get_tree_*/set_tree_* methods are intentional
-    // safe-wrappers over BlockStateBase<address_traits>::get_*/set_* utilities.
-    // They add manager-level guards (null-check, _initialized-check) and translate
-    // between the public pptr<T> API and the raw void* block interface used internally.
-    // The delegation is not duplication — it is the adapter layer between the public
-    // persistent-pointer API and the internal block-state machine.
-    //
-    // Note (Issue #179): The repeated blk_raw computation was extracted into two private
-    // helpers: block_raw_ptr_from_pptr() (const) and block_raw_mut_ptr_from_pptr() (mutable).
-    // Each public method now checks the guards and delegates to the helper + BlockStateBase.
+    // Note (#141): safe-wrappers over BlockStateBase get_*/set_* with manager-level guards.
+    // Note (#179): blk_raw computation extracted into block_raw_[mut_]ptr_from_pptr() helpers.
 
     /**
      * @brief Получить смещение левого дочернего узла AVL-дерева для блока,
@@ -7393,15 +7717,14 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     /// @brief Мьютекс для потокобезопасности.
     static inline typename thread_policy::mutex_type _mutex{};
 
+    /// @brief Last error code (Issue #201, Phase 4.1).
+    static inline PmmError _last_error{ PmmError::Ok };
+
     // ─── Вспомогательные методы ────────────────────────────────────────────────
 
     // ─── Issue #179: find_block helpers ───────────────────────────────────────
-    // Locate and validate the Block header for a user pointer. Called from
-    // deallocate(), lock_block_permanent(), and is_permanently_locked() after
-    // the lock is already held and _initialized / ptr are confirmed non-null.
 
-    /// @brief Find the mutable block header for a user-data pointer.
-    /// Returns nullptr if ptr is out of range or the block header is invalid.
+    /// @brief Find the mutable block header for a user-data pointer (or nullptr).
     static pmm::Block<address_traits>* find_block_from_user_ptr( void* ptr ) noexcept
     {
         std::uint8_t*                          base = _backend.base_ptr();
@@ -7431,10 +7754,7 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
     }
 
     // ─── Issue #179: blk_raw helpers ──────────────────────────────────────────
-    // Compute the raw block-header pointer from a pptr<T>.
-    // Formula: base + offset * granule_size - sizeof(Block<AT>) points to the
-    // Block header that immediately precedes the user-data area.
-    // Callers must check p.is_null() && _initialized before calling these.
+    // base + offset * granule_size - sizeof(Block<AT>) → block header before user data.
 
     /// @brief Return a const pointer to the block header for the given pptr.
     template <typename T> static const void* block_raw_ptr_from_pptr( pptr<T> p ) noexcept
@@ -7612,6 +7932,7 @@ template <typename ConfigT = CacheManagerConfig, std::size_t InstanceId = 0> cla
         if ( new_base == nullptr || new_size <= old_size )
             return false;
 
+        logging_policy::on_expand( old_size, new_size );
         hdr = get_header( new_base );
 
         // Issue #146: compute extra_idx using address_traits::granule_size.
@@ -7879,7 +8200,11 @@ template <typename MgrT> inline bool load_manager_from_file( const char* filenam
         std::uint32_t stored_crc   = hdr->crc32;
         std::uint32_t computed_crc = detail::compute_image_crc32<address_traits>( buf, file_size );
         if ( stored_crc != 0 && stored_crc != computed_crc )
+        {
+            MgrT::set_last_error( PmmError::CrcMismatch );
+            MgrT::logging_policy::on_corruption_detected( PmmError::CrcMismatch );
             return false;
+        }
         // Note: stored_crc==0 is accepted for backward compatibility with images
         // saved before Phase 2.1 (which had _reserved[8] zeroed).
     }

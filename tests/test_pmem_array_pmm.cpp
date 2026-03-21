@@ -9,7 +9,7 @@
 #include <cstring>
 #include <type_traits>
 
-#include "pam_adapter.h"
+#include "pam_pmm_config.h"
 
 using namespace pjson;
 

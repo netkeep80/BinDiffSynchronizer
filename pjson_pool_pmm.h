@@ -12,14 +12,14 @@
  *   - Свободные слоты связаны через встроенный free-list в ppool.
  *   - node_id = байтовое смещение узла в ПАП (формат совместим с остальной системой).
  *
- * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t
+ * @see pam_pmm.h — фасад ПАМ на PMM (pmm_resolve, pmm_resolve_const)
  * @see pjson_node.h — структура node и node_tag
  */
 
 // Важно: pjson_node.h должен быть включен первым, чтобы определить ::node
-// до включения pam_adapter.h.
+// до включения pam_pmm.h.
 #include "pjson_node.h"
-#include "pam_adapter.h" // Для pmm_resolve, pmm_resolve_const, pptr_to_offset, offset_to_pptr
+#include "pam_pmm.h" // Для pmm_resolve, pmm_resolve_const
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
@@ -246,7 +246,7 @@ inline uintptr_t pjson_pool_pmm_create()
     if ( pool_pptr.is_null() )
         return 0;
 
-    uintptr_t pool_off = pptr_to_offset( pool_pptr );
+    uintptr_t pool_off = pool_pptr.byte_offset();
     pjson_pool_pmm_init( pool_off );
 
     return pool_off;
@@ -266,7 +266,7 @@ inline void pjson_pool_pmm_destroy( uintptr_t pool_off )
     pjson_pool_pmm_free_pool( pool_off );
 
     // Затем освобождаем саму структуру пула.
-    auto pool_pptr = offset_to_pptr<pjson_pool_pmm>( pool_off );
+    auto pool_pptr = PamManager::pptr_from_byte_offset<pjson_pool_pmm>( pool_off );
     PamManager::template deallocate_typed<pjson_pool_pmm>( pool_pptr );
 }
 

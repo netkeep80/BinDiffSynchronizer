@@ -21,11 +21,11 @@
  * Изменения (Issue #143, План 1.4):
  *   - Внутреннее хранение заменено с uintptr_t на pptr<T>
  *   - Разыменование делегировано операторам pptr<T> (operator*, operator->)
- *   - Удалена зависимость от pmm_resolve/pmm_resolve_const (pam_adapter.h)
+ *   - Удалена зависимость от pmm_resolve/pmm_resolve_const
  *   - sizeof(fptr_pmm<T>) == sizeof(pptr<T>) вместо sizeof(void*)
  *
  * @see pam_pmm.h — фасад PMM для управления ПАП
- * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t (для addr()/set_addr())
+ * @see pam_pmm.h — фасад ПАМ на PMM (pmm_resolve, pptr::byte_offset, pptr_from_byte_offset)
  */
 
 #include "pam_pmm.h"
@@ -72,7 +72,7 @@ template <typename T> class fptr_pmm
         if ( name != nullptr && name[0] != '\0' )
         {
             uintptr_t off = pam_pmm_find_typed<T>( name );
-            _p            = offset_to_pptr<T>( off );
+            _p            = PamManager::pptr_from_byte_offset<T>( off );
         }
     }
 
@@ -107,7 +107,7 @@ template <typename T> class fptr_pmm
     void find( const char* name )
     {
         uintptr_t off = pam_pmm_find_typed<T>( name );
-        _p            = offset_to_pptr<T>( off );
+        _p            = PamManager::pptr_from_byte_offset<T>( off );
     }
 
     // -------------------------------------------------------------------------
@@ -140,7 +140,7 @@ template <typename T> class fptr_pmm
     void New( const char* name = nullptr )
     {
         uintptr_t off = pam_pmm_create<T>( name );
-        _p            = offset_to_pptr<T>( off );
+        _p            = PamManager::pptr_from_byte_offset<T>( off );
     }
 
     /**
@@ -152,7 +152,7 @@ template <typename T> class fptr_pmm
     void NewArray( unsigned count, const char* name = nullptr )
     {
         uintptr_t off = pam_pmm_create_array<T>( count, name );
-        _p            = offset_to_pptr<T>( off );
+        _p            = PamManager::pptr_from_byte_offset<T>( off );
     }
 
     /**
@@ -164,7 +164,7 @@ template <typename T> class fptr_pmm
     {
         if ( !_p.is_null() )
         {
-            uintptr_t obj_off = pptr_to_offset( _p );
+            uintptr_t obj_off = _p.byte_offset();
 
             // Получаем своё смещение внутри ПАП для безопасного обновления.
             uintptr_t self_off = pam_pmm_ptr_to_offset( this );
@@ -189,18 +189,18 @@ template <typename T> class fptr_pmm
     // Обратная совместимость: байтовые смещения
     // -------------------------------------------------------------------------
 
-    /// Получить байтовое смещение объекта в ПАП (через pptr_to_offset).
-    uintptr_t addr() const noexcept { return pptr_to_offset( _p ); }
+    /// Получить байтовое смещение объекта в ПАП (через pptr::byte_offset).
+    uintptr_t addr() const noexcept { return _p.byte_offset(); }
 
-    /// Установить указатель по байтовому смещению (через offset_to_pptr).
-    void set_addr( uintptr_t a ) noexcept { _p = offset_to_pptr<T>( a ); }
+    /// Установить указатель по байтовому смещению (через pptr_from_byte_offset).
+    void set_addr( uintptr_t a ) noexcept { _p = PamManager::pptr_from_byte_offset<T>( a ); }
 
     /// Получить число элементов массива (через реестр PMM).
     uintptr_t count() const
     {
         if ( _p.is_null() )
             return 0;
-        return pam_pmm_get_count( pptr_to_offset( _p ) );
+        return pam_pmm_get_count( _p.byte_offset() );
     }
 
     /// Проверка на null.

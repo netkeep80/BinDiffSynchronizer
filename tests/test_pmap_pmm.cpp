@@ -403,13 +403,13 @@ TEST_CASE( "pmap_pmm<int,int>: insert with self_off", "[pmap_pmm][insert]" )
     PamManager::create( 64 * 1024 );
 
     auto      pm     = PamManager::template allocate_typed<pmap_pmm<int, int>>();
-    uintptr_t pm_off = pptr_to_offset( pm );
+    uintptr_t pm_off = pm.byte_offset();
     std::memset( pm.resolve(), 0, sizeof( pmap_pmm<int, int> ) );
 
     pm->insert( 42, 100, pm_off );
 
     // После insert нужно обновить указатель (может быть realloc)
-    pm = offset_to_pptr<pmap_pmm<int, int>>( pm_off );
+    pm = PamManager::pptr_from_byte_offset<pmap_pmm<int, int>>( pm_off );
 
     REQUIRE( pm->size() == 1u );
     REQUIRE( *pm->find( 42 ) == 100 );

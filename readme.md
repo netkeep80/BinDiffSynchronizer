@@ -94,7 +94,6 @@ C++20 header-only библиотека для работы с JSON в перси
 │   Слой A: PMM                               │
 │   PersistMemoryManager: бэкенд ПАП          │
 │   pam_pmm_config.h: конфигурация PamManager │
-│   pam_adapter.h: pptr<T> ↔ uintptr_t        │
 │   pam_pmm.h: фасад ПАМ на PMM              │
 │   fptr_pmm.h: персистный указатель          │
 └─────────────────────────────────────────────┘
@@ -105,14 +104,14 @@ C++20 header-only библиотека для работы с JSON в перси
 | Файл | Слой | Описание |
 |------|------|----------|
 | `pam_pmm_config.h` | A | Конфигурация менеджера PMM: определяет `PamManager` |
-| `pam_adapter.h` | A | Адаптер pptr<T> ↔ uintptr_t: `pptr_to_offset()`, `offset_to_pptr()`, `pmm_resolve<T>()` |
+| ~~`pam_adapter.h`~~ | A | Удалён (Issue #169, План 1.1): конверсия через `pptr::byte_offset()` и `PamManager::pptr_from_byte_offset<T>()` (PMM v0.43.0); `pmm_resolve<T>()` перенесён в `pam_pmm.h` |
 | ~~`pmem_array_pmm.h`~~ | A | Удалён (Issue #145, План 2.2): используйте `PamManager::parray<T>` напрямую |
 | ~~`pvector_pmm.h`~~ | A | Удалён (Issue #167, План 2.6): используйте `PamManager::parray<T>` напрямую |
 | `pmap_pmm.h` | A | Персистная карта: `pmap_pmm<K,V>` — sorted array на `PamManager::parray<Entry>`, бинарный поиск O(log n); выбран вместо pmm::pmap (AVL-дерево), т.к. `rebuild_free_tree()` при загрузке файла сбрасывает AVL-поля пользовательских деревьев (Issue #166, План 2.3) |
 | ~~`pstring_pmm.h`~~ | A | Удалён (Issue #144, План 2.1): используйте `PamManager::pstring` напрямую |
 | `pstringview_pmm.h` | A | Тонкая обёртка: типовые алиасы `pmm_pstringview`/`pmm_pstringview_pptr`, hooks для персистентности AVL-корня, `pstringview_pmm_reset()`, AVL-обход для поиска; структура `pstringview_pmm` удалена (Issue #167, План 2.5) |
 | `pjson_pool_pmm.h` | C | Пул узлов: `pjson_pool_pmm` = `PamManager::ppool<node>` — чанковая аллокация O(1) через pmm::ppool, node_id-совместимый API (Issue #166, План 2.4) |
-| `pam_pmm.h` | A | Фасад ПАМ на PMM: `pam_pmm_init()`, `pam_pmm_create<T>()`, `pam_pmm_find()`, `pam_pmm_save()`, реестр именованных объектов; корневая структура `pam_pmm_root` через `PamManager::set_root()`/`get_root()` (Issue #163, План 1.2) |
+| `pam_pmm.h` | A | Фасад ПАМ на PMM: `pam_pmm_init()`, `pam_pmm_create<T>()`, `pam_pmm_find()`, `pam_pmm_save()`, `pmm_resolve<T>()`, `pmm_resolve_const<T>()`, реестр именованных объектов; корневая структура `pam_pmm_root` через `PamManager::set_root()`/`get_root()` (Issue #163, План 1.2; Issue #169, План 1.1) |
 | `fptr_pmm.h` | A | Персистный указатель: `fptr_pmm<T>` — тонкая обёртка над `pptr<T>` с `New()`, `Delete()`, `find()` |
 | ~~`pallocator_pmm.h`~~ | A | Удалён (Issue #143, План 1.3): используйте `PamManager::pallocator<T>` напрямую |
 | `deps/pmm/pmm.h` | A | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — бэкенд ПАП |
@@ -615,12 +614,12 @@ pam_pmm_reset(); // очистить всё ПАП и пересоздать м�
 | 3.1 | `node` union — все типы используют PMM (`pstring`, `parray`) | #144, #145 |
 | 3.2 | `pjson_codec` — парсер/сериализатор обновлён | #144, #145 |
 | 3.3 | `pjson_db_pmm` — публичный API обновлён | #144, #145, #166 |
+| 1.1 | Удалён `pam_adapter.h` — конверсия через `pptr::byte_offset()` / `pptr_from_byte_offset<T>()` | #169 |
 
-### Оставшиеся задачи
+### Статус миграции
 
-| Задача | Описание | Блокировка |
-|--------|----------|------------|
-| 1.1 | Удаление `pam_adapter.h` (конверсия `pptr<T>` ↔ `uintptr_t`) | Ожидает pmm 4.4: `pptr::byte_offset()`, `pptr_from_byte_offset<T>()` |
+Все задачи этапов 1–3 выполнены. Миграция уровней A и B на типы PMM завершена.
+Подробности — в [plan.md](plan.md).
 
 ---
 

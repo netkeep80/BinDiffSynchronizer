@@ -7,7 +7,7 @@
  *   - Аллокация и деаллокация памяти
  *   - Типизированная аллокация (allocate_typed<T>)
  *   - Проверка конфигурации PamManager
- *   - Конверсия pptr<T> <-> uintptr_t
+ *   - Конверсия pptr<T> <-> byte offset через pptr::byte_offset() и pptr_from_byte_offset<T>()
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -15,9 +15,6 @@
 
 // Включаем конфигурацию pjson_db для PMM
 #include "pam_pmm_config.h"
-
-// Включаем адаптер pptr <-> uintptr_t
-#include "pam_adapter.h"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ТЕСТЫ ИНТЕГРАЦИИ PMM
@@ -201,35 +198,34 @@ TEST_CASE( "PMM: pptr<T> type alias works", "[pmm]" )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ АДАПТЕРА pptr <-> uintptr_t
+// ТЕСТЫ pptr::byte_offset() и pptr_from_byte_offset<T>() (PMM v0.43.0, Phase 4.4)
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE( "pam_adapter: pptr_to_offset for null pptr returns 0", "[pmm][adapter]" )
+TEST_CASE( "PMM byte_offset: null pptr returns 0", "[pmm][byte_offset]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
-    // Null pptr должен конвертироваться в 0
+    // Null pptr должен возвращать byte_offset == 0
     pjson_pptr<int> null_p{};
     REQUIRE( null_p.is_null() );
 
-    uintptr_t off = pjson::pptr_to_offset( null_p );
-    REQUIRE( off == 0 );
+    REQUIRE( null_p.byte_offset() == 0 );
 
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: offset_to_pptr for 0 returns null pptr", "[pmm][adapter]" )
+TEST_CASE( "PMM byte_offset: pptr_from_byte_offset for 0 returns null pptr", "[pmm][byte_offset]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
     // Смещение 0 должно конвертироваться в null pptr
-    auto p = pjson::offset_to_pptr<int>( 0 );
+    auto p = pjson::PamManager::pptr_from_byte_offset<int>( 0 );
     REQUIRE( p.is_null() );
 
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: roundtrip pptr -> offset -> pptr", "[pmm][adapter]" )
+TEST_CASE( "PMM byte_offset: roundtrip pptr -> byte_offset -> pptr_from_byte_offset", "[pmm][byte_offset]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -239,12 +235,12 @@ TEST_CASE( "pam_adapter: roundtrip pptr -> offset -> pptr", "[pmm][adapter]" )
     *p_orig = 42;
 
     // Конвертируем в байтовое смещение
-    uintptr_t off = pjson::pptr_to_offset( p_orig );
+    std::size_t off = p_orig.byte_offset();
     REQUIRE( off != 0 );
-    REQUIRE( pjson::is_aligned_offset( off ) );
+    REQUIRE( off % pjson::PamManager::address_traits::granule_size == 0 );
 
     // Конвертируем обратно в pptr
-    auto p_restored = pjson::offset_to_pptr<int>( off );
+    auto p_restored = pjson::PamManager::pptr_from_byte_offset<int>( off );
     REQUIRE_FALSE( p_restored.is_null() );
 
     // Проверяем что оба указывают на один и тот же объект
@@ -255,7 +251,7 @@ TEST_CASE( "pam_adapter: roundtrip pptr -> offset -> pptr", "[pmm][adapter]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: multiple allocations have different offsets", "[pmm][adapter]" )
+TEST_CASE( "PMM byte_offset: multiple allocations have different offsets", "[pmm][byte_offset]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -269,9 +265,9 @@ TEST_CASE( "pam_adapter: multiple allocations have different offsets", "[pmm][ad
     *p3 = 300;
 
     // Конвертируем в смещения
-    uintptr_t off1 = pjson::pptr_to_offset( p1 );
-    uintptr_t off2 = pjson::pptr_to_offset( p2 );
-    uintptr_t off3 = pjson::pptr_to_offset( p3 );
+    std::size_t off1 = p1.byte_offset();
+    std::size_t off2 = p2.byte_offset();
+    std::size_t off3 = p3.byte_offset();
 
     // Все смещения должны быть разными
     REQUIRE( off1 != off2 );
@@ -279,14 +275,15 @@ TEST_CASE( "pam_adapter: multiple allocations have different offsets", "[pmm][ad
     REQUIRE( off1 != off3 );
 
     // Все должны быть выровнены
-    REQUIRE( pjson::is_aligned_offset( off1 ) );
-    REQUIRE( pjson::is_aligned_offset( off2 ) );
-    REQUIRE( pjson::is_aligned_offset( off3 ) );
+    constexpr auto gs = pjson::PamManager::address_traits::granule_size;
+    REQUIRE( off1 % gs == 0 );
+    REQUIRE( off2 % gs == 0 );
+    REQUIRE( off3 % gs == 0 );
 
     // Конвертируем обратно и проверяем значения
-    REQUIRE( *pjson::offset_to_pptr<int>( off1 ) == 100 );
-    REQUIRE( *pjson::offset_to_pptr<int>( off2 ) == 200 );
-    REQUIRE( *pjson::offset_to_pptr<int>( off3 ) == 300 );
+    REQUIRE( *pjson::PamManager::pptr_from_byte_offset<int>( off1 ) == 100 );
+    REQUIRE( *pjson::PamManager::pptr_from_byte_offset<int>( off2 ) == 200 );
+    REQUIRE( *pjson::PamManager::pptr_from_byte_offset<int>( off3 ) == 300 );
 
     pjson::PamManager::template deallocate_typed<int>( p1 );
     pjson::PamManager::template deallocate_typed<int>( p2 );
@@ -294,7 +291,7 @@ TEST_CASE( "pam_adapter: multiple allocations have different offsets", "[pmm][ad
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: offset is granule_index * granule_size", "[pmm][adapter]" )
+TEST_CASE( "PMM byte_offset: byte_offset == granule_index * granule_size", "[pmm][byte_offset]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -305,61 +302,26 @@ TEST_CASE( "pam_adapter: offset is granule_index * granule_size", "[pmm][adapter
     auto granule_idx = p.offset();
     REQUIRE( granule_idx != 0 );
 
-    // Получаем байтовое смещение через адаптер
-    uintptr_t byte_off = pjson::pptr_to_offset( p );
+    // Получаем байтовое смещение через byte_offset()
+    std::size_t byte_off = p.byte_offset();
 
     // Проверяем формулу: byte_off = granule_idx * granule_size
-    REQUIRE( byte_off == static_cast<uintptr_t>( granule_idx ) * pjson::PMM_GRANULE_SIZE );
+    constexpr auto gs = pjson::PamManager::address_traits::granule_size;
+    REQUIRE( byte_off == static_cast<std::size_t>( granule_idx ) * gs );
 
     pjson::PamManager::template deallocate_typed<double>( p );
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: granule_size constant", "[pmm][adapter]" )
+TEST_CASE( "PMM byte_offset: granule_size constant", "[pmm][byte_offset]" )
 {
     // Проверяем что размер гранулы соответствует конфигурации
     // CacheManagerConfig использует DefaultAddressTraits с 16-байтовой гранулой
-    REQUIRE( pjson::PMM_GRANULE_SIZE == 16 );
-    REQUIRE( pjson::get_granule_size() == 16 );
+    constexpr auto gs = pjson::PamManager::address_traits::granule_size;
+    REQUIRE( gs == 16 );
 }
 
-TEST_CASE( "pam_adapter: is_aligned_offset", "[pmm][adapter]" )
-{
-    // 0 всегда выровнен
-    REQUIRE( pjson::is_aligned_offset( 0 ) );
-
-    // Кратные размеру гранулы выровнены
-    REQUIRE( pjson::is_aligned_offset( 16 ) );
-    REQUIRE( pjson::is_aligned_offset( 32 ) );
-    REQUIRE( pjson::is_aligned_offset( 64 ) );
-    REQUIRE( pjson::is_aligned_offset( 1024 ) );
-
-    // Не кратные — не выровнены
-    REQUIRE_FALSE( pjson::is_aligned_offset( 1 ) );
-    REQUIRE_FALSE( pjson::is_aligned_offset( 15 ) );
-    REQUIRE_FALSE( pjson::is_aligned_offset( 17 ) );
-    REQUIRE_FALSE( pjson::is_aligned_offset( 100 ) );
-}
-
-TEST_CASE( "pam_adapter: align_offset_up", "[pmm][adapter]" )
-{
-    // 0 остаётся 0
-    REQUIRE( pjson::align_offset_up( 0 ) == 0 );
-
-    // Уже выровненные значения не меняются
-    REQUIRE( pjson::align_offset_up( 16 ) == 16 );
-    REQUIRE( pjson::align_offset_up( 32 ) == 32 );
-    REQUIRE( pjson::align_offset_up( 64 ) == 64 );
-
-    // Не выровненные округляются вверх
-    REQUIRE( pjson::align_offset_up( 1 ) == 16 );
-    REQUIRE( pjson::align_offset_up( 15 ) == 16 );
-    REQUIRE( pjson::align_offset_up( 17 ) == 32 );
-    REQUIRE( pjson::align_offset_up( 31 ) == 32 );
-    REQUIRE( pjson::align_offset_up( 33 ) == 48 );
-}
-
-TEST_CASE( "pam_adapter: works with struct types", "[pmm][adapter]" )
+TEST_CASE( "PMM byte_offset: works with struct types", "[pmm][byte_offset]" )
 {
     pjson::PamManager::create( 64 * 1024 );
 
@@ -378,12 +340,12 @@ TEST_CASE( "pam_adapter: works with struct types", "[pmm][adapter]" )
     p->value = 3.14;
     std::strcpy( p->name, "test" );
 
-    // Конвертируем в uintptr_t (как node_id)
-    uintptr_t node_id = pjson::pptr_to_offset( p );
-    REQUIRE( node_id != 0 );
+    // Конвертируем в byte offset (как node_id)
+    std::size_t node_off = p.byte_offset();
+    REQUIRE( node_off != 0 );
 
-    // Восстанавливаем из node_id
-    auto p2 = pjson::offset_to_pptr<TestNode>( node_id );
+    // Восстанавливаем из byte offset
+    auto p2 = pjson::PamManager::pptr_from_byte_offset<TestNode>( node_off );
     REQUIRE_FALSE( p2.is_null() );
 
     // Проверяем данные
@@ -395,11 +357,11 @@ TEST_CASE( "pam_adapter: works with struct types", "[pmm][adapter]" )
     pjson::PamManager::destroy();
 }
 
-TEST_CASE( "pam_adapter: pmm_index_type alias", "[pmm][adapter]" )
+TEST_CASE( "PMM byte_offset: index_type alias", "[pmm][byte_offset]" )
 {
-    // Проверяем что pmm_index_type соответствует типу индекса из pptr
-    static_assert( std::is_same_v<pjson::pmm_index_type, uint32_t>,
-                   "pmm_index_type should be uint32_t for CacheManagerConfig" );
+    // Проверяем что index_type соответствует типу индекса из pptr
+    static_assert( std::is_same_v<pjson::PamManager::index_type, uint32_t>,
+                   "index_type should be uint32_t for CacheManagerConfig" );
 
-    SUCCEED( "pmm_index_type is uint32_t" );
+    SUCCEED( "PamManager::index_type is uint32_t" );
 }
