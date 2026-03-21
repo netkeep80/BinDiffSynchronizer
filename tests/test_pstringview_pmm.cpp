@@ -169,7 +169,7 @@ TEST_CASE( "pam_intern_string: many distinct strings are all interned correctly"
     pjson::pam_intern_result results[N];
     for ( int i = 0; i < N; i++ )
     {
-        results[i] = pjson::pam_intern_string( words[i] );
+        results[i]    = pjson::pam_intern_string( words[i] );
         const char* s = pjson::pmm_resolve<char>( results[i].chars_offset );
         REQUIRE( std::strcmp( s, words[i] ) == 0 );
     }
@@ -307,7 +307,7 @@ TEST_CASE( "pam_intern_string: survives PAM Save and Load (persistence)", "[pstr
         pjson::pstringview_pmm_reset();
         pjson::pam_pmm_init( fname );
 
-        auto r = pjson::pam_intern_string( "persistent_key" );
+        auto        r = pjson::pam_intern_string( "persistent_key" );
         const char* s = pjson::pmm_resolve<char>( r.chars_offset );
         REQUIRE( std::strcmp( s, "persistent_key" ) == 0 );
         saved_offset = r.chars_offset;
