@@ -572,3 +572,134 @@ TEST_CASE( "pjson_codec: from_string handles null pointer", "[pjson_codec][from_
     node_view v{ fv.addr() };
     REQUIRE( v.is_null() );
 }
+
+// ---------------------------------------------------------------------------
+// Тесты валидации Unicode codepoints (Этап 8.3, Проблема 12)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "pjson_codec: valid BMP codepoint \\u0041 (A)", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    REQUIRE( node_from_string( "\"\\u0041\"", fv.addr() ) );
+    node_view v{ fv.addr() };
+    REQUIRE( v.is_string() );
+    REQUIRE( v.as_string() == "A" );
+}
+
+TEST_CASE( "pjson_codec: valid BMP codepoint \\u00E9 (é)", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    REQUIRE( node_from_string( "\"\\u00E9\"", fv.addr() ) );
+    node_view v{ fv.addr() };
+    REQUIRE( v.is_string() );
+    // é в UTF-8: 0xC3 0xA9
+    REQUIRE( v.as_string() == "\xC3\xA9" );
+}
+
+TEST_CASE( "pjson_codec: valid surrogate pair \\uD83D\\uDE00 (emoji)", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    // U+1F600 (😀) = surrogate pair D83D DE00
+    REQUIRE( node_from_string( "\"\\uD83D\\uDE00\"", fv.addr() ) );
+    node_view v{ fv.addr() };
+    REQUIRE( v.is_string() );
+    // U+1F600 в UTF-8: F0 9F 98 80
+    REQUIRE( v.as_string() == "\xF0\x9F\x98\x80" );
+}
+
+TEST_CASE( "pjson_codec: lone high surrogate \\uD800 is rejected", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    // Одиночный высокий суррогат без парного низкого — невалидный Unicode.
+    REQUIRE( !node_from_string( "\"\\uD800\"", fv.addr() ) );
+}
+
+TEST_CASE( "pjson_codec: lone high surrogate \\uDBFF is rejected", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    REQUIRE( !node_from_string( "\"\\uDBFF\"", fv.addr() ) );
+}
+
+TEST_CASE( "pjson_codec: lone low surrogate \\uDC00 is rejected", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    // Одиночный низкий суррогат — невалидный Unicode.
+    REQUIRE( !node_from_string( "\"\\uDC00\"", fv.addr() ) );
+}
+
+TEST_CASE( "pjson_codec: lone low surrogate \\uDFFF is rejected", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    REQUIRE( !node_from_string( "\"\\uDFFF\"", fv.addr() ) );
+}
+
+TEST_CASE( "pjson_codec: high surrogate followed by non-surrogate is rejected", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    // Высокий суррогат + обычный символ (не низкий суррогат).
+    REQUIRE( !node_from_string( "\"\\uD800\\u0041\"", fv.addr() ) );
+}
+
+TEST_CASE( "pjson_codec: valid CJK codepoint \\u4E16 (世)", "[pjson_codec][from_string][unicode]" )
+{
+    ensure_pmm();
+    fptr<node> fv;
+    fv.New();
+    REQUIRE( node_from_string( "\"\\u4E16\"", fv.addr() ) );
+    node_view v{ fv.addr() };
+    REQUIRE( v.is_string() );
+    // 世 (U+4E16) в UTF-8: E4 B8 96
+    REQUIRE( v.as_string() == "\xE4\xB8\x96" );
+}
+
+TEST_CASE( "pjson_codec: encode_utf8 rejects cp > 0x10FFFF directly", "[pjson_codec][unicode]" )
+{
+    // Прямой тест функции encode_utf8 для значений за пределами Unicode.
+    std::string out;
+    REQUIRE( pjson_codec_detail::encode_utf8( out, 0x10FFFFu ) ); // максимальный допустимый
+    REQUIRE( !out.empty() );
+
+    std::string out2;
+    REQUIRE( !pjson_codec_detail::encode_utf8( out2, 0x110000u ) ); // первый недопустимый
+    REQUIRE( out2.empty() );
+
+    std::string out3;
+    REQUIRE( !pjson_codec_detail::encode_utf8( out3, 0xFFFFFFFFu ) ); // максимальный unsigned
+    REQUIRE( out3.empty() );
+}
+
+TEST_CASE( "pjson_codec: encode_utf8 rejects lone surrogates directly", "[pjson_codec][unicode]" )
+{
+    std::string out;
+    REQUIRE( !pjson_codec_detail::encode_utf8( out, 0xD800u ) );
+    REQUIRE( out.empty() );
+
+    std::string out2;
+    REQUIRE( !pjson_codec_detail::encode_utf8( out2, 0xDFFFu ) );
+    REQUIRE( out2.empty() );
+
+    // Граничные значения вокруг суррогатного диапазона — допустимы.
+    std::string out3;
+    REQUIRE( pjson_codec_detail::encode_utf8( out3, 0xD7FFu ) );
+    REQUIRE( !out3.empty() );
+
+    std::string out4;
+    REQUIRE( pjson_codec_detail::encode_utf8( out4, 0xE000u ) );
+    REQUIRE( !out4.empty() );
+}

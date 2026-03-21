@@ -139,7 +139,7 @@ int main() {
 | `pjson_db_pmm.h` | D | Менеджер персистной JSON-БД: path-адресация, `put`/`get`/`erase`, `$ref`, метрики, поиск, клонирование |
 | `deps/pmm/pmm.h` | A | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — бэкенд ПАП |
 | `main.cpp` | — | Демонстрационная программа |
-| `tests/` | — | Тесты на Catch2 (630 тестов, ~360 000 assertion) |
+| `tests/` | — | Тесты на Catch2 (641 тест, ~360 000 assertion) |
 | `CMakeLists.txt` | — | Система сборки (CMake 3.16+, C++20) |
 
 ---
