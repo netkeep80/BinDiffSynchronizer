@@ -1121,7 +1121,7 @@ inline node_id node_clone( node_id src_id )
                     break;
                 auto arr_copy = dst->binary_val;
                 arr_copy.resize( bin_size );
-                dst             = pmm_resolve<node>( dst_id );
+                dst = pmm_resolve<node>( dst_id );
                 if ( dst == nullptr )
                     break;
                 dst->binary_val = arr_copy;
