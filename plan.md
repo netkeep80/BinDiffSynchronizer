@@ -27,13 +27,9 @@
 
 ## Code review: текущие проблемы реализации
 
-### Проблема 1: Мёртвый код parse_object() в pjson_codec.h
+### ~~Проблема 1: Мёртвый код parse_object() в pjson_codec.h~~ ✅
 
-**Файл:** `pjson_codec.h`, строки 530–636
-
-Функция `parse_object()` содержит заглушку `return false` (строка 635) и никогда не используется — вызывается только `parse_object_v2()`. Мёртвый код размером ~100 строк затрудняет чтение.
-
-**Решение:** Удалить `parse_object()`, переименовать `parse_object_v2()` → `parse_object()`.
+**Решено в Этапе 8.1:** Удалена мёртвая `parse_object()` (~100 строк), `parse_object_v2()` переименована в `parse_object()`.
 
 ---
 
@@ -210,7 +206,7 @@ bool is_number() const { return is_integer() || is_uinteger() || is_real(); }
 
 | # | Проблема | Файл | Сложность | Влияние |
 |---|----------|------|-----------|---------|
-| 1 | Мёртвый код parse_object() | pjson_codec.h | Низкая | Чистота кода |
+| ~~1~~ | ~~Мёртвый код parse_object()~~ | ~~pjson_codec.h~~ | ~~Низкая~~ | ✅ |
 | 8 | Hardcoded max_depth = 32 | pjson_node.h | Низкая | Читаемость |
 | 12 | Нет валидации UTF-8 > 0x10FFFF | pjson_codec.h | Низкая | Корректность |
 | 4 | Утечка временных узлов метрик | pjson_db_pmm.h | Средняя | Стабильность |
@@ -239,7 +235,7 @@ bool is_number() const { return is_integer() || is_uinteger() || is_real(); }
 
 ```
 Этап 8: Приоритет 1 — критичные / простые исправления
-  8.1  Удалить parse_object(), переименовать parse_object_v2() → parse_object()
+  8.1  ✅ Удалить parse_object(), переименовать parse_object_v2() → parse_object()
   8.2  Вынести PJSON_MAX_REF_DEPTH = 32
   8.3  Добавить валидацию cp > 0x10FFFF
   8.4  Исправить утечку временных узлов метрик
@@ -265,6 +261,7 @@ bool is_number() const { return is_integer() || is_uinteger() || is_real(); }
 
 | Дата | Изменение |
 |------|-----------|
+| 2026-03-21 | Этап 8.1: удалён мёртвый код parse_object(), переименована parse_object_v2() → parse_object() (Issue #185) |
 | 2026-03-21 | Переписан: результаты code review, анализ проблем, новый план рефакторинга (Issue #199) |
 | 2026-03-20 | Этап 7: CRTP-база pjson_iterator_base (Issue #184) |
 | 2026-03-19 | Этап 6: parray::insert/erase (Issue #183) |
