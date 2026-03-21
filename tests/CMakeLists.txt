@@ -37,6 +37,7 @@ set(TEST_SOURCES
     test_pjson_db_batch.cpp
     test_regression_pmm_types.cpp
     test_compat_save_load.cpp
+    test_pjson_ref_stability.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})
