@@ -138,19 +138,9 @@ db.get("/config/a/b");  // ищет config → "a" → "b" вместо config �
 
 ---
 
-### Проблема 8: Hardcoded максимальная глубина $ref
+### ~~Проблема 8: Hardcoded максимальная глубина $ref~~ ✅
 
-**Файл:** `pjson_node.h`, метод `node_view::deref()`, строка 510
-
-Максимальная глубина разыменования $ref захардкожена как `32`:
-
-```cpp
-node_view deref( bool recursive = true, uintptr_t max_depth = 32 ) const
-```
-
-Магическое число без обоснования.
-
-**Решение:** Вынести в именованную константу `PJSON_MAX_REF_DEPTH = 32` с документацией.
+**Решено в Этапе 8.2:** Магическое число `32` вынесено в именованную константу `PJSON_MAX_REF_DEPTH` с документацией. Константа используется в `node_view::deref()` и `pjson_db_pmm::resolve_ref()`.
 
 ---
 
@@ -207,7 +197,7 @@ bool is_number() const { return is_integer() || is_uinteger() || is_real(); }
 | # | Проблема | Файл | Сложность | Влияние |
 |---|----------|------|-----------|---------|
 | ~~1~~ | ~~Мёртвый код parse_object()~~ | ~~pjson_codec.h~~ | ~~Низкая~~ | ✅ |
-| 8 | Hardcoded max_depth = 32 | pjson_node.h | Низкая | Читаемость |
+| ~~8~~ | ~~Hardcoded max_depth = 32~~ | ~~pjson_node.h~~ | ~~Низкая~~ | ✅ |
 | 12 | Нет валидации UTF-8 > 0x10FFFF | pjson_codec.h | Низкая | Корректность |
 | 4 | Утечка временных узлов метрик | pjson_db_pmm.h | Средняя | Стабильность |
 
@@ -236,7 +226,7 @@ bool is_number() const { return is_integer() || is_uinteger() || is_real(); }
 ```
 Этап 8: Приоритет 1 — критичные / простые исправления
   8.1  ✅ Удалить parse_object(), переименовать parse_object_v2() → parse_object()
-  8.2  Вынести PJSON_MAX_REF_DEPTH = 32
+  8.2  ✅ Вынести PJSON_MAX_REF_DEPTH = 32
   8.3  Добавить валидацию cp > 0x10FFFF
   8.4  Исправить утечку временных узлов метрик
        → тесты: все 630 тестов проходят
@@ -261,6 +251,7 @@ bool is_number() const { return is_integer() || is_uinteger() || is_real(); }
 
 | Дата | Изменение |
 |------|-----------|
+| 2026-03-21 | Этап 8.2: магическое число 32 вынесено в константу PJSON_MAX_REF_DEPTH (Issue #186) |
 | 2026-03-21 | Этап 8.1: удалён мёртвый код parse_object(), переименована parse_object_v2() → parse_object() (Issue #185) |
 | 2026-03-21 | Переписан: результаты code review, анализ проблем, новый план рефакторинга (Issue #199) |
 | 2026-03-20 | Этап 7: CRTP-база pjson_iterator_base (Issue #184) |
