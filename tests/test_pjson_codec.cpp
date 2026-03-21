@@ -588,7 +588,7 @@ TEST_CASE( "pjson_codec: valid BMP codepoint \\u0041 (A)", "[pjson_codec][from_s
     REQUIRE( v.as_string() == "A" );
 }
 
-TEST_CASE( "pjson_codec: valid BMP codepoint \\u00E9 (é)", "[pjson_codec][from_string][unicode]" )
+TEST_CASE( "pjson_codec: valid BMP codepoint \\u00E9 (e-acute)", "[pjson_codec][from_string][unicode]" )
 {
     ensure_pmm();
     fptr<node> fv;
@@ -656,7 +656,7 @@ TEST_CASE( "pjson_codec: high surrogate followed by non-surrogate is rejected", 
     REQUIRE( !node_from_string( "\"\\uD800\\u0041\"", fv.addr() ) );
 }
 
-TEST_CASE( "pjson_codec: valid CJK codepoint \\u4E16 (世)", "[pjson_codec][from_string][unicode]" )
+TEST_CASE( "pjson_codec: valid CJK codepoint \\u4E16 (CJK-shi)", "[pjson_codec][from_string][unicode]" )
 {
     ensure_pmm();
     fptr<node> fv;
