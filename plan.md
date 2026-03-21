@@ -356,6 +356,8 @@ pmm Фаза 3 (параллельно с планированием мигра�
                                     4.3 Бенчмарки                       ✅
                                          │
                                     4.4 Стабильность node_id (resize)   ✅
+                                         │
+                                    Этап 7 (унификация итераторов)     ✅
 ```
 
 Все этапы 1, 2 и 3 выполнены. Обновление типов в этапе 3 было выполнено
@@ -364,9 +366,11 @@ pmm Фаза 3 (параллельно с планированием мигра�
 `PersistMemoryManager::pptr_from_byte_offset<T>()`).
 Задача 4.1 выполнена: все тесты проходят, добавлены 32 регрессионных теста на граничные случаи.
 
-**Все задачи выполнены.** Этапы 1–5 и 4.1–4.4 завершены. Задача 5.10 выполнена (Issue #182).
+**Все задачи выполнены.** Этапы 1–7 и 4.1–4.4 завершены. Задача 5.10 выполнена (Issue #182).
 
 **Этап 5 (устранение дублирования кода) выполнен:** задачи 5.1–5.9 (Issue #171), задача 5.10 (Issue #182).
+
+**Этап 7 (унификация итераторов) выполнен:** задача 7.1 (Issue #184).
 
 ---
 
@@ -743,6 +747,65 @@ node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) con
 | `pjson_db_pmm.h` | `parray::erase` (2 места) | ~15 |
 | **Итого** | | **~43 строки** |
 
+## Этап 7: Унификация итераторов и диапазонов (Issue #184)
+
+### 7.1 CRTP-база итераторов pjson_iterator_base ✅
+
+**Выполнено (Issue #184):** `node_view_iterator` и `object_iterator` унифицированы через CRTP-базу `pjson_iterator_base<Derived, Value>`.
+
+**Файл:** `pjson_node.h`
+
+**Проблема:** `node_view_iterator` и `object_iterator` содержали идентичный boilerplate (~30 строк каждый):
+- `iterator_category`, `value_type`, `difference_type`, `pointer`, `reference` — идентичные typedef-ы
+- `operator++()` / `operator++(int)` — идентичная реализация
+- `operator==` / `operator!=` — идентичная реализация
+- Единственное различие — `operator*()` (разыменование)
+
+Аналогичный паттерн — дублирование `object_items_range` и `array_range` (идентичные структуры с `node_id` + `uintptr_t sz` + `begin()`/`end()`).
+
+**Решение:**
+1. CRTP-шаблон `pjson_iterator_base<Derived, Value>`:
+   - Содержит общие поля `nid` (node_id контейнера) и `idx` (текущий индекс)
+   - Реализует `operator++`, `operator++(int)`, `operator==`, `operator!=`
+   - Derived-классы определяют только `operator*() const`
+2. Шаблонный диапазон `pjson_range<Iterator>`:
+   - Заменяет `object_items_range` и `array_range`
+   - `using object_items_range = pjson_range<object_iterator>`
+   - `using array_range = pjson_range<node_view_iterator>`
+
+```cpp
+// CRTP-база итераторов
+template <typename Derived, typename Value> struct pjson_iterator_base {
+    node_id nid; uintptr_t idx;
+    // operator++, operator++(int), operator==, operator!=
+};
+
+// Конкретные итераторы — только operator*()
+struct node_view_iterator : pjson_iterator_base<node_view_iterator, node_view> {
+    using pjson_iterator_base::pjson_iterator_base;
+    node_view operator*() const { return node_view{nid}.at(idx); }
+};
+struct object_iterator : pjson_iterator_base<object_iterator, object_item> {
+    using pjson_iterator_base::pjson_iterator_base;
+    object_item operator*() const { ... }
+};
+
+// Шаблонный диапазон
+template <typename Iterator> struct pjson_range { ... };
+using object_items_range = pjson_range<object_iterator>;
+using array_range        = pjson_range<node_view_iterator>;
+```
+
+**Экономия:** ~22 строки (pjson_node.h: 1391 → 1369 строк).
+Удалены 4 дублирования (operator++, operator++(int), operator==, operator!=) + 2 дублирования range-структур.
+
+### Сводка Этапа 7
+
+| Файл | Изменение | Строк удалено |
+|------|-----------|---------------|
+| `pjson_node.h` | CRTP-база `pjson_iterator_base` + `pjson_range<Iterator>` | ~22 |
+| **Итого** | | **~22 строки** |
+
 ---
 
 *Документ создан 2026-03-19 на основе анализа BinDiffSynchronizer и плана pmm Фазы 3.*
@@ -755,3 +818,4 @@ node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) con
 *Обновлён 2026-03-21: задача 4.4 — тестирование стабильности node_id ссылок после resize array/object (Issue #194).*
 *Обновлён 2026-03-21: задача 5.10 — объединение get() и _ensure_path() в общий _walk_path<CreateMode>() (Issue #182).*
 *Обновлён 2026-03-21: Этап 6 — рефакторинг на parray::insert/erase (Issue #183, PMM PR #234).*
+*Обновлён 2026-03-21: Этап 7 — унификация итераторов через CRTP-базу pjson_iterator_base и шаблонный pjson_range (Issue #184).*
