@@ -87,9 +87,9 @@ C++20 header-only библиотека для работы с JSON в перси
 │   Слой C: pjson_codec                       │
 │   (парсинг, сериализация, base64)           │
 ├─────────────────────────────────────────────┤
-│   Слой B: pvector_pmm + pmap_pmm             │
+│   Слой B: pmap_pmm                            │
 │   + pstringview_pmm (тонкая обёртка)        │
-│   (readonly/readwrite строки, массивы)       │
+│   (sorted map, readonly строки)             │
 ├─────────────────────────────────────────────┤
 │   Слой A: PMM                               │
 │   PersistMemoryManager: бэкенд ПАП          │
@@ -107,7 +107,7 @@ C++20 header-only библиотека для работы с JSON в перси
 | `pam_pmm_config.h` | A | Конфигурация менеджера PMM: определяет `PamManager` |
 | `pam_adapter.h` | A | Адаптер pptr<T> ↔ uintptr_t: `pptr_to_offset()`, `offset_to_pptr()`, `pmm_resolve<T>()` |
 | ~~`pmem_array_pmm.h`~~ | A | Удалён (Issue #145, План 2.2): используйте `PamManager::parray<T>` напрямую |
-| `pvector_pmm.h` | A | Динамический массив: `pvector_pmm<T>` — обёртка над `PamManager::parray<T>` |
+| ~~`pvector_pmm.h`~~ | A | Удалён (Issue #167, План 2.6): используйте `PamManager::parray<T>` напрямую |
 | `pmap_pmm.h` | A | Персистная карта: `pmap_pmm<K,V>` — sorted array на `PamManager::parray<Entry>`, бинарный поиск O(log n); выбран вместо pmm::pmap (AVL-дерево), т.к. `rebuild_free_tree()` при загрузке файла сбрасывает AVL-поля пользовательских деревьев (Issue #166, План 2.3) |
 | ~~`pstring_pmm.h`~~ | A | Удалён (Issue #144, План 2.1): используйте `PamManager::pstring` напрямую |
 | `pstringview_pmm.h` | A | Тонкая обёртка: типовые алиасы `pmm_pstringview`/`pmm_pstringview_pptr`, hooks для персистентности AVL-корня, `pstringview_pmm_reset()`, AVL-обход для поиска; структура `pstringview_pmm` удалена (Issue #167, План 2.5) |

@@ -175,6 +175,17 @@ JSON-базу данных поверх PMM. Текущая архитектур
 - Тесты переведены на `pam_intern_string()` / `pam_search_strings()` / `pam_all_strings()`
 - Все 587 тестов проходят
 
+### 2.6 Удаление pvector_pmm ✅
+
+**Выполнено (Issue #167):** `pvector_pmm.h` удалён — обёртка над `PamManager::parray<T>` больше не нужна.
+
+**Что сделано:**
+- Удалён `pvector_pmm.h` — тонкая обёртка (210 строк) над `PamManager::parray<T>` с собственными итераторами
+- `pjson_node.h`: удалён мёртвый `#include "pvector_pmm.h"` (тип `pvector_pmm` не использовался в production-коде после задачи 2.2); удалён дублирующий `#include "pam_adapter.h"`
+- `tests/test_pvector.cpp`: переписан — тесты используют `PamManager::parray<T>` напрямую (capacity growth, front/back через data(), pointer iteration, double type, clear+push_back, pop_back on empty)
+- `tests/test_pmem_array_pmm.cpp`: удалены 7 тестов `pvector_pmm` (layout, push_back, front/back, pop_back, clear, iterators, capacity) — их функциональность покрыта тестами parray
+- Все 576 тестов проходят
+
 ---
 
 ## Этап 3: Обновление уровней C и D
