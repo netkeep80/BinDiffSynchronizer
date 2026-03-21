@@ -179,8 +179,8 @@ class pjson_db_pmm
         if ( _is_metrics_path( path ) )
             return _get_metrics( path );
 
-        node_error err  = node_error::none;
-        node_id    cur  = _walk_path<false>( path, deref_refs, &err );
+        node_error err = node_error::none;
+        node_id    cur = _walk_path<false>( path, deref_refs, &err );
         if ( cur == 0 )
             return node_view_error( err );
 
@@ -590,8 +590,7 @@ class pjson_db_pmm
     /// @param deref_refs  разыменовывать ли $ref-узлы при обходе
     /// @param out_err     (только read) указатель на код ошибки (может быть nullptr)
     /// @return node_id целевого узла или 0 при ошибке
-    template <bool CreateMode>
-    node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) const
+    template <bool CreateMode> node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) const
     {
         auto fail = [&]( node_error e ) -> node_id
         {
@@ -923,10 +922,7 @@ class pjson_db_pmm
         return node_view{ tmp_off };
     }
 
-    node_id _ensure_path( const char* path )
-    {
-        return _walk_path<true>( path, true, nullptr );
-    }
+    node_id _ensure_path( const char* path ) { return _walk_path<true>( path, true, nullptr ); }
 
     // -----------------------------------------------------------------------
     // Вспомогательные методы: удаление узлов
