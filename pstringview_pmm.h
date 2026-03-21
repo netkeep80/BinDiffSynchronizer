@@ -1,21 +1,25 @@
 #pragma once
 /**
  * @file pstringview_pmm.h
- * @brief Каноническая реализация pstringview на базе PersistMemoryManager.
+ * @brief Тонкая обёртка над PMM pstringview: типовые алиасы, сброс словаря, AVL-обход.
  *
- * Содержит PMM-версию персистной интернированной read-only строки,
- * а также полный API интернирования и поиска строк в словаре ПАП.
- *
- * PMM v0.21.0 уже содержит оптимизированный pstringview:
+ * PMM v0.21.0+ содержит оптимизированный pstringview:
  *   - Single-block хранение (длина + строка в одном блоке)
  *   - AVL-дерево для интернирования (O(log n) поиск)
  *   - Блоки заблокированы навечно (не освобождаются)
  *
- * Ключевые особенности:
- *   - Read-only: строковые данные никогда не изменяются после создания
- *   - Интернирование: одинаковые строки → один pptr
- *   - Сравнение O(1): через сравнение pptr (гранульных индексов)
+ * Этот файл предоставляет:
+ *   - pmm_pstringview / pmm_pstringview_pptr — типовые алиасы
+ *   - pstringview_pmm_reset() — сброс словаря (для тестов)
+ *   - Hooks для ленивого восстановления/сохранения корня AVL-дерева из ПАП
+ *   - detail::pstringview_pmm_inorder() — обход AVL-дерева (для pam_search_strings)
+ *   - pstringview_manager — менеджер таблицы интернирования
  *
+ * Структура pstringview_pmm удалена (Issue #167, План 2.5):
+ *   Интернирование — через pam_intern_string() из pam_pmm.h.
+ *   Поиск — через pam_search_strings() / pam_all_strings() из pam_pmm.h.
+ *
+ * @see pam_pmm.h — API словаря строк (pam_intern_string, pam_search_strings)
  * @see pam_adapter.h — адаптер pptr<T> <-> uintptr_t
  */
 
@@ -78,179 +82,17 @@ inline void pstringview_pmm_reset()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// pstringview_pmm — каноническая реализация
+// Обход AVL-дерева интернированных строк PMM
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * @brief Облегчённая структура для хранения ссылки на интернированную строку PMM.
- *
- * Использует внутренний формат PMM (гранульный индекс вместо chars_offset + length).
- *
- * Для полной совместимости с существующим кодом поддерживает поля:
- *   - length: длина строки (кэшируется)
- *   - chars_offset: байтовое смещение символьных данных в ПАП
- */
-struct pstringview_pmm
-{
-    uintptr_t length;       ///< Длина строки (без нулевого терминатора)
-    uintptr_t chars_offset; ///< Байтовое смещение строковых данных в ПАП
-
-    /**
-     * @brief Интернировать строку s.
-     *
-     * Ищет s в AVL-дереве PMM. Если найдена — устанавливает chars_offset на существующий блок.
-     * Если нет — создаёт новый блок pstringview в ПАП, добавляет в дерево.
-     *
-     * @param s C-строка для интернирования. nullptr трактуется как "".
-     */
-    void intern( const char* s )
-    {
-        if ( s == nullptr )
-            s = "";
-
-        // Ленивое восстановление корня AVL-дерева из ПАП (через callback из pam_pmm.h).
-        if ( pstringview_pmm_pre_intern_hook() != nullptr )
-            pstringview_pmm_pre_intern_hook()();
-
-        // Используем PMM pstringview::intern()
-        pmm_pstringview_pptr p = pmm_pstringview::intern( s );
-
-        if ( p.is_null() )
-        {
-            length       = 0;
-            chars_offset = 0;
-            return;
-        }
-
-        // Получаем указатель на строковые данные внутри блока.
-        pmm_pstringview* sv = p.resolve();
-        if ( sv == nullptr )
-        {
-            length       = 0;
-            chars_offset = 0;
-            return;
-        }
-
-        // chars_offset указывает на str[] внутри блока pmm_pstringview,
-        // обеспечивая совместимость с pmm_resolve<char>(chars_offset).
-        const std::uint8_t* base = PamManager::backend().base_ptr();
-        chars_offset = static_cast<uintptr_t>( reinterpret_cast<const std::uint8_t*>( sv->c_str() ) - base );
-
-        // Кэшируем длину
-        length = static_cast<uintptr_t>( sv->size() );
-
-        // Сохраняем корень AVL-дерева в ПАП (через callback из pam_pmm.h).
-        if ( pstringview_pmm_post_intern_hook() != nullptr )
-            pstringview_pmm_post_intern_hook()();
-    }
-
-    /**
-     * @brief Получить C-строку (нуль-терминированную).
-     *
-     * chars_offset указывает на символьные данные внутри блока pmm_pstringview.
-     *
-     * @return Указатель на символьные данные или "" для пустой строки.
-     */
-    const char* c_str() const
-    {
-        if ( chars_offset == 0 )
-            return "";
-        const char* s = pmm_resolve<char>( chars_offset );
-        return ( s != nullptr ) ? s : "";
-    }
-
-    /**
-     * @brief Получить длину строки (без нулевого терминатора).
-     */
-    uintptr_t size() const { return length; }
-
-    /**
-     * @brief Проверить, пустая ли строка.
-     */
-    bool empty() const { return length == 0; }
-
-    /**
-     * @brief Сравнение с C-строкой.
-     */
-    bool operator==( const char* s ) const
-    {
-        if ( s == nullptr )
-            return length == 0;
-        return std::strcmp( c_str(), s ) == 0;
-    }
-
-    /**
-     * @brief Сравнение двух pstringview_pmm.
-     *
-     * Интернирование гарантирует: одинаковые строки → один chars_offset.
-     * Сравнение O(1).
-     */
-    bool operator==( const pstringview_pmm& other ) const { return chars_offset == other.chars_offset; }
-
-    bool operator!=( const char* s ) const { return !( *this == s ); }
-    bool operator!=( const pstringview_pmm& other ) const { return !( *this == other ); }
-
-    /**
-     * @brief Лексикографическое сравнение.
-     */
-    bool operator<( const pstringview_pmm& other ) const { return std::strcmp( c_str(), other.c_str() ) < 0; }
-};
-
-static_assert( sizeof( pstringview_pmm ) == 2 * sizeof( void* ),
-               "pstringview_pmm должна занимать 2 * sizeof(void*) байт" );
-static_assert( std::is_trivially_copyable<pstringview_pmm>::value,
-               "pstringview_pmm должен быть тривиально копируемым" );
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Вспомогательные функции для интернирования и поиска строк
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * @brief Результат интернирования строки.
- */
-struct pstringview_pmm_intern_result
-{
-    uintptr_t chars_offset; ///< Байтовое смещение блока pstringview в ПАП
-    uintptr_t length;       ///< Длина строки
-};
-
-/**
- * @brief Интернировать строку через PMM.
- *
- * @param s C-строка для интернирования. nullptr трактуется как "".
- * @return Результат с chars_offset и length.
- */
-inline pstringview_pmm_intern_result pstringview_pmm_intern( const char* s )
-{
-    if ( s == nullptr )
-        s = "";
-
-    pmm_pstringview_pptr p = pmm_pstringview::intern( s );
-
-    pstringview_pmm_intern_result result{};
-    if ( p.is_null() )
-        return result;
-
-    result.chars_offset = pptr_to_offset( p );
-    pmm_pstringview* sv = p.resolve();
-    result.length       = ( sv != nullptr ) ? static_cast<uintptr_t>( sv->size() ) : 0;
-
-    return result;
-}
-
-/**
- * @brief Результат поиска строки в словаре PMM.
- */
+/// Результат поиска строки в словаре PMM.
+/// Используется pam_search_strings() / pam_all_strings() из pam_pmm.h.
 struct pstringview_pmm_search_result
 {
     std::string value;        ///< Найденная строка
     uintptr_t   chars_offset; ///< Байтовое смещение блока pstringview в ПАП
     uintptr_t   length;       ///< Длина строки
 };
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Обход AVL-дерева интернированных строк PMM
-// ═══════════════════════════════════════════════════════════════════════════
 
 namespace detail
 {

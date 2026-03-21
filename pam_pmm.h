@@ -758,7 +758,7 @@ inline uintptr_t pam_pmm_get_data_size()
 /**
  * @brief Получить смещение таблицы интернирования строк.
  *
- * Для PMM это смещение pstringview_pmm хранилища.
+ * Для PMM это смещение pstringview хранилища.
  * Возвращает 0, так как PMM хранит pstringview автоматически.
  */
 inline uintptr_t pam_pmm_get_string_table_offset()
