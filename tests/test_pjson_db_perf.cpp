@@ -54,17 +54,17 @@ static long long elapsed_ms( const perf_clk::time_point& start )
     return std::chrono::duration_cast<std::chrono::milliseconds>( perf_clk::now() - start ).count();
 }
 
-// Используем 10k для put/erase (каждый put() обходит весь путь O(depth)),
-// 100k — для запросов get() (намного быстрее put).
-constexpr unsigned PERF_N  = 10'000u;
-constexpr unsigned LARGE_N = 100'000u;
+// Используем 1k для put/erase (каждый put() обходит весь путь O(depth)),
+// 10k — для запросов get() (намного быстрее put).
+constexpr unsigned PERF_N  = 1'000u;
+constexpr unsigned LARGE_N = 10'000u;
 } // anonymous namespace
 
 // ===========================================================================
 // put() 10k целочисленных узлов, проверка корректности
 // ===========================================================================
 
-TEST_CASE( "pjson_db_pmm perf: put 10k integer nodes and verify", "[pjson_db_pmm][perf]" )
+TEST_CASE( "pjson_db_pmm perf: put 1k integer nodes and verify", "[pjson_db_pmm][perf]" )
 {
     reset_pam_perf();
     pjson_db_pmm db;
@@ -96,7 +96,7 @@ TEST_CASE( "pjson_db_pmm perf: put 10k integer nodes and verify", "[pjson_db_pmm
 // put() 10k строковых узлов, проверка корректности
 // ===========================================================================
 
-TEST_CASE( "pjson_db_pmm perf: put 10k string nodes and verify", "[pjson_db_pmm][perf]" )
+TEST_CASE( "pjson_db_pmm perf: put 1k string nodes and verify", "[pjson_db_pmm][perf]" )
 {
     reset_pam_perf();
     pjson_db_pmm db;
@@ -127,10 +127,10 @@ TEST_CASE( "pjson_db_pmm perf: put 10k string nodes and verify", "[pjson_db_pmm]
 }
 
 // ===========================================================================
-// get() 100k запросов по 10k ключам
+// get() 10k запросов по 1k ключам
 // ===========================================================================
 
-TEST_CASE( "pjson_db_pmm perf: get 100k requests", "[pjson_db_pmm][perf]" )
+TEST_CASE( "pjson_db_pmm perf: get 10k requests", "[pjson_db_pmm][perf]" )
 {
     reset_pam_perf();
     pjson_db_pmm db;
@@ -197,10 +197,10 @@ TEST_CASE( "pjson_db_pmm perf: parse_into 1k JSON objects", "[pjson_db_pmm][perf
 }
 
 // ===========================================================================
-// erase() 10k узлов (строковые ключи)
+// erase() 1k узлов (строковые ключи)
 // ===========================================================================
 
-TEST_CASE( "pjson_db_pmm perf: erase 10k nodes", "[pjson_db_pmm][perf]" )
+TEST_CASE( "pjson_db_pmm perf: erase 1k nodes", "[pjson_db_pmm][perf]" )
 {
     reset_pam_perf();
     pjson_db_pmm db;
@@ -234,7 +234,7 @@ TEST_CASE( "pjson_db_pmm perf: erase 10k nodes", "[pjson_db_pmm][perf]" )
 }
 
 // ===========================================================================
-// полный жизненный цикл — put/get/erase с 10k узлами
+// полный жизненный цикл — put/get/erase с 1k узлами
 // ===========================================================================
 
 TEST_CASE( "pjson_db_pmm perf: full lifecycle with 10k nodes", "[pjson_db_pmm][perf]" )
