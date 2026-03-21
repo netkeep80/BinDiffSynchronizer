@@ -327,7 +327,7 @@ class pjson_db_pmm
     // $ref: разыменование
     // -----------------------------------------------------------------------
 
-    node_view resolve_ref( node_id id, uintptr_t max_depth = 32 ) const
+    node_view resolve_ref( node_id id, uintptr_t max_depth = PJSON_MAX_REF_DEPTH ) const
     {
         return node_view{ id }.deref( true, max_depth );
     }
