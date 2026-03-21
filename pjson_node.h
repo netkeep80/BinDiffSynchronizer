@@ -1,9 +1,7 @@
 #pragma once
-#include "pstringview_pmm.h"
-#include "pam_pmm_config.h"
-#include "pvector_pmm.h"
-#include "pmap_pmm.h"
 #include "pam_adapter.h"
+#include "pam_pmm_config.h"
+#include "pmap_pmm.h"
 #include "fptr_pmm.h"
 
 using namespace pjson;

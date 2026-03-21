@@ -1,6 +1,6 @@
 /**
  * @file test_pmem_array_pmm.cpp
- * @brief Тесты для PamManager::parray и pvector_pmm.
+ * @brief Тесты для PamManager::parray.
  *
  * Проверяют корректность работы персистного массива на базе PMM.
  */
@@ -10,7 +10,6 @@
 #include <type_traits>
 
 #include "pam_adapter.h"
-#include "pvector_pmm.h"
 
 using namespace pjson;
 
@@ -209,162 +208,6 @@ TEST_CASE( "parray: clear resets size but keeps capacity", "[parray][clear]" )
 
     arr_pptr->free_data();
     PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
-    PamManager::destroy();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ТЕСТЫ pvector_pmm
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE( "pvector_pmm: size matches parray (12 bytes)", "[pvector_pmm][layout]" )
-{
-    // pvector_pmm оборачивает PamManager::parray<T>, размер = 12 байт
-    REQUIRE( sizeof( pvector_pmm<int> ) == sizeof( PamManager::parray<int> ) );
-    REQUIRE( sizeof( pvector_pmm<double> ) == sizeof( PamManager::parray<double> ) );
-    REQUIRE( sizeof( pvector_pmm<int> ) == 12u );
-}
-
-TEST_CASE( "pvector_pmm: push_back and element access", "[pvector_pmm][push_back]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    // Аллоцируем pvector_pmm через PMM
-    auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
-    REQUIRE( pv );
-
-    // Инициализируем нулями
-    std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
-
-    REQUIRE( pv->empty() );
-    REQUIRE( pv->size() == 0u );
-
-    pv->push_back( 10 );
-    pv->push_back( 20 );
-    pv->push_back( 30 );
-
-    REQUIRE( pv->size() == 3u );
-    REQUIRE( ( *pv )[0] == 10 );
-    REQUIRE( ( *pv )[1] == 20 );
-    REQUIRE( ( *pv )[2] == 30 );
-
-    pv->free();
-    PamManager::template deallocate_typed<pvector_pmm<int>>( pv );
-    PamManager::destroy();
-}
-
-TEST_CASE( "pvector_pmm: front and back", "[pvector_pmm][access]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
-    std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
-
-    pv->push_back( 100 );
-    pv->push_back( 200 );
-    pv->push_back( 300 );
-
-    REQUIRE( pv->front() == 100 );
-    REQUIRE( pv->back() == 300 );
-
-    pv->free();
-    PamManager::template deallocate_typed<pvector_pmm<int>>( pv );
-    PamManager::destroy();
-}
-
-TEST_CASE( "pvector_pmm: pop_back", "[pvector_pmm][pop_back]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
-    std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
-
-    pv->push_back( 1 );
-    pv->push_back( 2 );
-    pv->push_back( 3 );
-
-    REQUIRE( pv->size() == 3u );
-
-    pv->pop_back();
-    REQUIRE( pv->size() == 2u );
-    REQUIRE( pv->back() == 2 );
-
-    pv->pop_back();
-    pv->pop_back();
-    REQUIRE( pv->empty() );
-
-    pv->free();
-    PamManager::template deallocate_typed<pvector_pmm<int>>( pv );
-    PamManager::destroy();
-}
-
-TEST_CASE( "pvector_pmm: clear", "[pvector_pmm][clear]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
-    std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
-
-    pv->push_back( 1 );
-    pv->push_back( 2 );
-    pv->push_back( 3 );
-
-    uintptr_t cap_before = pv->capacity();
-
-    pv->clear();
-
-    REQUIRE( pv->size() == 0u );
-    REQUIRE( pv->capacity() == cap_before );
-
-    pv->free();
-    PamManager::template deallocate_typed<pvector_pmm<int>>( pv );
-    PamManager::destroy();
-}
-
-TEST_CASE( "pvector_pmm: iterators", "[pvector_pmm][iterator]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
-    std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
-
-    pv->push_back( 10 );
-    pv->push_back( 20 );
-    pv->push_back( 30 );
-
-    int sum = 0;
-    for ( auto it = pv->begin(); it != pv->end(); ++it )
-    {
-        sum += *it;
-    }
-    REQUIRE( sum == 60 );
-
-    pv->free();
-    PamManager::template deallocate_typed<pvector_pmm<int>>( pv );
-    PamManager::destroy();
-}
-
-TEST_CASE( "pvector_pmm: capacity grows with elements", "[pvector_pmm][capacity]" )
-{
-    PamManager::create( 64 * 1024 );
-
-    auto pv = PamManager::template allocate_typed<pvector_pmm<int>>();
-    std::memset( pv.resolve(), 0, sizeof( pvector_pmm<int> ) );
-
-    for ( int i = 0; i < 20; i++ )
-    {
-        pv->push_back( i );
-    }
-
-    REQUIRE( pv->size() == 20u );
-    REQUIRE( pv->capacity() >= 20u );
-
-    for ( int i = 0; i < 20; i++ )
-    {
-        REQUIRE( ( *pv )[static_cast<uintptr_t>( i )] == i );
-    }
-
-    pv->free();
-    PamManager::template deallocate_typed<pvector_pmm<int>>( pv );
     PamManager::destroy();
 }
 

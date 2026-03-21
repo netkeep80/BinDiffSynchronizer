@@ -1,9 +1,16 @@
+/**
+ * @file test_pvector.cpp
+ * @brief Дополнительные тесты для PamManager::parray<T>.
+ *
+ * Тесты capacity growth, front/back, data pointer iteration, double type.
+ * (Основные тесты parray — в test_pmem_array_pmm.cpp)
+ */
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstring>
 #include <type_traits>
 
-#include "pvector_pmm.h"
-#include "fptr_pmm.h"
 #include "pam_pmm.h"
 
 using namespace pjson;
@@ -15,213 +22,148 @@ static void ensure_pmm()
 }
 
 // =============================================================================
-// Tests for pvector_pmm<T> (persistent dynamic array)
+// Tests for PamManager::parray<T> — capacity growth
 // =============================================================================
 
-// ---------------------------------------------------------------------------
-// pvector_pmm<T> — layout checks
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: size and capacity are uintptr_t", "[pvector_pmm][layout]" )
-{
-    // pvector_pmm<T> оборачивает PamManager::parray<T> = uint32_t * 3 = 12 байт
-    REQUIRE( sizeof( pvector_pmm<int> ) == sizeof( PamManager::parray<int> ) );
-    REQUIRE( sizeof( pvector_pmm<double> ) == sizeof( PamManager::parray<double> ) );
-    REQUIRE( sizeof( pvector_pmm<int> ) == 12u );
-}
-
-// ---------------------------------------------------------------------------
-// pvector_pmm — default PAP allocation (empty)
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: zero-initialised pvector_pmm (via fptr) gives empty vector", "[pvector_pmm][construct]" )
+TEST_CASE( "parray<int>: capacity grows to accommodate elements", "[parray][capacity]" )
 {
     ensure_pmm();
-    fptr<pvector_pmm<int>> fv;
-    fv.New();
 
-    REQUIRE( fv->empty() );
-    REQUIRE( fv->size() == 0u );
-    REQUIRE( fv->capacity() == 0u );
-
-    fv.Delete();
-}
-
-// ---------------------------------------------------------------------------
-// pvector_pmm — push_back and size
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: push_back increases size and stores correct values", "[pvector_pmm][push_back]" )
-{
-    ensure_pmm();
-    fptr<pvector_pmm<int>> fv;
-    fv.New();
-
-    fv->push_back( 10 );
-    fv->push_back( 20 );
-    fv->push_back( 30 );
-
-    REQUIRE( fv->size() == 3u );
-    REQUIRE( ( *fv )[0] == 10 );
-    REQUIRE( ( *fv )[1] == 20 );
-    REQUIRE( ( *fv )[2] == 30 );
-
-    fv->free();
-    fv.Delete();
-}
-
-// ---------------------------------------------------------------------------
-// pvector_pmm — capacity grows (doubling strategy)
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: capacity grows to accommodate elements", "[pvector_pmm][capacity]" )
-{
-    ensure_pmm();
-    fptr<pvector_pmm<int>> fv;
-    fv.New();
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
     for ( int i = 0; i < 20; i++ )
-        fv->push_back( i );
+        arr_pptr->push_back( i );
 
-    REQUIRE( fv->size() == 20u );
-    REQUIRE( fv->capacity() >= 20u );
+    REQUIRE( arr_pptr->size() == 20u );
+    REQUIRE( arr_pptr->capacity() >= 20u );
 
+    int* d = arr_pptr->data();
     for ( int i = 0; i < 20; i++ )
-        REQUIRE( ( *fv )[static_cast<unsigned>( i )] == i );
+        REQUIRE( d[i] == i );
 
-    fv->free();
-    fv.Delete();
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
 }
 
-// ---------------------------------------------------------------------------
-// pvector_pmm — pop_back decreases size
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: pop_back decreases size", "[pvector_pmm][pop_back]" )
+// =============================================================================
+// parray — front and back via data()
+// =============================================================================
+
+TEST_CASE( "parray<int>: front and back via data()", "[parray][access]" )
 {
     ensure_pmm();
-    fptr<pvector_pmm<int>> fv;
-    fv.New();
 
-    fv->push_back( 1 );
-    fv->push_back( 2 );
-    fv->push_back( 3 );
-    REQUIRE( fv->size() == 3u );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    fv->pop_back();
-    REQUIRE( fv->size() == 2u );
-    REQUIRE( ( *fv )[0] == 1 );
-    REQUIRE( ( *fv )[1] == 2 );
+    arr_pptr->push_back( 10 );
+    arr_pptr->push_back( 20 );
+    arr_pptr->push_back( 30 );
 
-    fv->pop_back();
-    fv->pop_back();
-    REQUIRE( fv->size() == 0u );
-    REQUIRE( fv->empty() );
+    int* d = arr_pptr->data();
+    REQUIRE( d[0] == 10 );
+    REQUIRE( d[arr_pptr->size() - 1] == 30 );
 
-    // pop_back on empty should be safe (no-op).
-    fv->pop_back();
-    REQUIRE( fv->size() == 0u );
-
-    fv.Delete();
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
 }
 
-// ---------------------------------------------------------------------------
-// pvector_pmm — clear resets size to 0 (does not free allocation)
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: clear resets size to 0", "[pvector_pmm][clear]" )
+// =============================================================================
+// parray — pointer iteration over data()
+// =============================================================================
+
+TEST_CASE( "parray<int>: pointer iteration over data() produces correct sum", "[parray][iterator]" )
 {
     ensure_pmm();
-    fptr<pvector_pmm<int>> fv;
-    fv.New();
 
-    fv->push_back( 1 );
-    fv->push_back( 2 );
-    uintptr_t cap_before = fv->capacity();
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
 
-    fv->clear();
-    REQUIRE( fv->size() == 0u );
-    REQUIRE( fv->empty() );
-    // Capacity should be unchanged by clear().
-    REQUIRE( fv->capacity() == cap_before );
+    arr_pptr->push_back( 1 );
+    arr_pptr->push_back( 2 );
+    arr_pptr->push_back( 3 );
 
-    fv->free();
-    fv.Delete();
-}
-
-// ---------------------------------------------------------------------------
-// pvector_pmm — free releases the allocation
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: free releases allocation and resets capacity", "[pvector_pmm][free]" )
-{
-    ensure_pmm();
-    fptr<pvector_pmm<int>> fv;
-    fv.New();
-
-    fv->push_back( 42 );
-
-    fv->free();
-    REQUIRE( fv->size() == 0u );
-    REQUIRE( fv->capacity() == 0u );
-
-    fv.Delete();
-}
-
-// ---------------------------------------------------------------------------
-// pvector_pmm — front and back
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: front() and back() return correct elements", "[pvector_pmm][access]" )
-{
-    ensure_pmm();
-    fptr<pvector_pmm<int>> fv;
-    fv.New();
-
-    fv->push_back( 10 );
-    fv->push_back( 20 );
-    fv->push_back( 30 );
-
-    REQUIRE( fv->front() == 10 );
-    REQUIRE( fv->back() == 30 );
-
-    fv->free();
-    fv.Delete();
-}
-
-// ---------------------------------------------------------------------------
-// pvector_pmm — iterator
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<int>: range-based iteration produces correct values", "[pvector_pmm][iterator]" )
-{
-    ensure_pmm();
-    fptr<pvector_pmm<int>> fv;
-    fv.New();
-
-    fv->push_back( 1 );
-    fv->push_back( 2 );
-    fv->push_back( 3 );
-
-    int sum = 0;
-    for ( auto& elem : *fv )
-        sum += elem;
+    int  sum = 0;
+    int* d   = arr_pptr->data();
+    for ( uint32_t i = 0; i < arr_pptr->size(); ++i )
+        sum += d[i];
 
     REQUIRE( sum == 6 );
 
-    fv->free();
-    fv.Delete();
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
 }
 
-// ---------------------------------------------------------------------------
-// pvector_pmm<double> — works with double
-// ---------------------------------------------------------------------------
-TEST_CASE( "pvector_pmm<double>: push_back and read back doubles", "[pvector_pmm][double]" )
+// =============================================================================
+// parray<double> — works with double
+// =============================================================================
+
+TEST_CASE( "parray<double>: push_back and read back doubles", "[parray][double]" )
 {
     ensure_pmm();
-    fptr<pvector_pmm<double>> fv;
-    fv.New();
 
-    fv->push_back( 1.1 );
-    fv->push_back( 2.2 );
-    fv->push_back( 3.3 );
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<double>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<double> ) );
 
-    REQUIRE( fv->size() == 3u );
-    REQUIRE( ( *fv )[0] == 1.1 );
-    REQUIRE( ( *fv )[1] == 2.2 );
-    REQUIRE( ( *fv )[2] == 3.3 );
+    arr_pptr->push_back( 1.1 );
+    arr_pptr->push_back( 2.2 );
+    arr_pptr->push_back( 3.3 );
 
-    fv->free();
-    fv.Delete();
+    REQUIRE( arr_pptr->size() == 3u );
+
+    double* d = arr_pptr->data();
+    REQUIRE( d[0] == 1.1 );
+    REQUIRE( d[1] == 2.2 );
+    REQUIRE( d[2] == 3.3 );
+
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<double>>( arr_pptr );
+}
+
+// =============================================================================
+// parray — empty after clear then push_back works
+// =============================================================================
+
+TEST_CASE( "parray<int>: push_back after clear works correctly", "[parray][clear][push_back]" )
+{
+    ensure_pmm();
+
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
+
+    arr_pptr->push_back( 1 );
+    arr_pptr->push_back( 2 );
+    arr_pptr->clear();
+
+    REQUIRE( arr_pptr->size() == 0u );
+    REQUIRE( arr_pptr->empty() );
+
+    arr_pptr->push_back( 42 );
+    REQUIRE( arr_pptr->size() == 1u );
+
+    int* d = arr_pptr->data();
+    REQUIRE( d[0] == 42 );
+
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
+}
+
+// =============================================================================
+// parray — pop_back on empty is safe (no-op)
+// =============================================================================
+
+TEST_CASE( "parray<int>: pop_back on empty is no-op", "[parray][pop_back]" )
+{
+    ensure_pmm();
+
+    auto arr_pptr = PamManager::template allocate_typed<PamManager::parray<int>>();
+    std::memset( arr_pptr.resolve(), 0, sizeof( PamManager::parray<int> ) );
+
+    // pop_back on empty should be safe
+    arr_pptr->pop_back();
+    REQUIRE( arr_pptr->size() == 0u );
+
+    arr_pptr->free_data();
+    PamManager::template deallocate_typed<PamManager::parray<int>>( arr_pptr );
 }

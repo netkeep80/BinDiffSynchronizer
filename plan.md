@@ -163,15 +163,28 @@ JSON-базу данных поверх PMM. Текущая архитектур
 - `pjson_pool_pmm.h` сохранён как тонкая обёртка над `PamManager::ppool<node>` (не удалён, т.к. предоставляет node_id-совместимый API)
 - Все 593 теста проходят
 
-### 2.5 Упрощение pstringview_pmm
+### 2.5 Упрощение pstringview_pmm ✅
 
-**Текущая ситуация:** `pstringview_pmm` кэширует `length` и `chars_offset` и оборачивает
-`pmm::pstringview`.
+**Выполнено (Issue #167):** Структура `pstringview_pmm` удалена, `pstringview_pmm.h` упрощён до тонкой обёртки.
 
-**Действия:**
-- Оценить, можно ли использовать `pmm::pstringview` напрямую
-- Если кэширование необходимо для производительности — оставить как тонкую обёртку
-- Удалить дублирование логики интернирования
+**Что сделано:**
+- Удалена структура `pstringview_pmm` (16-байтовая обёртка с `length` + `chars_offset`) — не использовалась вне тестов
+- Удалены дублирующие функции `pstringview_pmm_intern()`, `pstringview_pmm_intern_result` — вместо них `pam_intern_string()` из `pam_pmm.h`
+- `pstringview_pmm.h` сохранён как тонкая обёртка: типовые алиасы (`pmm_pstringview`, `pmm_pstringview_pptr`), hooks для персистентности корня AVL-дерева, `pstringview_pmm_reset()`, AVL-обход для поиска строк, `pstringview_manager`
+- `pjson_node.h`: include заменён с `pstringview_pmm.h` на `pam_adapter.h` (реальная зависимость)
+- Тесты переведены на `pam_intern_string()` / `pam_search_strings()` / `pam_all_strings()`
+- Все 587 тестов проходят
+
+### 2.6 Удаление pvector_pmm ✅
+
+**Выполнено (Issue #167):** `pvector_pmm.h` удалён — обёртка над `PamManager::parray<T>` больше не нужна.
+
+**Что сделано:**
+- Удалён `pvector_pmm.h` — тонкая обёртка (210 строк) над `PamManager::parray<T>` с собственными итераторами
+- `pjson_node.h`: удалён мёртвый `#include "pvector_pmm.h"` (тип `pvector_pmm` не использовался в production-коде после задачи 2.2); удалён дублирующий `#include "pam_adapter.h"`
+- `tests/test_pvector.cpp`: переписан — тесты используют `PamManager::parray<T>` напрямую (capacity growth, front/back через data(), pointer iteration, double type, clear+push_back, pop_back on empty)
+- `tests/test_pmem_array_pmm.cpp`: удалены 7 тестов `pvector_pmm` (layout, push_back, front/back, pop_back, clear, iterators, capacity) — их функциональность покрыта тестами parray
+- Все 576 тестов проходят
 
 ---
 
