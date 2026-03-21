@@ -9,6 +9,7 @@ using namespace pjson;
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 // pjson_node.h — Расширенная модель узлов JSON.
 //
@@ -1095,7 +1096,9 @@ inline node_id node_clone( node_id src_id )
 
     case node_tag::binary:
     {
-        // Инициализируем binary-узел и копируем данные побайтно.
+        // Инициализируем binary-узел и копируем данные bulk-методом (Issue #189, Этап 9.1).
+        // Вместо побайтового push_back с O(N) переразрешений PMM-указателей,
+        // копируем данные в промежуточный std::vector, затем выполняем resize + memcpy.
         node_set_binary( dst_id );
         // Переразрешаем src после set_binary (может вызвать realloc).
         src = pmm_resolve<node>( src_id );
@@ -1107,17 +1110,30 @@ inline node_id node_clone( node_id src_id )
             const uint8_t* bin_data = src->binary_val.data();
             if ( bin_data != nullptr )
             {
-                for ( uintptr_t i = 0; i < bin_size; ++i )
+                // 1. Копируем данные в промежуточный буфер (безопасно — не содержит PMM-указателей).
+                std::vector<uint8_t> buf( bin_data, bin_data + bin_size );
+
+                // 2. Resize целевого binary_val за одну аллокацию.
+                //    Работаем через стековую копию parray (как parray_push_back_safe),
+                //    чтобы безопасно пережить возможный realloc PMM-пула.
+                node* dst = pmm_resolve<node>( dst_id );
+                if ( dst == nullptr )
+                    break;
+                auto arr_copy = dst->binary_val;
+                arr_copy.resize( bin_size );
+                dst = pmm_resolve<node>( dst_id );
+                if ( dst == nullptr )
+                    break;
+                dst->binary_val = arr_copy;
+
+                // 3. Bulk-копирование данных через memcpy.
+                dst = pmm_resolve<node>( dst_id );
+                if ( dst == nullptr )
+                    break;
+                uint8_t* dst_data = dst->binary_val.data();
+                if ( dst_data != nullptr )
                 {
-                    uint8_t byte = bin_data[i];
-                    node_binary_push_back( dst_id, byte );
-                    // Переразрешаем bin_data после push_back (может вызвать realloc).
-                    src = pmm_resolve<node>( src_id );
-                    if ( src == nullptr )
-                        break;
-                    bin_data = src->binary_val.data();
-                    if ( bin_data == nullptr )
-                        break;
+                    std::memcpy( dst_data, buf.data(), bin_size );
                 }
             }
         }

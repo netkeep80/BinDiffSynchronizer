@@ -366,3 +366,104 @@ TEST_CASE( "pjson_db_pmm::clone(node_id): low-level clone by node_id", "[clone][
     node_view cv{ cloned };
     REQUIRE( cv.as_int() == 42 );
 }
+
+// ---------------------------------------------------------------------------
+// Тесты bulk-копирования binary (Этап 9.1, Issue #189)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "node_clone: binary clone preserves data content", "[clone]" )
+{
+    reset_pam();
+
+    fptr<node> src;
+    src.New();
+    node_set_binary( src.addr() );
+    node_binary_push_back( src.addr(), 0xAA );
+    node_binary_push_back( src.addr(), 0xBB );
+    node_binary_push_back( src.addr(), 0xCC );
+
+    node_id cloned = node_clone( src.addr() );
+    REQUIRE( cloned != 0 );
+
+    // Проверяем содержимое побайтно.
+    node_view cv{ cloned };
+    REQUIRE( cv.is_binary() == true );
+    REQUIRE( cv.size() == 3 );
+    const node* cn = pmm_resolve<node>( cloned );
+    REQUIRE( cn != nullptr );
+    const uint8_t* data = cn->binary_val.data();
+    REQUIRE( data != nullptr );
+    REQUIRE( data[0] == 0xAA );
+    REQUIRE( data[1] == 0xBB );
+    REQUIRE( data[2] == 0xCC );
+}
+
+TEST_CASE( "node_clone: large binary bulk-copy correctness", "[clone]" )
+{
+    reset_pam();
+
+    // Создаём binary-узел с 1000 байтами (паттерн 0..255, циклически).
+    fptr<node> src;
+    src.New();
+    node_set_binary( src.addr() );
+    constexpr uintptr_t N = 1000;
+    for ( uintptr_t i = 0; i < N; ++i )
+        node_binary_push_back( src.addr(), static_cast<uint8_t>( i & 0xFF ) );
+
+    node_id cloned = node_clone( src.addr() );
+    REQUIRE( cloned != 0 );
+
+    node_view cv{ cloned };
+    REQUIRE( cv.is_binary() == true );
+    REQUIRE( cv.size() == N );
+
+    const node* cn = pmm_resolve<node>( cloned );
+    REQUIRE( cn != nullptr );
+    const uint8_t* data = cn->binary_val.data();
+    REQUIRE( data != nullptr );
+    for ( uintptr_t i = 0; i < N; ++i )
+        REQUIRE( data[i] == static_cast<uint8_t>( i & 0xFF ) );
+}
+
+TEST_CASE( "node_clone: binary clone is independent of original", "[clone]" )
+{
+    reset_pam();
+
+    fptr<node> src;
+    src.New();
+    node_set_binary( src.addr() );
+    node_binary_push_back( src.addr(), 0x01 );
+    node_binary_push_back( src.addr(), 0x02 );
+
+    node_id cloned = node_clone( src.addr() );
+    REQUIRE( cloned != 0 );
+
+    // Модифицируем оригинал — добавляем ещё байт.
+    node_binary_push_back( src.addr(), 0x03 );
+
+    // Клон не должен измениться.
+    node_view cv{ cloned };
+    REQUIRE( cv.size() == 2 );
+    const node* cn = pmm_resolve<node>( cloned );
+    REQUIRE( cn != nullptr );
+    const uint8_t* data = cn->binary_val.data();
+    REQUIRE( data != nullptr );
+    REQUIRE( data[0] == 0x01 );
+    REQUIRE( data[1] == 0x02 );
+}
+
+TEST_CASE( "node_clone: empty binary clone", "[clone]" )
+{
+    reset_pam();
+
+    fptr<node> src;
+    src.New();
+    node_set_binary( src.addr() );
+
+    node_id cloned = node_clone( src.addr() );
+    REQUIRE( cloned != 0 );
+
+    node_view cv{ cloned };
+    REQUIRE( cv.is_binary() == true );
+    REQUIRE( cv.size() == 0 );
+}
