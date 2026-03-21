@@ -563,8 +563,8 @@ class pjson_db_pmm
     uintptr_t pmm_named_count() const { return pam_pmm_named_count(); }
 
   private:
-    uintptr_t _batch_depth = 0;      ///< Глубина вложенности пакетных операций.
-    uintptr_t _metrics_tmp_off = 0;  ///< Этап 8.4: pre-allocated узел для возврата значений метрик.
+    uintptr_t _batch_depth = 0; ///< Глубина вложенности пакетных операций.
+    uintptr_t _metrics_tmp_off = 0; ///< Этап 8.4: pre-allocated узел для возврата значений метрик.
 
     // -----------------------------------------------------------------------
     // Общий шаблон для put-методов
