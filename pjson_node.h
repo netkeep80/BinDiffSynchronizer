@@ -45,8 +45,8 @@ enum class node_tag : uint32_t
     uinteger = 3,           ///< uint64_t
     real     = 4,           ///< double
     string   = 5,           ///< pstring (readwrite, изменяемое строковое значение JSON)
-    binary   = 6,           ///< pvector<uint8_t> в ПАП ($base64 при сериализации)
-    array    = 7,           ///< pvector<node_id>
+    binary   = 6,           ///< parray<uint8_t> в ПАП ($base64 при сериализации)
+    array    = 7,           ///< parray<node_id>
     object   = 8,           ///< pmap<pstringview, node_id> — ключи readonly (pstringview)
     ref      = 9,           ///< pstringview path (readonly) + node_id target ($ref при сериализации)
     _free    = 0xFFFFFFFFu, ///< Служебный тег: слот освобождён (для free-list пула)

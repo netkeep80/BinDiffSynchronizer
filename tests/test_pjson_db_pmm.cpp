@@ -1120,3 +1120,72 @@ TEST_CASE( "pjson_db_pmm: integration - operator[] creates path then insert popu
 
     REQUIRE( db.get( "/settings/theme" ).as_string() == "dark" );
 }
+
+// ===========================================================================
+// Этап 8.4: проверка отсутствия утечки временных узлов метрик
+// ===========================================================================
+
+TEST_CASE( "pjson_db_pmm: metrics queries do not leak temporary nodes (issue 188 step 8.4)", "[pjson_db_pmm]" )
+{
+    reset_pmm();
+    pjson_db_pmm db;
+    db.put( "/x", 42 );
+
+    // Запоминаем количество слотов после инициализации.
+    uint64_t slots_before = pam_pmm_slot_count();
+
+    // Выполняем множество обращений к метрикам.
+    for ( int i = 0; i < 100; ++i )
+    {
+        node_view v1 = db.get( "/$metrics/node_count_total" );
+        REQUIRE( v1.valid() );
+        node_view v2 = db.get( "/$metrics/free_node_count" );
+        REQUIRE( v2.valid() );
+        node_view v3 = db.get( "/$metrics/pam_bump_offset" );
+        REQUIRE( v3.valid() );
+        node_view v4 = db.get( "/$metrics/last_save_time" );
+        REQUIRE( v4.valid() );
+        node_view v5 = db.get( "/$metrics/nonexistent_metric" );
+        REQUIRE( v5.valid() );
+    }
+
+    // Количество слотов не должно расти — временный узел переиспользуется.
+    uint64_t slots_after = pam_pmm_slot_count();
+    REQUIRE( slots_after == slots_before );
+}
+
+TEST_CASE( "pjson_db_pmm: metrics tmp node is reused across calls", "[pjson_db_pmm]" )
+{
+    reset_pmm();
+    pjson_db_pmm db;
+    db.put( "/a", 1 );
+
+    // Все обращения к метрикам должны возвращать node_view с одним и тем же id.
+    node_view v1 = db.get( "/$metrics/node_count_total" );
+    node_view v2 = db.get( "/$metrics/pam_bump_offset" );
+    node_view v3 = db.get( "/$metrics/last_save_time" );
+
+    REQUIRE( v1.id == v2.id );
+    REQUIRE( v2.id == v3.id );
+}
+
+TEST_CASE( "pjson_db_pmm: metrics values are correct after repeated queries", "[pjson_db_pmm]" )
+{
+    reset_pmm();
+    pjson_db_pmm db;
+
+    // Каждый следующий вызов перезаписывает значение в том же узле,
+    // поэтому node_view из предыдущего вызова «протухает».
+    // Проверяем, что последний вызов корректно возвращает значение.
+    db.put( "/item1", 10 );
+    db.put( "/item2", 20 );
+
+    node_view obj_count = db.get( "/$metrics/object_count" );
+    REQUIRE( obj_count.valid() );
+    REQUIRE( obj_count.is_uinteger() );
+    REQUIRE( obj_count.as_uint() >= 1u );
+
+    node_view arr_count = db.get( "/$metrics/array_count" );
+    REQUIRE( arr_count.valid() );
+    REQUIRE( arr_count.is_uinteger() );
+}

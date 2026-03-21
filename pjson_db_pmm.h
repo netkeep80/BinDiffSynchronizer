@@ -37,6 +37,8 @@ static constexpr const char* PJSON_DB_PMM_POOL_NAME = "pjson_db_pmm.pool";
 static constexpr const char* PJSON_DB_PMM_ROOT_NAME = "pjson_db_pmm.root";
 /// Имя структуры метрик в PMM (Фаза 7).
 static constexpr const char* PJSON_DB_PMM_METRICS_NAME = "pjson_db_pmm.metrics";
+/// Имя временного узла для возврата значений метрик (Этап 8.4).
+static constexpr const char* PJSON_DB_PMM_METRICS_TMP_NAME = "pjson_db_pmm.metrics_tmp";
 
 // ===========================================================================
 // db_metrics_pmm — структура метрик персистной JSON-БД (PMM версия)
@@ -104,6 +106,7 @@ class pjson_db_pmm
         _ensure_pool();
         _ensure_root();
         _get_metrics_struct(); // создаёт при необходимости
+        _ensure_metrics_tmp(); // Этап 8.4: pre-allocate переиспользуемый узел для метрик
     }
 
     // -----------------------------------------------------------------------
@@ -561,6 +564,7 @@ class pjson_db_pmm
 
   private:
     uintptr_t _batch_depth = 0; ///< Глубина вложенности пакетных операций.
+    uintptr_t _metrics_tmp_off = 0; ///< Этап 8.4: pre-allocated узел для возврата значений метрик.
 
     // -----------------------------------------------------------------------
     // Общий шаблон для put-методов
@@ -777,6 +781,18 @@ class pjson_db_pmm
         node_set_object( root_off );
     }
 
+    /// Этап 8.4: создать или найти переиспользуемый временный узел для метрик.
+    void _ensure_metrics_tmp()
+    {
+        _metrics_tmp_off = pam_pmm_find( PJSON_DB_PMM_METRICS_TMP_NAME );
+        if ( _metrics_tmp_off == 0 )
+        {
+            _metrics_tmp_off = pam_pmm_create<node>( PJSON_DB_PMM_METRICS_TMP_NAME );
+            if ( _metrics_tmp_off != 0 )
+                node_init_null( _metrics_tmp_off );
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Вспомогательные методы: путевая адресация
     // -----------------------------------------------------------------------
@@ -815,8 +831,8 @@ class pjson_db_pmm
         if ( *key == '/' )
             ++key;
 
-        // Создаём временный узел для возврата значения метрики.
-        uintptr_t tmp_off = pam_pmm_create<node>();
+        // Этап 8.4: переиспользуем pre-allocated узел вместо аллокации нового.
+        uintptr_t tmp_off = _metrics_tmp_off;
         if ( tmp_off == 0 )
             return node_view{};
 
