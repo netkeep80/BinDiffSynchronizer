@@ -655,7 +655,7 @@ inline void parray_push_back_safe( uintptr_t node_off, Field field, const T& ele
         return;
     auto arr_copy = n->*field;
     arr_copy.push_back( elem );
-    n        = pmm_resolve<node>( node_off );
+    n         = pmm_resolve<node>( node_off );
     n->*field = arr_copy;
 }
 

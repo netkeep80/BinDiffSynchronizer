@@ -206,10 +206,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
      * @param k Ключ для поиска.
      * @return V* — указатель на значение или nullptr, если не найдено.
      */
-    V* find( const K& k )
-    {
-        return const_cast<V*>( static_cast<const pmap_pmm*>( this )->find( k ) );
-    }
+    V* find( const K& k ) { return const_cast<V*>( static_cast<const pmap_pmm*>( this )->find( k ) ); }
 
     /**
      * @brief Найти значение по ключу (const версия).
@@ -303,8 +300,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
     /**
      * @brief Шаблонный итератор для pmap_pmm (const/non-const).
      */
-    template <bool IsConst>
-    class iterator_base
+    template <bool IsConst> class iterator_base
     {
         using MapPtr = std::conditional_t<IsConst, const pmap_pmm*, pmap_pmm*>;
         using Ref    = std::conditional_t<IsConst, const Entry&, Entry&>;

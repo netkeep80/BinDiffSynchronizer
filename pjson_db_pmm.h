@@ -622,8 +622,7 @@ class pjson_db_pmm
     // -----------------------------------------------------------------------
 
     /// Общая реализация put-методов: проверка metrics path, ensure_path, setter, update metrics.
-    template <typename F>
-    bool _put_impl( const char* path, F&& setter )
+    template <typename F> bool _put_impl( const char* path, F&& setter )
     {
         if ( _is_metrics_path( path ) )
             return false;

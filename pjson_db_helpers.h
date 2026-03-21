@@ -64,8 +64,7 @@ inline bool pjson_next_seg_is_numeric( const char* p )
 /// Visitor должен реализовать метод visit(node_id, const node_view&).
 /// Рекурсия выполняется для array (по элементам) и object (по значениям).
 /// ref-узлы не рекурсируются (избегаем дублирования и циклов).
-template <typename Visitor>
-inline void pjson_traverse_subtree( node_id id, Visitor&& vis )
+template <typename Visitor> inline void pjson_traverse_subtree( node_id id, Visitor&& vis )
 {
     if ( id == 0 )
         return;
@@ -152,7 +151,7 @@ inline void pjson_count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64
 /// Visitor для поиска string-узлов, чьё значение содержит подстроку pattern.
 struct pjson_search_strings_visitor
 {
-    const char*            pattern;
+    const char*           pattern;
     std::vector<node_id>& results;
 
     void visit( node_id id, const node_view& v )

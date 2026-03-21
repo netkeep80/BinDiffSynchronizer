@@ -73,8 +73,7 @@ inline node_id node_ptr_to_id( const node* ptr ) noexcept
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Разрешить смещение пула в указатель. Возвращает nullptr если off == 0 или невалидно.
-template <typename T>
-inline T* pjson_resolve_or_null( uintptr_t off )
+template <typename T> inline T* pjson_resolve_or_null( uintptr_t off )
 {
     if ( off == 0 )
         return nullptr;
@@ -82,8 +81,7 @@ inline T* pjson_resolve_or_null( uintptr_t off )
 }
 
 /// Константная версия resolve_or_null.
-template <typename T>
-inline const T* pjson_resolve_const_or_null( uintptr_t off )
+template <typename T> inline const T* pjson_resolve_const_or_null( uintptr_t off )
 {
     if ( off == 0 )
         return nullptr;
