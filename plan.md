@@ -308,6 +308,8 @@ pmm Фаза 3 (параллельно с планированием мигра�
 
 **Оставшиеся задачи:** Этап 4.2 (совместимость), Этап 4.3 (бенчмарки).
 
+**Этап 5 (устранение дублирования кода) выполнен:** задачи 5.1–5.9 (Issue #171). Задача 5.10 (get vs _ensure_path) оставлена как информационная.
+
 ---
 
 ## Этап 5: Устранение дублирования кода (Code Review, Issue #128)
@@ -319,7 +321,9 @@ pmm Фаза 3 (параллельно с планированием мигра�
 
 ---
 
-### 5.1 Бинарный поиск в pmap_pmm.h (Критический)
+### 5.1 Бинарный поиск в pmap_pmm.h (Критический) ✅
+
+**Выполнено (Issue #171):** Извлечён приватный статический метод `_lower_bound()`, 4 дублирования → 1 реализация.
 
 **Файл:** `pmap_pmm.h`, строки 131–144, 207–215, 234–242, 265–272
 
@@ -347,7 +351,9 @@ uintptr_t _lower_bound(const Entry* raw, uintptr_t sz, const K& k) const {
 
 ---
 
-### 5.2 Дублирование const/non-const пар в pmap_pmm.h (Средний)
+### 5.2 Дублирование const/non-const пар в pmap_pmm.h (Средний) ✅
+
+**Выполнено (Issue #171):** non-const `find()` делегирует в const через паттерн Скотта Мейерса.
 
 **Файл:** `pmap_pmm.h`, строки 199–221 vs 226–248 (find/find const)
 
@@ -366,7 +372,9 @@ V* find(const K& k) {
 
 ---
 
-### 5.3 Итераторы iterator/const_iterator в pmap_pmm.h (Средний)
+### 5.3 Итераторы iterator/const_iterator в pmap_pmm.h (Средний) ✅
+
+**Выполнено (Issue #171):** Шаблонный `iterator_base<IsConst>` заменяет два идентичных класса.
 
 **Файл:** `pmap_pmm.h`, строки 328–363 vs 368–403
 
@@ -398,7 +406,9 @@ using const_iterator = iterator_base<true>;
 
 ---
 
-### 5.4 Паттерн put-методов в pjson_db_pmm.h (Средний)
+### 5.4 Паттерн put-методов в pjson_db_pmm.h (Средний) ✅
+
+**Выполнено (Issue #171):** Извлечён приватный шаблонный helper `_put_impl()`, 6 put-методов и put_ref делегируют в него.
 
 **Файл:** `pjson_db_pmm.h`, строки 278–373
 
@@ -438,7 +448,9 @@ bool put(const char* path, bool value) {
 
 ---
 
-### 5.5 Рекурсивный обход поддерева (switch по node_tag) (Средний)
+### 5.5 Рекурсивный обход поддерева (switch по node_tag) (Средний) ✅
+
+**Выполнено (Issue #171):** Реализован `pjson_traverse_subtree()` с visitor-паттерном в `pjson_db_helpers.h`. Visitors: `pjson_count_visitor`, `pjson_search_strings_visitor`. `_free_node_tree()` и `_resolve_refs_in_subtree()` оставлены как есть (post-visit и зависимость от db::get()).
 
 **Файлы:**
 - `pjson_db_helpers.h`: `pjson_count_nodes_in_subtree()` (строки 64–116)
@@ -479,7 +491,9 @@ void traverse_subtree(node_id id, Visitor&& vis) {
 
 ---
 
-### 5.6 Инициализация null-узла (дублирование node_init_null) (Низкий)
+### 5.6 Инициализация null-узла (дублирование node_init_null) (Низкий) ✅
+
+**Выполнено (Issue #171):** Ручная инициализация в `node_array_push_back()` и `node_object_insert()` заменена на `node_init_null()`.
 
 **Файл:** `pjson_node.h`, строки 930–940 vs 769–778
 
@@ -500,7 +514,9 @@ slot->ref_val.target            = 0;
 
 ---
 
-### 5.7 Делегирующие обёртки pjson_pmm_count/search (Низкий)
+### 5.7 Делегирующие обёртки pjson_pmm_count/search (Низкий) ✅
+
+**Выполнено (Issue #171):** Обёртки `pjson_pmm_count_nodes_in_subtree()` и `pjson_pmm_search_node_strings_in_subtree()` удалены, вызовы заменены на прямые из `pjson_db_helpers.h`.
 
 **Файл:** `pjson_db_pmm.h`, строки 77–88
 
@@ -512,7 +528,9 @@ slot->ref_val.target            = 0;
 
 ---
 
-### 5.8 Null-guard паттерн в pjson_pool_pmm.h (Низкий)
+### 5.8 Null-guard паттерн в pjson_pool_pmm.h (Низкий) ✅
+
+**Выполнено (Issue #171):** Извлечены шаблонные helpers `pjson_resolve_or_null<T>()` и `pjson_resolve_const_or_null<T>()`, 8 функций упрощены.
 
 **Файл:** `pjson_pool_pmm.h`
 
@@ -532,7 +550,9 @@ T* resolve_or_null(uintptr_t off) {
 
 ---
 
-### 5.9 Стековая копия parray для безопасности при realloc (Низкий)
+### 5.9 Стековая копия parray для безопасности при realloc (Низкий) ✅
+
+**Выполнено (Issue #171):** Извлечён шаблонный helper `parray_push_back_safe<T>()`, применён в `node_array_push_back()` и `node_binary_push_back()`. `parray_insert_sorted_object_entry()` и `pmap_pmm::_insert_impl()` оставлены как есть (более сложная логика insert+memmove).
 
 **Файлы:** `pjson_node.h` (node_array_push_back, node_binary_push_back), `pmap_pmm.h` (_insert_impl), `pjson_node.h` (parray_insert_sorted_object_entry)
 
@@ -615,3 +635,4 @@ void parray_push_back_safe(uintptr_t node_off, NodeField node::* field, const T&
 *Обновлён 2026-03-21: выполнена задача 1.1 — удалён pam_adapter.h после обновления PMM до v0.43.0 (Issue #169).*
 *Обновлён 2026-03-21: выполнена задача 4.1 — регрессионное тестирование, 32 новых теста (Issue #170).*
 *Обновлён 2026-03-21: code review и план устранения дублирования кода (Issue #128).*
+*Обновлён 2026-03-21: выполнен Этап 5 — устранение дублирования кода, задачи 5.1–5.9 (Issue #171).*

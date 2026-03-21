@@ -640,6 +640,25 @@ struct object_entry_less
     }
 };
 
+/// Безопасный push_back в parray поля node: стековая копия → push_back → переразрешение → запись обратно.
+/// Шаблон устраняет дублирование для array_val, binary_val и других parray-полей node.
+/// @tparam T       Тип элемента parray.
+/// @tparam Field   Тип указатель-на-поле node (PamManager::parray<T> node::*).
+/// @param node_off Смещение node в ПАП (для переразрешения после push_back).
+/// @param field    Указатель на parray-поле node (например, &node::array_val).
+/// @param elem     Элемент для добавления.
+template <typename T, typename Field>
+inline void parray_push_back_safe( uintptr_t node_off, Field field, const T& elem )
+{
+    node* n = pmm_resolve<node>( node_off );
+    if ( n == nullptr )
+        return;
+    auto arr_copy = n->*field;
+    arr_copy.push_back( elem );
+    n         = pmm_resolve<node>( node_off );
+    n->*field = arr_copy;
+}
+
 /// Вставить object_entry в отсортированный parray (вставка или обновление).
 /// Выполняет бинарный поиск, вставляет со сдвигом или обновляет существующий.
 /// Вставить object_entry в отсортированный parray. Безопасна при росте PMM-пула:
@@ -929,15 +948,7 @@ inline node_id node_array_push_back( uintptr_t node_off )
     uintptr_t slot_off = new_slot.addr();
 
     // Инициализируем слот нулями.
-    node* slot = pmm_resolve<node>( slot_off );
-    if ( slot != nullptr )
-    {
-        slot->tag                       = node_tag::null;
-        slot->_pad                      = 0;
-        slot->ref_val.path_length       = 0;
-        slot->ref_val.path_chars_offset = 0;
-        slot->ref_val.target            = 0;
-    }
+    node_init_null( slot_off );
 
     // Переразрешаем array-узел после возможного realloc.
     node* n = pmm_resolve<node>( node_off );
@@ -946,14 +957,7 @@ inline node_id node_array_push_back( uintptr_t node_off )
 
     // Добавляем slot_off в массив через parray::push_back.
     // push_back может вызвать рост PMM-пула, инвалидируя n.
-    // Используем стековую копию parray для безопасности.
-    {
-        PamManager::parray<node_id> arr_copy = n->array_val;
-        arr_copy.push_back( slot_off );
-        // Переразрешаем node после возможного роста пула.
-        n            = pmm_resolve<node>( node_off );
-        n->array_val = arr_copy;
-    }
+    parray_push_back_safe<node_id>( node_off, &node::array_val, slot_off );
 
     return slot_off;
 }
@@ -994,15 +998,7 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     uintptr_t slot_off = new_slot.addr();
 
     // Инициализируем слот нулями.
-    node* slot = pmm_resolve<node>( slot_off );
-    if ( slot != nullptr )
-    {
-        slot->tag                       = node_tag::null;
-        slot->_pad                      = 0;
-        slot->ref_val.path_length       = 0;
-        slot->ref_val.path_chars_offset = 0;
-        slot->ref_val.target            = 0;
-    }
+    node_init_null( slot_off );
 
     // Переразрешаем node после realloc.
     n = pmm_resolve<node>( node_off );
@@ -1029,11 +1025,7 @@ inline void node_binary_push_back( uintptr_t node_off, uint8_t byte )
     if ( n == nullptr || n->tag != node_tag::binary )
         return;
     // push_back может вызвать рост PMM-пула, инвалидируя n.
-    // Используем стековую копию parray для безопасности.
-    PamManager::parray<uint8_t> arr_copy = n->binary_val;
-    arr_copy.push_back( byte );
-    n             = pmm_resolve<node>( node_off );
-    n->binary_val = arr_copy;
+    parray_push_back_safe<uint8_t>( node_off, &node::binary_val, byte );
 }
 
 // ---------------------------------------------------------------------------

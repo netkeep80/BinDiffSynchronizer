@@ -67,27 +67,6 @@ struct db_metrics_pmm
 static_assert( std::is_trivially_copyable<db_metrics_pmm>::value, "db_metrics_pmm должен быть тривиально копируемым" );
 
 // ===========================================================================
-// Вспомогательные функции для подсчёта узлов (PMM версия)
-// ===========================================================================
-
-/// Рекурсивный обход поддерева для подсчёта узлов по типам (PMM версия).
-/// Делегирует в pjson_count_nodes_in_subtree из pjson_db_helpers.h (Задача 16.2).
-/// Логика идентична — обе версии используют node_view и pmm_resolve, которые
-/// работают одинаково для PMM и не-PMM бэкендов.
-inline void pjson_pmm_count_nodes_in_subtree( node_id id, uint64_t& node_cnt, uint64_t& ref_cnt, uint64_t& array_cnt,
-                                              uint64_t& object_cnt, uint64_t& binary_bytes )
-{
-    pjson_count_nodes_in_subtree( id, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
-}
-
-/// Рекурсивный обход поддерева для поиска string-узлов (PMM версия).
-/// Делегирует в pjson_search_node_strings_in_subtree из pjson_db_helpers.h (Задача 16.2).
-inline void pjson_pmm_search_node_strings_in_subtree( node_id id, const char* pattern, std::vector<node_id>& results )
-{
-    pjson_search_node_strings_in_subtree( id, pattern, results );
-}
-
-// ===========================================================================
 // pjson_db_pmm — менеджер персистной JSON-БД на базе PMM (Задача 14.8)
 // ===========================================================================
 
@@ -287,76 +266,34 @@ class pjson_db_pmm
 
     bool put( const char* path, bool value )
     {
-        if ( _is_metrics_path( path ) )
-            return false;
-        node_id slot = _ensure_path( path );
-        if ( slot == 0 )
-            return false;
-        node_set_bool( slot, value );
-        _update_metrics_after_mutation();
-        return true;
+        return _put_impl( path, [value]( node_id s ) { node_set_bool( s, value ); } );
     }
 
     bool put( const char* path, int64_t value )
     {
-        if ( _is_metrics_path( path ) )
-            return false;
-        node_id slot = _ensure_path( path );
-        if ( slot == 0 )
-            return false;
-        node_set_int( slot, value );
-        _update_metrics_after_mutation();
-        return true;
+        return _put_impl( path, [value]( node_id s ) { node_set_int( s, value ); } );
     }
 
     bool put( const char* path, uint64_t value )
     {
-        if ( _is_metrics_path( path ) )
-            return false;
-        node_id slot = _ensure_path( path );
-        if ( slot == 0 )
-            return false;
-        node_set_uint( slot, value );
-        _update_metrics_after_mutation();
-        return true;
+        return _put_impl( path, [value]( node_id s ) { node_set_uint( s, value ); } );
     }
 
     bool put( const char* path, double value )
     {
-        if ( _is_metrics_path( path ) )
-            return false;
-        node_id slot = _ensure_path( path );
-        if ( slot == 0 )
-            return false;
-        node_set_real( slot, value );
-        _update_metrics_after_mutation();
-        return true;
+        return _put_impl( path, [value]( node_id s ) { node_set_real( s, value ); } );
     }
 
     bool put( const char* path, const char* value )
     {
-        if ( _is_metrics_path( path ) )
-            return false;
-        node_id slot = _ensure_path( path );
-        if ( slot == 0 )
-            return false;
-        node_set_string( slot, value );
-        _update_metrics_after_mutation();
-        return true;
+        return _put_impl( path, [value]( node_id s ) { node_set_string( s, value ); } );
     }
 
     bool put( const char* path, int value ) { return put( path, static_cast<int64_t>( value ) ); }
 
     bool put_ref( const char* path, const char* ref_path )
     {
-        if ( _is_metrics_path( path ) )
-            return false;
-        node_id slot = _ensure_path( path );
-        if ( slot == 0 )
-            return false;
-        node_set_ref( slot, ref_path );
-        _update_metrics_after_mutation();
-        return true;
+        return _put_impl( path, [ref_path]( node_id s ) { node_set_ref( s, ref_path ); } );
     }
 
     bool parse_into( const char* path, const char* json )
@@ -530,7 +467,7 @@ class pjson_db_pmm
         node_id              root = _find_root();
         if ( root == 0 )
             return results;
-        pjson_pmm_search_node_strings_in_subtree( root, pattern != nullptr ? pattern : "", results );
+        pjson_search_node_strings_in_subtree( root, pattern != nullptr ? pattern : "", results );
         return results;
     }
 
@@ -679,6 +616,23 @@ class pjson_db_pmm
 
   private:
     uintptr_t _batch_depth = 0; ///< Глубина вложенности пакетных операций.
+
+    // -----------------------------------------------------------------------
+    // Общий шаблон для put-методов
+    // -----------------------------------------------------------------------
+
+    /// Общая реализация put-методов: проверка metrics path, ensure_path, setter, update metrics.
+    template <typename F> bool _put_impl( const char* path, F&& setter )
+    {
+        if ( _is_metrics_path( path ) )
+            return false;
+        node_id slot = _ensure_path( path );
+        if ( slot == 0 )
+            return false;
+        setter( slot );
+        _update_metrics_after_mutation();
+        return true;
+    }
 
     // -----------------------------------------------------------------------
     // Вспомогательные методы: пул и корень
@@ -1241,7 +1195,7 @@ class pjson_db_pmm
 
         node_id root = _find_root();
         if ( root != 0 )
-            pjson_pmm_count_nodes_in_subtree( root, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
+            pjson_count_nodes_in_subtree( root, node_cnt, ref_cnt, array_cnt, object_cnt, binary_bytes );
 
         if ( m->node_count_total == 0 )
             m->node_count_total = node_cnt;
