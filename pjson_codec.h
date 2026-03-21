@@ -319,8 +319,16 @@ inline int parse_hex4( ParseState& st )
 }
 
 /// Декодировать Unicode code point в UTF-8.
-inline void encode_utf8( std::string& out, unsigned cp )
+/// Возвращает false, если cp > 0x10FFFF (за пределами Unicode) или cp — одиночный суррогат (0xD800–0xDFFF).
+inline bool encode_utf8( std::string& out, unsigned cp )
 {
+    // Суррогаты (0xD800–0xDFFF) не являются допустимыми кодовыми точками Unicode.
+    if ( cp >= 0xD800u && cp <= 0xDFFFu )
+        return false;
+    // Максимальный допустимый code point Unicode — 0x10FFFF.
+    if ( cp > 0x10FFFFu )
+        return false;
+
     if ( cp < 0x80u )
     {
         out += static_cast<char>( cp );
@@ -343,6 +351,7 @@ inline void encode_utf8( std::string& out, unsigned cp )
         out += static_cast<char>( 0x80u | ( ( cp >> 6 ) & 0x3Fu ) );
         out += static_cast<char>( 0x80u | ( cp & 0x3Fu ) );
     }
+    return true;
 }
 
 /// Разобрать JSON-строку (позиция уже ПОСЛЕ открывающей ").
@@ -401,12 +410,14 @@ inline bool parse_string( ParseState& st, std::string& out )
                         {
                             unsigned full = 0x10000u + ( static_cast<unsigned>( cp - 0xD800 ) << 10 ) +
                                             static_cast<unsigned>( lo - 0xDC00 );
-                            encode_utf8( out, full );
+                            if ( !encode_utf8( out, full ) )
+                                return false;
                             break;
                         }
                     }
                 }
-                encode_utf8( out, static_cast<unsigned>( cp ) );
+                if ( !encode_utf8( out, static_cast<unsigned>( cp ) ) )
+                    return false;
                 break;
             }
             default:
