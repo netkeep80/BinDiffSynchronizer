@@ -112,7 +112,7 @@ C++20 header-only библиотека для работы с JSON в перси
 | ~~`pstring_pmm.h`~~ | A | Удалён (Issue #144, План 2.1): используйте `PamManager::pstring` напрямую |
 | `pstringview_pmm.h` | A | Тонкая обёртка: типовые алиасы `pmm_pstringview`/`pmm_pstringview_pptr`, hooks для персистентности AVL-корня, `pstringview_pmm_reset()`, AVL-обход для поиска; структура `pstringview_pmm` удалена (Issue #167, План 2.5) |
 | `pjson_pool_pmm.h` | C | Пул узлов: `pjson_pool_pmm` = `PamManager::ppool<node>` — чанковая аллокация O(1) через pmm::ppool, node_id-совместимый API (Issue #166, План 2.4) |
-| `pam_pmm.h` | A | Фасад ПАМ на PMM: `pam_pmm_init()`, `pam_pmm_create<T>()`, `pam_pmm_find()`, `pam_pmm_save()`, реестр именованных объектов |
+| `pam_pmm.h` | A | Фасад ПАМ на PMM: `pam_pmm_init()`, `pam_pmm_create<T>()`, `pam_pmm_find()`, `pam_pmm_save()`, реестр именованных объектов; корневая структура `pam_pmm_root` через `PamManager::set_root()`/`get_root()` (Issue #163, План 1.2) |
 | `fptr_pmm.h` | A | Персистный указатель: `fptr_pmm<T>` — тонкая обёртка над `pptr<T>` с `New()`, `Delete()`, `find()` |
 | ~~`pallocator_pmm.h`~~ | A | Удалён (Issue #143, План 1.3): используйте `PamManager::pallocator<T>` напрямую |
 | `deps/pmm/pmm.h` | A | [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager) — бэкенд ПАП |
@@ -592,6 +592,35 @@ pam_pmm_reset(); // очистить всё ПАП и пересоздать м�
 
 **Примечание:** `put()` и `erase()` имеют накладные расходы O(depth) на обход пути при каждой операции.
 Для массовой загрузки данных рекомендуется предварительно зарезервировать слоты через `ReserveSlots()`.
+
+---
+
+## Состояние миграции на PMM
+
+Библиотека проходит миграцию на типы [PersistMemoryManager](https://github.com/netkeep80/PersistMemoryManager). Подробности — в [plan.md](plan.md).
+
+### Выполненные задачи
+
+| Задача | Описание | Issue |
+|--------|----------|-------|
+| 1.2 | `pam_pmm.h` — корневой объект через `PamManager::set_root()`/`get_root()` | #163 |
+| 1.3 | Удалён `pallocator_pmm.h` — используется `PamManager::pallocator<T>` | #143 |
+| 1.4 | `fptr_pmm<T>` — тонкая обёртка над `pptr<T>` | #143 |
+| 2.1 | Заменён `pstring_pmm` на `PamManager::pstring` | #144 |
+| 2.2 | Заменён `pmem_array_pmm` на `PamManager::parray<T>` | #145 |
+| 2.3 | `pmap_pmm` — sorted array на `PamManager::parray<Entry>` | #166 |
+| 2.4 | `pjson_pool_pmm` → `PamManager::ppool<node>` | #166 |
+| 2.5 | Упрощён `pstringview_pmm.h` — удалена структура `pstringview_pmm` | #167 |
+| 2.6 | Удалён `pvector_pmm.h` | #167 |
+| 3.1 | `node` union — все типы используют PMM (`pstring`, `parray`) | #144, #145 |
+| 3.2 | `pjson_codec` — парсер/сериализатор обновлён | #144, #145 |
+| 3.3 | `pjson_db_pmm` — публичный API обновлён | #144, #145, #166 |
+
+### Оставшиеся задачи
+
+| Задача | Описание | Блокировка |
+|--------|----------|------------|
+| 1.1 | Удаление `pam_adapter.h` (конверсия `pptr<T>` ↔ `uintptr_t`) | Ожидает pmm 4.4: `pptr::byte_offset()`, `pptr_from_byte_offset<T>()` |
 
 ---
 
