@@ -179,65 +179,10 @@ class pjson_db_pmm
         if ( _is_metrics_path( path ) )
             return _get_metrics( path );
 
-        node_id cur = _find_root();
+        node_error err = node_error::none;
+        node_id    cur = _walk_path<false>( path, deref_refs, &err );
         if ( cur == 0 )
-            return node_view_error( node_error::not_found );
-
-        const char* p = path;
-        if ( *p == '/' )
-            ++p;
-
-        while ( *p != '\0' )
-        {
-            const char* seg_start = p;
-            while ( *p != '\0' && *p != '/' )
-                ++p;
-            uintptr_t seg_len = static_cast<uintptr_t>( p - seg_start );
-            if ( *p == '/' )
-                ++p;
-
-            if ( seg_len == 0 )
-                continue;
-
-            std::string seg( seg_start, seg_len );
-
-            if ( deref_refs )
-            {
-                node_view cur_v{ cur };
-                if ( cur_v.is_ref() )
-                {
-                    node_view resolved = cur_v.deref( true, 32 );
-                    if ( !resolved.valid() )
-                        return node_view_error( node_error::ref_cycle );
-                    cur = resolved.id;
-                }
-            }
-
-            node_view cur_v{ cur };
-
-            if ( cur_v.is_object() )
-            {
-                node_view child = cur_v.at( seg.c_str() );
-                if ( !child.valid() )
-                    return node_view_error( node_error::not_found );
-                cur = child.id;
-            }
-            else if ( cur_v.is_array() )
-            {
-                char*     end_ptr = nullptr;
-                uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );
-                if ( end_ptr == seg.c_str() || *end_ptr != '\0' )
-                    return node_view_error( node_error::wrong_type );
-                node_view elem = cur_v.at( idx );
-                if ( !elem.valid() )
-                    return node_view_error( node_error::index_out_of_range );
-                cur = elem.id;
-            }
-            else
-            {
-                return node_view_error( node_error::wrong_type );
-            }
-        }
+            return node_view_error( err );
 
         node_view result{ cur };
         if ( deref_refs && result.is_ref() )
@@ -635,6 +580,149 @@ class pjson_db_pmm
     }
 
     // -----------------------------------------------------------------------
+    // Общий обход пути: _walk_path
+    // -----------------------------------------------------------------------
+
+    /// Обход пути по сегментам с двумя режимами:
+    ///   CreateMode=false (read) — возвращает 0 при отсутствии узла;
+    ///   CreateMode=true  (create) — создаёт промежуточные узлы.
+    /// @param path        абсолютный путь вида /a/b/0/c
+    /// @param deref_refs  разыменовывать ли $ref-узлы при обходе
+    /// @param out_err     (только read) указатель на код ошибки (может быть nullptr)
+    /// @return node_id целевого узла или 0 при ошибке
+    template <bool CreateMode> node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) const
+    {
+        auto fail = [&]( node_error e ) -> node_id
+        {
+            if ( out_err )
+                *out_err = e;
+            return 0;
+        };
+
+        if ( path == nullptr )
+            return fail( node_error::not_found );
+
+        node_id cur = _find_root();
+        if ( cur == 0 )
+            return fail( node_error::not_found );
+
+        const char* p = path;
+        if ( *p == '/' )
+            ++p;
+
+        while ( *p != '\0' )
+        {
+            // --- разбор сегмента ---
+            const char* seg_start = p;
+            while ( *p != '\0' && *p != '/' )
+                ++p;
+            uintptr_t seg_len = static_cast<uintptr_t>( p - seg_start );
+            if ( *p == '/' )
+                ++p;
+
+            if ( seg_len == 0 )
+                continue;
+
+            std::string seg( seg_start, seg_len );
+
+            // --- разыменование $ref ---
+            if ( deref_refs )
+            {
+                node_view cur_v{ cur };
+                if ( cur_v.is_ref() )
+                {
+                    node_view resolved = cur_v.deref( true, 32 );
+                    if ( !resolved.valid() )
+                        return fail( node_error::ref_cycle );
+                    cur = resolved.id;
+                }
+            }
+
+            node_view cur_v{ cur };
+
+            [[maybe_unused]] bool is_last = ( *p == '\0' );
+
+            // --- навигация по object ---
+            if ( cur_v.is_object() )
+            {
+                node_view child = cur_v.at( seg.c_str() );
+                if ( child.valid() )
+                {
+                    cur = child.id;
+                }
+                else if constexpr ( CreateMode )
+                {
+                    node_id slot = node_object_insert( cur, seg.c_str() );
+                    if ( slot == 0 )
+                        return 0;
+                    if ( !is_last )
+                    {
+                        if ( pjson_next_seg_is_numeric( p ) )
+                            node_set_array( slot );
+                        else
+                            node_set_object( slot );
+                    }
+                    cur = slot;
+                }
+                else
+                {
+                    return fail( node_error::not_found );
+                }
+            }
+            // --- навигация по array ---
+            else if ( cur_v.is_array() )
+            {
+                char*     end_ptr = nullptr;
+                uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );
+                if ( end_ptr == seg.c_str() || *end_ptr != '\0' )
+                    return fail( node_error::wrong_type );
+
+                node_view elem = cur_v.at( idx );
+                if ( elem.valid() )
+                {
+                    cur = elem.id;
+                }
+                else if constexpr ( CreateMode )
+                {
+                    uintptr_t cur_size = cur_v.size();
+                    for ( uintptr_t i = cur_size; i <= idx; ++i )
+                    {
+                        node_id slot = node_array_push_back( cur );
+                        if ( i == idx )
+                        {
+                            if ( !is_last )
+                            {
+                                if ( pjson_next_seg_is_numeric( p ) )
+                                    node_set_array( slot );
+                                else
+                                    node_set_object( slot );
+                            }
+                            cur = slot;
+                        }
+                    }
+                }
+                else
+                {
+                    return fail( node_error::index_out_of_range );
+                }
+            }
+            // --- ни object, ни array ---
+            else if constexpr ( CreateMode )
+            {
+                if ( is_last )
+                    return cur;
+                return 0;
+            }
+            else
+            {
+                return fail( node_error::wrong_type );
+            }
+        }
+
+        return cur;
+    }
+
+    // -----------------------------------------------------------------------
     // Вспомогательные методы: пул и корень
     // -----------------------------------------------------------------------
 
@@ -834,111 +922,7 @@ class pjson_db_pmm
         return node_view{ tmp_off };
     }
 
-    node_id _ensure_path( const char* path )
-    {
-        if ( path == nullptr )
-            return 0;
-
-        node_id cur = _find_root();
-        if ( cur == 0 )
-            return 0;
-
-        const char* p = path;
-        if ( *p == '/' )
-            ++p;
-
-        while ( *p != '\0' )
-        {
-            const char* seg_start = p;
-            while ( *p != '\0' && *p != '/' )
-                ++p;
-            uintptr_t seg_len = static_cast<uintptr_t>( p - seg_start );
-            if ( *p == '/' )
-                ++p;
-
-            if ( seg_len == 0 )
-                continue;
-
-            std::string seg( seg_start, seg_len );
-
-            node_view cur_v{ cur };
-
-            if ( cur_v.is_ref() )
-            {
-                node_view resolved = cur_v.deref( true, 32 );
-                if ( !resolved.valid() )
-                    return 0;
-                cur   = resolved.id;
-                cur_v = resolved;
-            }
-
-            bool is_last = ( *p == '\0' );
-
-            if ( cur_v.is_object() )
-            {
-                node_view child = cur_v.at( seg.c_str() );
-                if ( child.valid() )
-                {
-                    cur = child.id;
-                }
-                else
-                {
-                    node_id slot = node_object_insert( cur, seg.c_str() );
-                    if ( slot == 0 )
-                        return 0;
-                    if ( !is_last )
-                    {
-                        if ( pjson_next_seg_is_numeric( p ) )
-                            node_set_array( slot );
-                        else
-                            node_set_object( slot );
-                    }
-                    cur = slot;
-                }
-            }
-            else if ( cur_v.is_array() )
-            {
-                char*     end_ptr = nullptr;
-                uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );
-                if ( end_ptr == seg.c_str() || *end_ptr != '\0' )
-                    return 0;
-                node_view elem = cur_v.at( idx );
-                if ( elem.valid() )
-                {
-                    cur = elem.id;
-                }
-                else
-                {
-                    uintptr_t cur_size = cur_v.size();
-                    for ( uintptr_t i = cur_size; i <= idx; ++i )
-                    {
-                        node_id slot = node_array_push_back( cur );
-                        if ( i == idx )
-                        {
-                            if ( !is_last )
-                            {
-                                if ( pjson_next_seg_is_numeric( p ) )
-                                    node_set_array( slot );
-                                else
-                                    node_set_object( slot );
-                            }
-                            cur = slot;
-                        }
-                    }
-                }
-            }
-            else if ( is_last )
-            {
-                return cur;
-            }
-            else
-            {
-                return 0;
-            }
-        }
-
-        return cur;
-    }
+    node_id _ensure_path( const char* path ) { return _walk_path<true>( path, true, nullptr ); }
 
     // -----------------------------------------------------------------------
     // Вспомогательные методы: удаление узлов
