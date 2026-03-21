@@ -1014,12 +1014,7 @@ class pjson_db_pmm
             return false;
         uintptr_t del_idx = find_result.index;
 
-        for ( uintptr_t i = del_idx; i + 1 < sz; ++i )
-            entries[i] = entries[i + 1];
-
-        n = pmm_resolve<node>( obj_id );
-        if ( n != nullptr )
-            n->object_val._size--;
+        n->object_val.erase( del_idx );
 
         return true;
     }
@@ -1030,22 +1025,10 @@ class pjson_db_pmm
         if ( n == nullptr )
             return false;
 
-        uintptr_t sz = n->array_val.size();
-        if ( idx >= sz )
+        if ( idx >= n->array_val.size() )
             return false;
 
-        node_id* arr = n->array_val.data();
-        if ( arr == nullptr )
-            return false;
-
-        for ( uintptr_t i = idx; i + 1 < sz; ++i )
-            arr[i] = arr[i + 1];
-        arr[sz - 1] = 0;
-
-        n = pmm_resolve<node>( arr_id );
-        if ( n != nullptr )
-            n->array_val._size--;
-
+        n->array_val.erase( idx );
         return true;
     }
 

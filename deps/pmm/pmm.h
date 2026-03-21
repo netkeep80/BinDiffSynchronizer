@@ -4554,6 +4554,57 @@ template <typename T, typename ManagerT> struct parray
     }
 
     /**
+     * @brief Insert an element at the given index, shifting subsequent elements right.
+     *
+     * Elements at positions [index, size) are shifted one position to the right.
+     * If index == size(), behaves like push_back().
+     * Complexity: O(n) due to element shifting.
+     *
+     * @param index Position to insert at (0-based, must be <= size()).
+     * @param value The element to insert.
+     * @return true on success, false if index is out of range or allocation fails.
+     */
+    bool insert( std::size_t index, const T& value ) noexcept
+    {
+        if ( index > static_cast<std::size_t>( _size ) )
+            return false;
+        if ( !ensure_capacity( _size + 1 ) )
+            return false;
+        T* d = resolve_data();
+        if ( d == nullptr )
+            return false;
+        // Shift elements [index, _size) one position to the right.
+        if ( index < static_cast<std::size_t>( _size ) )
+            std::memmove( d + index + 1, d + index, ( static_cast<std::size_t>( _size ) - index ) * sizeof( T ) );
+        d[index] = value;
+        ++_size;
+        return true;
+    }
+
+    /**
+     * @brief Remove the element at the given index, shifting subsequent elements left.
+     *
+     * Elements at positions [index+1, size) are shifted one position to the left.
+     * Complexity: O(n) due to element shifting.
+     *
+     * @param index Position to remove (0-based, must be < size()).
+     * @return true on success, false if index is out of range.
+     */
+    bool erase( std::size_t index ) noexcept
+    {
+        if ( index >= static_cast<std::size_t>( _size ) )
+            return false;
+        T* d = resolve_data();
+        if ( d == nullptr )
+            return false;
+        // Shift elements [index+1, _size) one position to the left.
+        if ( index + 1 < static_cast<std::size_t>( _size ) )
+            std::memmove( d + index, d + index + 1, ( static_cast<std::size_t>( _size ) - index - 1 ) * sizeof( T ) );
+        --_size;
+        return true;
+    }
+
+    /**
      * @brief Clear the array (set size to 0) without freeing the data block.
      *
      * Capacity is preserved for potential reuse.

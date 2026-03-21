@@ -705,6 +705,44 @@ node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) con
 - **Шаблонный put (5.4)** упростит добавление новых типов узлов при расширении JSON-модели
 - **Общий _lower_bound (5.1–5.2)** обеспечит единую реализацию поиска в sorted-array, что критично при добавлении новых контейнерных типов
 
+## Этап 6: Использование parray::insert/erase (Issue #183, PMM PR #234)
+
+### 6.1 Обновление PMM до версии с parray::insert/erase ✅
+
+**Выполнено (Issue #183):** Обновлён `deps/pmm/pmm.h` до версии с `parray::insert(index, value)` и `parray::erase(index)` (PMM Issue #233, PR #234).
+
+### 6.2 Рефакторинг pmap_pmm.h ✅
+
+**Выполнено (Issue #183):**
+
+- `_insert_impl()`: заменён паттерн `push_back(empty) + memmove + write` на `arr_copy.insert(idx, entry)` — сокращение с ~20 строк до ~10
+- `erase()`: заменён паттерн `memmove + pop_back` на `arr_.erase(lo)` — сокращение с 7 строк до 1
+- Удалён `insert(k, v, self_off)` — 3-аргументная перегрузка (compatibility shim); `insert(k, v)` сам вычисляет `self_off`
+- Удалён `#include <cstring>` — заменён `std::memset(&def, 0, sizeof(V))` на `V def{}`
+- Сохранён `insert_direct()` — используется в production-коде (pam_pmm.h) и тестах
+
+### 6.3 Рефакторинг pjson_node.h ✅
+
+**Выполнено (Issue #183):**
+
+- `parray_insert_sorted_object_entry()`: заменён паттерн `push_back(empty) + memmove + write` на `arr.insert(idx, value)` — сокращение с 9 строк до 1
+
+### 6.4 Рефакторинг pjson_db_pmm.h ✅
+
+**Выполнено (Issue #183):**
+
+- `_object_erase()`: заменён ручной цикл сдвига + прямой `_size--` на `n->object_val.erase(del_idx)` — сокращение с 5 строк до 1
+- `_array_erase_at()`: заменён ручной цикл сдвига + зануление + `_size--` на `n->array_val.erase(idx)` — сокращение с 10 строк до 3
+
+### Сводка Этапа 6
+
+| Файл | Изменение | Строк удалено |
+|------|-----------|---------------|
+| `pmap_pmm.h` | `parray::insert` + `parray::erase` | ~20 |
+| `pjson_node.h` | `parray::insert` | ~8 |
+| `pjson_db_pmm.h` | `parray::erase` (2 места) | ~15 |
+| **Итого** | | **~43 строки** |
+
 ---
 
 *Документ создан 2026-03-19 на основе анализа BinDiffSynchronizer и плана pmm Фазы 3.*
@@ -716,3 +754,4 @@ node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) con
 *Обновлён 2026-03-21: выполнены задачи 4.2 (совместимость save/load) и 4.3 (бенчмарки) (Issue #172).*
 *Обновлён 2026-03-21: задача 4.4 — тестирование стабильности node_id ссылок после resize array/object (Issue #194).*
 *Обновлён 2026-03-21: задача 5.10 — объединение get() и _ensure_path() в общий _walk_path<CreateMode>() (Issue #182).*
+*Обновлён 2026-03-21: Этап 6 — рефакторинг на parray::insert/erase (Issue #183, PMM PR #234).*

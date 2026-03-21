@@ -10,7 +10,6 @@
  */
 
 #include "pam_pmm_config.h"
-#include <cstring>
 #include <type_traits>
 
 namespace pjson
@@ -94,15 +93,6 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
      *
      * @param k Ключ.
      * @param v Значение.
-     * @param self_off Байтовое смещение этого pmap_pmm в ПАП (игнорируется, сохранён для совместимости).
-     */
-    void insert( const K& k, const V& v, uintptr_t self_off ) { _insert_impl( k, v, self_off ); }
-
-    /**
-     * @brief Вставить или обновить пару.
-     *
-     * @param k Ключ.
-     * @param v Значение.
      */
     void insert( const K& k, const V& v )
     {
@@ -140,10 +130,10 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
     /**
      * @brief Внутренняя реализация вставки, безопасная при росте PMM-пула.
      *
-     * Когда pmap_pmm хранится внутри PMM-пула, операция push_back может
+     * Когда pmap_pmm хранится внутри PMM-пула, операция insert может
      * вызвать рост пула (malloc+memcpy+free), после чего указатель this
-     * становится невалидным. Поэтому после push_back необходимо повторно
-     * разрешить self_off для получения актуального this.
+     * становится невалидным. Поэтому insert выполняется на стековой копии
+     * arr_, а результат записывается обратно после повторной резолвации self_off.
      */
     void _insert_impl( const K& k, const V& v, uintptr_t self_off )
     {
@@ -170,29 +160,21 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
             }
         }
 
-        // Вставляем новый элемент: push_back может вызвать рост PMM-пула,
-        // что инвалидирует this. Сохраняем состояние arr_ и выполняем
-        // push_back через копию, затем записываем результат обратно.
+        // Вставляем новый элемент: insert может вызвать рост PMM-пула,
+        // что инвалидирует this. Выполняем insert на стековой копии arr_,
+        // затем записываем результат обратно после повторной резолвации.
         {
             PamManager::parray<Entry> arr_copy = arr_;
-            Entry                     empty_entry{};
-            arr_copy.push_back( empty_entry );
+            Entry                     new_entry{};
+            new_entry.key   = k;
+            new_entry.value = v;
+            arr_copy.insert( idx, new_entry );
 
-            // После push_back пул мог вырасти — перечитываем this.
+            // После insert пул мог вырасти — перечитываем this.
             pmap_pmm<K, V>* self =
                 ( self_off != 0 ) ? reinterpret_cast<pmap_pmm<K, V>*>( PamManager::backend().base_ptr() + self_off )
                                   : this;
             self->arr_ = arr_copy;
-
-            Entry* raw = self->arr_.data();
-            if ( raw != nullptr && sz > idx )
-                std::memmove( raw + idx + 1, raw + idx, ( sz - idx ) * sizeof( Entry ) );
-
-            if ( raw != nullptr )
-            {
-                raw[idx].key   = k;
-                raw[idx].value = v;
-            }
         }
     }
 
@@ -240,7 +222,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         if ( arr_.empty() )
             return false;
 
-        Entry* raw = arr_.data();
+        const Entry* raw = arr_.data();
         if ( raw == nullptr )
             return false;
 
@@ -250,11 +232,7 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         if ( lo >= sz || Less{}( k, raw[lo].key ) || Less{}( raw[lo].key, k ) )
             return false;
 
-        // Сдвигаем элементы [lo+1..size-1] влево
-        if ( lo + 1 < sz )
-            std::memmove( raw + lo, raw + lo + 1, ( sz - lo - 1 ) * sizeof( Entry ) );
-
-        arr_.pop_back();
+        arr_.erase( lo );
         return true;
     }
 
@@ -273,9 +251,8 @@ template <typename K, typename V> class pmap_pmm : pmap_pmm_trivial_check<K, V>
         if ( existing != nullptr )
             return *existing;
 
-        // Вставляем значение по умолчанию
-        V def;
-        std::memset( &def, 0, sizeof( V ) );
+        // Вставляем значение по умолчанию (нулевая инициализация)
+        V def{};
         insert( k, def );
 
         // После вставки ищем снова (может быть realloc)

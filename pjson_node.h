@@ -711,20 +711,9 @@ inline void parray_insert_sorted_object_entry( uintptr_t node_off, const object_
     }
 
     // Нужно вставить новый элемент в позицию idx.
-    // Добавляем пустой элемент в конец, затем сдвигаем.
-    // push_back может вызвать рост PMM-пула, инвалидируя все указатели.
+    // insert может вызвать рост PMM-пула, инвалидируя все указатели.
     // Работаем на стековой копии arr (безопасно).
-    object_entry empty{};
-    arr.push_back( empty );
-
-    // После push_back данные могли переместиться — получаем свежий указатель.
-    object_entry* raw = arr.data();
-    if ( raw != nullptr && sz > idx )
-        std::memmove( raw + idx + 1, raw + idx, ( sz - idx ) * sizeof( object_entry ) );
-
-    // Записываем новый элемент.
-    if ( raw != nullptr )
-        raw[idx] = value;
+    arr.insert( idx, value );
 
     // Записываем обновлённый parray обратно в node (после возможного роста пула).
     n             = pmm_resolve<node>( node_off );

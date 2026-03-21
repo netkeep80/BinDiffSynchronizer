@@ -250,7 +250,7 @@ TEST_CASE( "pmap_pmm perf: erase 100k entries completes within 2 seconds", "[pma
     fm.New();
 
     for ( unsigned i = 0; i < N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i ), fm.addr() );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i ) );
 
     REQUIRE( fm->size() == N );
 
@@ -288,7 +288,7 @@ TEST_CASE( "pmap_pmm perf: insert 100k entries completes within 2 seconds", "[pm
     auto t0 = std::chrono::steady_clock::now();
 
     for ( unsigned i = 0; i < N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i * 2 ), fm.addr() );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i * 2 ) );
 
     auto t1 = std::chrono::steady_clock::now();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 ).count();

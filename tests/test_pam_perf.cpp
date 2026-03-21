@@ -37,7 +37,7 @@ TEST_CASE( "pmap_pmm<int,int>: insert 100 000 entries", "[pmap][perf][insert]" )
     auto t0 = std::chrono::steady_clock::now();
 
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i * 2 ), fm.addr() );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i * 2 ) );
 
     auto t1 = std::chrono::steady_clock::now();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 ).count();
@@ -62,7 +62,7 @@ TEST_CASE( "pmap_pmm<int,int>: find 100 000 entries", "[pmap][perf][find]" )
     fm.New();
 
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i * 3 ), fm.addr() );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i * 3 ) );
 
     REQUIRE( fm->size() == PERF_N );
 
@@ -99,7 +99,7 @@ TEST_CASE( "pmap_pmm<int,int>: verify 100 000 values after insert", "[pmap][perf
     fm.New();
 
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i * 5 ), fm.addr() );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i * 5 ) );
 
     REQUIRE( fm->size() == PERF_N );
 
@@ -132,7 +132,7 @@ TEST_CASE( "pmap_pmm<int,int>: erase 100 000 entries", "[pmap][perf][erase]" )
     fm.New();
 
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i ), fm.addr() );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i ) );
 
     REQUIRE( fm->size() == PERF_N );
 
@@ -170,7 +170,7 @@ TEST_CASE( "pmap_pmm<int,int>: full lifecycle with 100 000 entries", "[pmap][per
     {
         auto t0 = std::chrono::steady_clock::now();
         for ( unsigned i = 0; i < PERF_N; ++i )
-            fm->insert( static_cast<int>( i ), static_cast<int>( i * 7 ), fm.addr() );
+            fm->insert( static_cast<int>( i ), static_cast<int>( i * 7 ) );
         auto t1 = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 ).count();
         std::printf( "[perf][lifecycle] insert: %lld ms\n", static_cast<long long>( ms ) );
@@ -240,7 +240,7 @@ TEST_CASE( "pmap_pmm<int,int>: find 100 000 non-existent keys returns nullptr", 
 
     // Вставляем ключи 0..PERF_N-1
     for ( unsigned i = 0; i < PERF_N; ++i )
-        fm->insert( static_cast<int>( i ), static_cast<int>( i ), fm.addr() );
+        fm->insert( static_cast<int>( i ), static_cast<int>( i ) );
 
     // Ищем ключи PERF_N..2*PERF_N-1 (их нет)
     auto t0 = std::chrono::steady_clock::now();
