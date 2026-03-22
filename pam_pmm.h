@@ -165,12 +165,11 @@ static_assert( std::is_trivially_copyable<pam_pmm_registry>::value,
  * @brief Инкапсулированное состояние PMM-фасада.
  *
  * Три ранее разрозненные статические переменные (filename, root_offset,
- * initialized) объединены в одну структуру. Это первый шаг к поддержке
- * нескольких экземпляров БД в одном процессе (Проблема 3, plan.md).
+ * initialized) объединены в одну структуру (Этап A, Issue #205).
  *
- * Текущая реализация использует глобальный синглтон (pam_pmm_global_state()),
- * а функции detail:: делегируют ему. В дальнейшем (Этап 10.1b) состояние
- * будет передаваться как явный параметр.
+ * Этап B (Issue #209): все pam_pmm_* функции принимают pam_pmm_state&
+ * как явный параметр. Глобальные обёртки без параметра сохранены для
+ * обратной совместимости и делегируют глобальному синглтону.
  */
 struct pam_pmm_state
 {
@@ -222,25 +221,37 @@ inline bool& pam_pmm_initialized()
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Получить указатель на корневую структуру.
+ * @brief Получить указатель на корневую структуру (явное состояние).
  */
-inline pam_pmm_root* pam_pmm_get_root()
+inline pam_pmm_root* pam_pmm_get_root( pam_pmm_state& state )
 {
-    uintptr_t off = detail::pam_pmm_root_offset();
+    uintptr_t off = state.root_offset;
     if ( off == 0 )
         return nullptr;
     return pmm_resolve<pam_pmm_root>( off );
 }
 
-/**
- * @brief Получить указатель на реестр.
- */
-inline pam_pmm_registry* pam_pmm_get_registry()
+/// Обёртка для обратной совместимости (делегирует глобальному состоянию).
+inline pam_pmm_root* pam_pmm_get_root()
 {
-    pam_pmm_root* root = pam_pmm_get_root();
+    return pam_pmm_get_root( pam_pmm_global_state() );
+}
+
+/**
+ * @brief Получить указатель на реестр (явное состояние).
+ */
+inline pam_pmm_registry* pam_pmm_get_registry( pam_pmm_state& state )
+{
+    pam_pmm_root* root = pam_pmm_get_root( state );
     if ( root == nullptr || root->registry_off == 0 )
         return nullptr;
     return pmm_resolve<pam_pmm_registry>( root->registry_off );
+}
+
+/// Обёртка для обратной совместимости.
+inline pam_pmm_registry* pam_pmm_get_registry()
+{
+    return pam_pmm_get_registry( pam_pmm_global_state() );
 }
 
 /**
@@ -312,21 +323,22 @@ inline uintptr_t pam_pmm_create_root_and_registry()
 }
 
 /**
- * @brief Инициализировать PMM из файла или создать новое хранилище.
+ * @brief Инициализировать PMM из файла или создать новое хранилище (явное состояние).
  *
+ * @param state Состояние PMM-фасада.
  * @param filename Путь к файлу хранилища (может быть nullptr для in-memory).
  */
-inline void pam_pmm_init( const char* filename )
+inline void pam_pmm_init( pam_pmm_state& state, const char* filename )
 {
     // Сохраняем имя файла.
     if ( filename != nullptr )
     {
-        std::strncpy( detail::pam_pmm_filename(), filename, 255 );
-        detail::pam_pmm_filename()[255] = '\0';
+        std::strncpy( state.filename, filename, 255 );
+        state.filename[255] = '\0';
     }
     else
     {
-        detail::pam_pmm_filename()[0] = '\0';
+        state.filename[0] = '\0';
     }
 
     // Пытаемся загрузить существующий файл.
@@ -361,8 +373,8 @@ inline void pam_pmm_init( const char* filename )
                         pam_pmm_root* root = root_pptr.resolve();
                         if ( root != nullptr && root->magic == PAM_PMM_MAGIC && root->version == PAM_PMM_VERSION )
                         {
-                            detail::pam_pmm_root_offset() = root_pptr.byte_offset();
-                            loaded                        = true;
+                            state.root_offset = root_pptr.byte_offset();
+                            loaded            = true;
                         }
                     }
                 }
@@ -382,65 +394,89 @@ inline void pam_pmm_init( const char* filename )
         PamManager::create( PAM_PMM_INITIAL_SIZE );
 
         // Создаём корневую структуру и реестр.
-        uintptr_t root_off            = pam_pmm_create_root_and_registry();
-        detail::pam_pmm_root_offset() = root_off;
+        uintptr_t root_off  = pam_pmm_create_root_and_registry();
+        state.root_offset   = root_off;
     }
 
-    detail::pam_pmm_initialized() = true;
+    state.initialized = true;
+}
+
+/// Обёртка для обратной совместимости.
+inline void pam_pmm_init( const char* filename )
+{
+    pam_pmm_init( pam_pmm_global_state(), filename );
 }
 
 /**
- * @brief Сохранить PMM в файл.
- *
- * Сохраняет PMM данные на диск.
+ * @brief Сохранить PMM в файл (явное состояние).
  */
-inline void pam_pmm_save()
+inline void pam_pmm_save( pam_pmm_state& state )
 {
-    const char* filename = detail::pam_pmm_filename();
-    if ( filename[0] == '\0' )
+    if ( state.filename[0] == '\0' )
         return;
 
-    pmm::save_manager<PamManager>( filename );
+    pmm::save_manager<PamManager>( state.filename );
+}
+
+/// Обёртка для обратной совместимости.
+inline void pam_pmm_save()
+{
+    pam_pmm_save( pam_pmm_global_state() );
 }
 
 /**
- * @brief Уничтожить PMM и освободить ресурсы.
+ * @brief Уничтожить PMM и освободить ресурсы (явное состояние).
  *
  * Сохраняет данные перед уничтожением, если указан файл.
  */
+inline void pam_pmm_destroy( pam_pmm_state& state )
+{
+    pam_pmm_save( state );
+    PamManager::destroy();
+    state.reset();
+}
+
+/// Обёртка для обратной совместимости.
 inline void pam_pmm_destroy()
 {
-    pam_pmm_save();
-    PamManager::destroy();
-
-    detail::pam_pmm_filename()[0] = '\0';
-    detail::pam_pmm_root_offset() = 0;
-    detail::pam_pmm_initialized() = false;
+    pam_pmm_destroy( pam_pmm_global_state() );
 }
 
 /**
- * @brief Сбросить PMM к пустому состоянию за O(1).
+ * @brief Сбросить PMM к пустому состоянию за O(1) (явное состояние).
  *
  * Пересоздаёт хранилище с чистым состоянием.
  */
-inline void pam_pmm_reset()
+inline void pam_pmm_reset( pam_pmm_state& state )
 {
     // Уничтожаем и создаём заново.
     PamManager::destroy();
     PamManager::create( PAM_PMM_INITIAL_SIZE );
 
     // Создаём корневую структуру и реестр.
-    uintptr_t root_off            = pam_pmm_create_root_and_registry();
-    detail::pam_pmm_root_offset() = root_off;
-    detail::pam_pmm_initialized() = true;
+    uintptr_t root_off = pam_pmm_create_root_and_registry();
+    state.root_offset   = root_off;
+    state.initialized   = true;
+}
+
+/// Обёртка для обратной совместимости.
+inline void pam_pmm_reset()
+{
+    pam_pmm_reset( pam_pmm_global_state() );
 }
 
 /**
- * @brief Проверить, инициализирован ли PMM.
+ * @brief Проверить, инициализирован ли PMM (явное состояние).
  */
+inline bool pam_pmm_is_initialized( const pam_pmm_state& state )
+{
+    return state.initialized && PamManager::is_initialized();
+}
+
+/// Обёртка для обратной совместимости.
 inline bool pam_pmm_is_initialized()
 {
-    return detail::pam_pmm_initialized() && PamManager::is_initialized();
+    return pam_pmm_is_initialized( pam_pmm_global_state() );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -448,18 +484,19 @@ inline bool pam_pmm_is_initialized()
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Создать один объект типа T в ПАП.
+ * @brief Создать один объект типа T в ПАП (явное состояние).
  *
  * @tparam T Тип создаваемого объекта. Должен быть тривиально копируемым.
+ * @param state Состояние PMM-фасада.
  * @param name Имя объекта (может быть nullptr для безымянного).
  * @return Байтовое смещение объекта в ПАП; 0 при ошибке.
  */
-template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullptr )
+template <typename T> inline uintptr_t pam_pmm_create( pam_pmm_state& state, const char* name = nullptr )
 {
     static_assert( std::is_trivially_copyable<T>::value,
                    "pam_pmm_create<T> требует, чтобы T был тривиально копируемым" );
 
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
 
@@ -486,7 +523,7 @@ template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullpt
         std::memset( static_cast<void*>( obj ), 0, sizeof( T ) );
 
     // Перезапрашиваем указатель на реестр после аллокации.
-    reg = pam_pmm_get_registry();
+    reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
 
@@ -502,7 +539,7 @@ template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullpt
     if ( name != nullptr && name[0] != '\0' )
     {
         // Перезапрашиваем указатель после вставки в slot_map_.
-        reg = pam_pmm_get_registry();
+        reg = pam_pmm_get_registry( state );
         if ( reg == nullptr )
             return 0;
 
@@ -514,15 +551,22 @@ template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullpt
     return obj_off;
 }
 
+/// Обёртка для обратной совместимости.
+template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullptr )
+{
+    return pam_pmm_create<T>( pam_pmm_global_state(), name );
+}
+
 /**
- * @brief Создать массив из count объектов типа T в ПАП.
+ * @brief Создать массив из count объектов типа T в ПАП (явное состояние).
  *
  * @tparam T Тип элементов массива. Должен быть тривиально копируемым.
+ * @param state Состояние PMM-фасада.
  * @param count Количество элементов.
  * @param name Имя массива (может быть nullptr).
  * @return Байтовое смещение первого элемента; 0 при ошибке.
  */
-template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, const char* name = nullptr )
+template <typename T> inline uintptr_t pam_pmm_create_array( pam_pmm_state& state, unsigned count, const char* name = nullptr )
 {
     static_assert( std::is_trivially_copyable<T>::value,
                    "pam_pmm_create_array<T> требует, чтобы T был тривиально копируемым" );
@@ -530,7 +574,7 @@ template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, con
     if ( count == 0 )
         return 0;
 
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
 
@@ -557,7 +601,7 @@ template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, con
         std::memset( static_cast<void*>( arr ), 0, sizeof( T ) * count );
 
     // Перезапрашиваем указатель на реестр после аллокации.
-    reg = pam_pmm_get_registry();
+    reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
 
@@ -573,7 +617,7 @@ template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, con
     if ( name != nullptr && name[0] != '\0' )
     {
         // Перезапрашиваем указатель после вставки.
-        reg = pam_pmm_get_registry();
+        reg = pam_pmm_get_registry( state );
         if ( reg == nullptr )
             return 0;
 
@@ -585,21 +629,28 @@ template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, con
     return arr_off;
 }
 
+/// Обёртка для обратной совместимости.
+template <typename T> inline uintptr_t pam_pmm_create_array( unsigned count, const char* name = nullptr )
+{
+    return pam_pmm_create_array<T>( pam_pmm_global_state(), count, name );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // УДАЛЕНИЕ ОБЪЕКТОВ
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Удалить объект по байтовому смещению.
+ * @brief Удалить объект по байтовому смещению (явное состояние).
  *
+ * @param state Состояние PMM-фасада.
  * @param offset Байтовое смещение объекта.
  */
-inline void pam_pmm_delete( uintptr_t offset )
+inline void pam_pmm_delete( pam_pmm_state& state, uintptr_t offset )
 {
     if ( offset == 0 )
         return;
 
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return;
 
@@ -624,7 +675,7 @@ inline void pam_pmm_delete( uintptr_t offset )
     }
 
     // Перезапрашиваем реестр после удаления из name_map_.
-    reg = pam_pmm_get_registry();
+    reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return;
 
@@ -637,22 +688,29 @@ inline void pam_pmm_delete( uintptr_t offset )
     PamManager::template deallocate_typed<char>( p );
 }
 
+/// Обёртка для обратной совместимости.
+inline void pam_pmm_delete( uintptr_t offset )
+{
+    pam_pmm_delete( pam_pmm_global_state(), offset );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ПОИСК ОБЪЕКТОВ
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Найти объект по имени.
+ * @brief Найти объект по имени (явное состояние).
  *
+ * @param state Состояние PMM-фасада.
  * @param name Имя объекта.
  * @return Байтовое смещение объекта; 0 если не найден.
  */
-inline uintptr_t pam_pmm_find( const char* name )
+inline uintptr_t pam_pmm_find( pam_pmm_state& state, const char* name )
 {
     if ( name == nullptr || name[0] == '\0' )
         return 0;
 
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
 
@@ -666,19 +724,26 @@ inline uintptr_t pam_pmm_find( const char* name )
     return slot->offset;
 }
 
+/// Обёртка для обратной совместимости.
+inline uintptr_t pam_pmm_find( const char* name )
+{
+    return pam_pmm_find( pam_pmm_global_state(), name );
+}
+
 /**
- * @brief Найти объект по имени с проверкой размера элемента.
+ * @brief Найти объект по имени с проверкой размера элемента (явное состояние).
  *
  * @tparam T Ожидаемый тип объекта.
+ * @param state Состояние PMM-фасада.
  * @param name Имя объекта.
  * @return Байтовое смещение объекта; 0 если не найден или размер не совпадает.
  */
-template <typename T> inline uintptr_t pam_pmm_find_typed( const char* name )
+template <typename T> inline uintptr_t pam_pmm_find_typed( pam_pmm_state& state, const char* name )
 {
     if ( name == nullptr || name[0] == '\0' )
         return 0;
 
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
 
@@ -696,18 +761,25 @@ template <typename T> inline uintptr_t pam_pmm_find_typed( const char* name )
     return slot->offset;
 }
 
+/// Обёртка для обратной совместимости.
+template <typename T> inline uintptr_t pam_pmm_find_typed( const char* name )
+{
+    return pam_pmm_find_typed<T>( pam_pmm_global_state(), name );
+}
+
 /**
- * @brief Получить имя объекта по смещению.
+ * @brief Получить имя объекта по смещению (явное состояние).
  *
+ * @param state Состояние PMM-фасада.
  * @param offset Байтовое смещение объекта.
  * @return Указатель на строку имени или nullptr.
  */
-inline const char* pam_pmm_get_name( uintptr_t offset )
+inline const char* pam_pmm_get_name( pam_pmm_state& state, uintptr_t offset )
 {
     if ( offset == 0 )
         return nullptr;
 
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return nullptr;
 
@@ -721,18 +793,25 @@ inline const char* pam_pmm_get_name( uintptr_t offset )
     return nullptr;
 }
 
+/// Обёртка для обратной совместимости.
+inline const char* pam_pmm_get_name( uintptr_t offset )
+{
+    return pam_pmm_get_name( pam_pmm_global_state(), offset );
+}
+
 /**
- * @brief Получить количество элементов для слота.
+ * @brief Получить количество элементов для слота (явное состояние).
  *
+ * @param state Состояние PMM-фасада.
  * @param offset Байтовое смещение объекта.
  * @return Количество элементов; 0 если не найден.
  */
-inline uintptr_t pam_pmm_get_count( uintptr_t offset )
+inline uintptr_t pam_pmm_get_count( pam_pmm_state& state, uintptr_t offset )
 {
     if ( offset == 0 )
         return 0;
 
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
 
@@ -743,18 +822,25 @@ inline uintptr_t pam_pmm_get_count( uintptr_t offset )
     return slot->count;
 }
 
+/// Обёртка для обратной совместимости.
+inline uintptr_t pam_pmm_get_count( uintptr_t offset )
+{
+    return pam_pmm_get_count( pam_pmm_global_state(), offset );
+}
+
 /**
- * @brief Получить размер элемента для слота.
+ * @brief Получить размер элемента для слота (явное состояние).
  *
+ * @param state Состояние PMM-фасада.
  * @param offset Байтовое смещение объекта.
  * @return Размер одного элемента в байтах; 0 если не найден.
  */
-inline uintptr_t pam_pmm_get_elem_size( uintptr_t offset )
+inline uintptr_t pam_pmm_get_elem_size( pam_pmm_state& state, uintptr_t offset )
 {
     if ( offset == 0 )
         return 0;
 
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
 
@@ -765,34 +851,48 @@ inline uintptr_t pam_pmm_get_elem_size( uintptr_t offset )
     return slot->elem_size;
 }
 
+/// Обёртка для обратной совместимости.
+inline uintptr_t pam_pmm_get_elem_size( uintptr_t offset )
+{
+    return pam_pmm_get_elem_size( pam_pmm_global_state(), offset );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // МЕТРИКИ
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * @brief Получить количество аллоцированных слотов.
- *
- * Возвращает число записей в slot_map_.
+ * @brief Получить количество аллоцированных слотов (явное состояние).
  */
-inline uintptr_t pam_pmm_slot_count()
+inline uintptr_t pam_pmm_slot_count( pam_pmm_state& state )
 {
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
     return reg->slot_map_.size();
 }
 
-/**
- * @brief Получить количество именованных объектов.
- *
- * Возвращает число записей в name_map_.
- */
-inline uintptr_t pam_pmm_named_count()
+/// Обёртка для обратной совместимости.
+inline uintptr_t pam_pmm_slot_count()
 {
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    return pam_pmm_slot_count( pam_pmm_global_state() );
+}
+
+/**
+ * @brief Получить количество именованных объектов (явное состояние).
+ */
+inline uintptr_t pam_pmm_named_count( pam_pmm_state& state )
+{
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg == nullptr )
         return 0;
     return reg->name_map_.size();
+}
+
+/// Обёртка для обратной совместимости.
+inline uintptr_t pam_pmm_named_count()
+{
+    return pam_pmm_named_count( pam_pmm_global_state() );
 }
 
 /**
@@ -893,7 +993,10 @@ inline uintptr_t pam_pmm_ptr_to_offset( const void* p )
  * @note При успехе старый блок деаллоцируется автоматически.
  *       При ошибке старый блок остаётся нетронутым.
  */
-template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, uintptr_t old_count, uintptr_t new_count )
+/**
+ * @brief Перевыделить память (явное состояние).
+ */
+template <typename T> inline uintptr_t pam_pmm_realloc( pam_pmm_state& state, uintptr_t old_offset, uintptr_t old_count, uintptr_t new_count )
 {
     if ( old_offset == 0 || new_count == 0 )
         return 0;
@@ -923,7 +1026,7 @@ template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, ui
     PamManager::template deallocate_typed<T>( old_pptr );
 
     // Обновляем запись в slot_map_.
-    pam_pmm_registry* reg = pam_pmm_get_registry();
+    pam_pmm_registry* reg = pam_pmm_get_registry( state );
     if ( reg != nullptr )
     {
         // Удаляем старую запись.
@@ -935,7 +1038,7 @@ template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, ui
         reg->slot_map_.erase( old_offset );
 
         // Добавляем новую запись.
-        reg = pam_pmm_get_registry();
+        reg = pam_pmm_get_registry( state );
         if ( reg != nullptr )
         {
             old_info.offset = new_offset;
@@ -945,6 +1048,12 @@ template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, ui
     }
 
     return new_offset;
+}
+
+/// Обёртка для обратной совместимости.
+template <typename T> inline uintptr_t pam_pmm_realloc( uintptr_t old_offset, uintptr_t old_count, uintptr_t new_count )
+{
+    return pam_pmm_realloc<T>( pam_pmm_global_state(), old_offset, old_count, new_count );
 }
 
 /**
@@ -959,13 +1068,17 @@ inline void pam_pmm_reserve_slots( uintptr_t /*min_slots*/ )
 }
 
 /**
- * @brief Валидация хранилища (заглушка).
- *
- * Проверяет базовую корректность состояния PMM.
+ * @brief Валидация хранилища (явное состояние).
  */
+inline bool pam_pmm_validate( const pam_pmm_state& state )
+{
+    return state.initialized && PamManager::is_initialized();
+}
+
+/// Обёртка для обратной совместимости.
 inline bool pam_pmm_validate()
 {
-    return pam_pmm_is_initialized() && PamManager::is_initialized();
+    return pam_pmm_validate( pam_pmm_global_state() );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1041,9 +1154,9 @@ inline void pstringview_pmm_restore_root()
 /// без вызова pam_pmm_init() (Issue #161).
 inline void pstringview_pmm_reset_restored_flag()
 {
-    pstringview_pmm_root_restored_flag() = false;
-    detail::pam_pmm_initialized()        = false;
-    detail::pam_pmm_root_offset()        = 0;
+    pstringview_pmm_root_restored_flag()          = false;
+    pam_pmm_global_state().initialized  = false;
+    pam_pmm_global_state().root_offset  = 0;
 }
 
 /// Регистрация callbacks для персистентности корня AVL-дерева pstringview.

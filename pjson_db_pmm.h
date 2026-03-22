@@ -95,19 +95,39 @@ class pjson_db_pmm
     /// Открыть или создать базу данных через PMM.
     static pjson_db_pmm open( const char* pam_file )
     {
-        pam_pmm_init( pam_file );
+        pam_pmm_init( pam_pmm_global_state(), pam_file );
         return pjson_db_pmm{};
     }
 
-    /// Конструктор по умолчанию: привязывается к текущему PMM.
+    /// Открыть или создать базу данных через PMM (явное состояние).
+    static pjson_db_pmm open( pam_pmm_state& state, const char* pam_file )
+    {
+        pam_pmm_init( state, pam_file );
+        return pjson_db_pmm{ state };
+    }
+
+    /// Конструктор по умолчанию: привязывается к глобальному состоянию PMM.
     /// PMM должен быть проинициализирован вызовом pam_pmm_init() или open().
-    pjson_db_pmm()
+    pjson_db_pmm() : _state_ptr( &pam_pmm_global_state() )
     {
         _ensure_pool();
         _ensure_root();
         _get_metrics_struct(); // создаёт при необходимости
         _ensure_metrics_tmp(); // Этап 8.4: pre-allocate переиспользуемый узел для метрик
     }
+
+    /// Конструктор с явным состоянием PMM-фасада (Этап B, Issue #209).
+    explicit pjson_db_pmm( pam_pmm_state& state ) : _state_ptr( &state )
+    {
+        _ensure_pool();
+        _ensure_root();
+        _get_metrics_struct(); // создаёт при необходимости
+        _ensure_metrics_tmp(); // Этап 8.4: pre-allocate переиспользуемый узел для метрик
+    }
+
+    /// Получить ссылку на используемое состояние PMM.
+    pam_pmm_state& state() { return *_state_ptr; }
+    const pam_pmm_state& state() const { return *_state_ptr; }
 
     // -----------------------------------------------------------------------
     // Пакетные операции (batch)
@@ -376,7 +396,7 @@ class pjson_db_pmm
             _fill_metrics( m );
             m->last_save_time = static_cast<uint64_t>( std::time( nullptr ) );
         }
-        pam_pmm_save();
+        pam_pmm_save( *_state_ptr );
     }
 
     // -----------------------------------------------------------------------
@@ -559,14 +579,18 @@ class pjson_db_pmm
     uintptr_t pmm_total_size() const { return pam_pmm_get_data_size(); }
 
     /// Получить количество слотов (объектов) в реестре.
-    uintptr_t pmm_slot_count() const { return pam_pmm_slot_count(); }
+    uintptr_t pmm_slot_count() const { return pam_pmm_slot_count( *_state_ptr ); }
 
     /// Получить количество именованных объектов.
-    uintptr_t pmm_named_count() const { return pam_pmm_named_count(); }
+    uintptr_t pmm_named_count() const { return pam_pmm_named_count( *_state_ptr ); }
 
   private:
-    uintptr_t _batch_depth = 0; ///< Глубина вложенности пакетных операций.
-    uintptr_t _metrics_tmp_off = 0; ///< Этап 8.4: pre-allocated узел для возврата значений метрик.
+    /// Состояние PMM-фасада (Этап B, Issue #209).
+    /// Указатель вместо ссылки, чтобы const-методы (get, find) могли читать
+    /// состояние через pam_pmm_get_registry(), возвращающий не-const указатель в ПАП.
+    pam_pmm_state* _state_ptr;
+    uintptr_t _batch_depth = 0;        ///< Глубина вложенности пакетных операций.
+    uintptr_t _metrics_tmp_off = 0;    ///< Этап 8.4: pre-allocated узел для возврата значений метрик.
 
     // -----------------------------------------------------------------------
     // Общий шаблон для put-методов
@@ -806,7 +830,7 @@ class pjson_db_pmm
     // Вспомогательные методы: пул и корень
     // -----------------------------------------------------------------------
 
-    uintptr_t _find_pool_offset() const { return pam_pmm_find( PJSON_DB_PMM_POOL_NAME ); }
+    uintptr_t _find_pool_offset() const { return pam_pmm_find( *_state_ptr, PJSON_DB_PMM_POOL_NAME ); }
 
     pjson_pool_pmm* _get_pool() const
     {
@@ -827,7 +851,7 @@ class pjson_db_pmm
             return;
 
         // Регистрируем пул в реестре имён PMM.
-        pam_pmm_registry* reg = pam_pmm_get_registry();
+        pam_pmm_registry* reg = pam_pmm_get_registry( *_state_ptr );
         if ( reg != nullptr )
         {
             pam_pmm_name_key nk{};
@@ -842,7 +866,7 @@ class pjson_db_pmm
         }
     }
 
-    node_id _find_root() const { return pam_pmm_find( PJSON_DB_PMM_ROOT_NAME ); }
+    node_id _find_root() const { return pam_pmm_find( *_state_ptr, PJSON_DB_PMM_ROOT_NAME ); }
 
     void _ensure_root()
     {
@@ -850,7 +874,7 @@ class pjson_db_pmm
             return;
 
         // Создаём корневой узел через PMM.
-        uintptr_t root_off = pam_pmm_create<node>( PJSON_DB_PMM_ROOT_NAME );
+        uintptr_t root_off = pam_pmm_create<node>( *_state_ptr, PJSON_DB_PMM_ROOT_NAME );
         if ( root_off == 0 )
             return;
 
@@ -860,10 +884,10 @@ class pjson_db_pmm
     /// Этап 8.4: создать или найти переиспользуемый временный узел для метрик.
     void _ensure_metrics_tmp()
     {
-        _metrics_tmp_off = pam_pmm_find( PJSON_DB_PMM_METRICS_TMP_NAME );
+        _metrics_tmp_off = pam_pmm_find( *_state_ptr, PJSON_DB_PMM_METRICS_TMP_NAME );
         if ( _metrics_tmp_off == 0 )
         {
-            _metrics_tmp_off = pam_pmm_create<node>( PJSON_DB_PMM_METRICS_TMP_NAME );
+            _metrics_tmp_off = pam_pmm_create<node>( *_state_ptr, PJSON_DB_PMM_METRICS_TMP_NAME );
             if ( _metrics_tmp_off != 0 )
                 node_init_null( _metrics_tmp_off );
         }
@@ -1128,7 +1152,7 @@ class pjson_db_pmm
 
         if ( arr[idx] != 0 )
         {
-            pam_pmm_delete( arr[idx] );
+            pam_pmm_delete( *_state_ptr, arr[idx] );
         }
         arr[idx] = value_id;
 
@@ -1141,10 +1165,10 @@ class pjson_db_pmm
 
     db_metrics_pmm* _get_metrics_struct()
     {
-        uintptr_t off = pam_pmm_find( PJSON_DB_PMM_METRICS_NAME );
+        uintptr_t off = pam_pmm_find( *_state_ptr, PJSON_DB_PMM_METRICS_NAME );
         if ( off == 0 )
         {
-            off = pam_pmm_create<db_metrics_pmm>( PJSON_DB_PMM_METRICS_NAME );
+            off = pam_pmm_create<db_metrics_pmm>( *_state_ptr, PJSON_DB_PMM_METRICS_NAME );
             if ( off == 0 )
                 return nullptr;
             db_metrics_pmm* mp = pmm_resolve<db_metrics_pmm>( off );
@@ -1157,7 +1181,7 @@ class pjson_db_pmm
 
     const db_metrics_pmm* _get_metrics_struct_const() const
     {
-        uintptr_t off = pam_pmm_find( PJSON_DB_PMM_METRICS_NAME );
+        uintptr_t off = pam_pmm_find( *_state_ptr, PJSON_DB_PMM_METRICS_NAME );
         if ( off == 0 )
             return nullptr;
         return pmm_resolve_const<db_metrics_pmm>( off );
@@ -1177,8 +1201,8 @@ class pjson_db_pmm
         m->pam_bump_offset    = static_cast<uint64_t>( pam_pmm_get_bump() );
         m->pam_free_list_size = 0; // PMM не имеет прямого эквивалента
         m->pam_total_size     = static_cast<uint64_t>( pam_pmm_get_data_size() );
-        m->pam_slot_count     = static_cast<uint64_t>( pam_pmm_slot_count() );
-        m->pam_named_count    = static_cast<uint64_t>( pam_pmm_named_count() );
+        m->pam_slot_count     = static_cast<uint64_t>( pam_pmm_slot_count( *_state_ptr ) );
+        m->pam_named_count    = static_cast<uint64_t>( pam_pmm_named_count( *_state_ptr ) );
 
         // Метрики строк
         m->string_count_total = static_cast<uint64_t>( pam_all_strings().size() );

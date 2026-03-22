@@ -16,6 +16,7 @@
 #include <cstring>
 
 #include "pam_pmm.h"
+#include "pjson_db_pmm.h"
 
 using namespace pjson;
 
@@ -591,4 +592,179 @@ TEST_CASE( "pam_pmm_state: init/destroy cycle reflected in global state", "[pam_
     REQUIRE( gs.initialized == false );
     REQUIRE( gs.root_offset == 0 );
     REQUIRE( gs.filename[0] == '\0' );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ явного параметра pam_pmm_state (Этап B, Issue #209)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE( "pam_pmm_state explicit: init/destroy with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+    pam_pmm_init( gs, nullptr );
+
+    REQUIRE( gs.initialized == true );
+    REQUIRE( gs.root_offset != 0 );
+    REQUIRE( pam_pmm_is_initialized( gs ) == true );
+
+    pam_pmm_destroy( gs );
+
+    REQUIRE( gs.initialized == false );
+    REQUIRE( gs.root_offset == 0 );
+}
+
+TEST_CASE( "pam_pmm_state explicit: create/find/delete with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+    pam_pmm_init( gs, nullptr );
+
+    // create with explicit state
+    uintptr_t off = pam_pmm_create<uint64_t>( gs, "test_explicit_obj" );
+    REQUIRE( off != 0 );
+
+    // find with explicit state
+    uintptr_t found = pam_pmm_find( gs, "test_explicit_obj" );
+    REQUIRE( found == off );
+
+    // find_typed with explicit state
+    uintptr_t found_typed = pam_pmm_find_typed<uint64_t>( gs, "test_explicit_obj" );
+    REQUIRE( found_typed == off );
+
+    // get_name with explicit state
+    const char* name = pam_pmm_get_name( gs, off );
+    REQUIRE( name != nullptr );
+    REQUIRE( std::strcmp( name, "test_explicit_obj" ) == 0 );
+
+    // get_elem_size with explicit state
+    REQUIRE( pam_pmm_get_elem_size( gs, off ) == sizeof( uint64_t ) );
+
+    // get_count with explicit state
+    REQUIRE( pam_pmm_get_count( gs, off ) == 1 );
+
+    // delete with explicit state
+    uintptr_t slot_before = pam_pmm_slot_count( gs );
+    pam_pmm_delete( gs, off );
+    REQUIRE( pam_pmm_find( gs, "test_explicit_obj" ) == 0 );
+    REQUIRE( pam_pmm_slot_count( gs ) == slot_before - 1 );
+
+    pam_pmm_destroy( gs );
+}
+
+TEST_CASE( "pam_pmm_state explicit: create_array with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+    pam_pmm_init( gs, nullptr );
+
+    uintptr_t off = pam_pmm_create_array<uint32_t>( gs, 10, "test_explicit_arr" );
+    REQUIRE( off != 0 );
+
+    REQUIRE( pam_pmm_find( gs, "test_explicit_arr" ) == off );
+    REQUIRE( pam_pmm_get_count( gs, off ) == 10 );
+    REQUIRE( pam_pmm_get_elem_size( gs, off ) == sizeof( uint32_t ) );
+
+    pam_pmm_destroy( gs );
+}
+
+TEST_CASE( "pam_pmm_state explicit: get_root and get_registry with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+    pam_pmm_init( gs, nullptr );
+
+    pam_pmm_root* root = pam_pmm_get_root( gs );
+    REQUIRE( root != nullptr );
+    REQUIRE( root->magic == PAM_PMM_MAGIC );
+    REQUIRE( root->version == PAM_PMM_VERSION );
+
+    pam_pmm_registry* reg = pam_pmm_get_registry( gs );
+    REQUIRE( reg != nullptr );
+
+    pam_pmm_destroy( gs );
+}
+
+TEST_CASE( "pam_pmm_state explicit: reset with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+    pam_pmm_init( gs, nullptr );
+
+    // Создаём объект.
+    pam_pmm_create<uint64_t>( gs, "before_reset" );
+    REQUIRE( pam_pmm_find( gs, "before_reset" ) != 0 );
+
+    // Reset с явным состоянием.
+    pam_pmm_reset( gs );
+    REQUIRE( gs.initialized == true );
+    REQUIRE( gs.root_offset != 0 );
+
+    // Объект из предыдущего хранилища должен быть недоступен.
+    REQUIRE( pam_pmm_find( gs, "before_reset" ) == 0 );
+
+    pam_pmm_destroy( gs );
+}
+
+TEST_CASE( "pam_pmm_state explicit: slot_count and named_count with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+    pam_pmm_init( gs, nullptr );
+
+    uintptr_t slots_before = pam_pmm_slot_count( gs );
+    uintptr_t named_before = pam_pmm_named_count( gs );
+
+    pam_pmm_create<uint64_t>( gs, "explicit_metric_test" );
+
+    REQUIRE( pam_pmm_slot_count( gs ) == slots_before + 1 );
+    REQUIRE( pam_pmm_named_count( gs ) == named_before + 1 );
+
+    // Результаты должны совпадать с обёртками без параметра.
+    REQUIRE( pam_pmm_slot_count( gs ) == pam_pmm_slot_count() );
+    REQUIRE( pam_pmm_named_count( gs ) == pam_pmm_named_count() );
+
+    pam_pmm_destroy( gs );
+}
+
+TEST_CASE( "pam_pmm_state explicit: validate with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+    pam_pmm_init( gs, nullptr );
+
+    REQUIRE( pam_pmm_validate( gs ) == true );
+    REQUIRE( pam_pmm_validate( gs ) == pam_pmm_validate() );
+
+    pam_pmm_destroy( gs );
+
+    REQUIRE( pam_pmm_validate( gs ) == false );
+}
+
+TEST_CASE( "pam_pmm_state explicit: pjson_db_pmm with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+    pam_pmm_init( gs, nullptr );
+
+    // Создаём БД с явным состоянием.
+    pjson_db_pmm db( gs );
+
+    REQUIRE( &db.state() == &gs );
+
+    db.put( "/test/key", 42 );
+    node_view v = db.get( "/test/key" );
+    REQUIRE( v.is_integer() );
+    REQUIRE( v.as_int() == 42 );
+
+    pam_pmm_destroy( gs );
+}
+
+TEST_CASE( "pam_pmm_state explicit: pjson_db_pmm::open with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+
+    auto db = pjson_db_pmm::open( gs, nullptr );
+
+    REQUIRE( &db.state() == &gs );
+    REQUIRE( gs.initialized == true );
+
+    db.put( "/hello", "world" );
+    node_view v = db.get( "/hello" );
+    REQUIRE( v.is_string() );
+    REQUIRE( v.as_string() == "world" );
+
+    pam_pmm_destroy( gs );
 }
