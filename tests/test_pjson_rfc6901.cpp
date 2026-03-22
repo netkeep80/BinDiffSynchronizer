@@ -31,43 +31,43 @@ static void reset_pmm()
 // Декодирование сегментов: pjson_decode_rfc6901_segment
 // ===========================================================================
 
-TEST_CASE( "rfc6901: decode segment — plain text unchanged", "[rfc6901]" )
+TEST_CASE( "rfc6901: decode segment - plain text unchanged", "[rfc6901]" )
 {
     REQUIRE( pjson_decode_rfc6901_segment( "hello" ) == "hello" );
 }
 
-TEST_CASE( "rfc6901: decode segment — ~1 becomes /", "[rfc6901]" )
+TEST_CASE( "rfc6901: decode segment - ~1 becomes /", "[rfc6901]" )
 {
     REQUIRE( pjson_decode_rfc6901_segment( "a~1b" ) == "a/b" );
 }
 
-TEST_CASE( "rfc6901: decode segment — ~0 becomes ~", "[rfc6901]" )
+TEST_CASE( "rfc6901: decode segment - ~0 becomes ~", "[rfc6901]" )
 {
     REQUIRE( pjson_decode_rfc6901_segment( "a~0b" ) == "a~b" );
 }
 
-TEST_CASE( "rfc6901: decode segment — multiple escapes", "[rfc6901]" )
+TEST_CASE( "rfc6901: decode segment - multiple escapes", "[rfc6901]" )
 {
     REQUIRE( pjson_decode_rfc6901_segment( "a~1b~0c~1d" ) == "a/b~c/d" );
 }
 
-TEST_CASE( "rfc6901: decode segment — ~0 before ~1 decodes correctly", "[rfc6901]" )
+TEST_CASE( "rfc6901: decode segment - ~0 before ~1 decodes correctly", "[rfc6901]" )
 {
     // ~01 → ~1 (not /), т.к. ~0 декодируется в ~, а 1 остаётся.
     REQUIRE( pjson_decode_rfc6901_segment( "~01" ) == "~1" );
 }
 
-TEST_CASE( "rfc6901: decode segment — trailing ~ unchanged", "[rfc6901]" )
+TEST_CASE( "rfc6901: decode segment - trailing ~ unchanged", "[rfc6901]" )
 {
     REQUIRE( pjson_decode_rfc6901_segment( "abc~" ) == "abc~" );
 }
 
-TEST_CASE( "rfc6901: decode segment — empty string", "[rfc6901]" )
+TEST_CASE( "rfc6901: decode segment - empty string", "[rfc6901]" )
 {
     REQUIRE( pjson_decode_rfc6901_segment( "" ) == "" );
 }
 
-TEST_CASE( "rfc6901: decode segment — ~2 unknown escape stays as-is", "[rfc6901]" )
+TEST_CASE( "rfc6901: decode segment - ~2 unknown escape stays as-is", "[rfc6901]" )
 {
     REQUIRE( pjson_decode_rfc6901_segment( "a~2b" ) == "a~2b" );
 }
