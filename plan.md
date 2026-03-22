@@ -111,13 +111,12 @@ db.get("/config/a/b");  // ищет config → "a" → "b" вместо config �
 
 ---
 
-### Проблема 9: Дублирование обхода поддерева (array/object) в _free_node_tree и _resolve_refs_in_subtree
+### ~~Проблема 9: Дублирование обхода поддерева (array/object) в _free_node_tree и _resolve_refs_in_subtree~~ ✅
 
-**Файл:** `pjson_db_pmm.h`, методы `_free_node_tree()` (строки 931–993) и `_resolve_refs_in_subtree()` (строки 1190–1231)
-
-Оба метода реализуют рекурсивный обход поддерева с одинаковой структурой: проверка типа → для array/object рекурсия по элементам. Это аналогично `pjson_traverse_subtree()` из `pjson_db_helpers.h`, но не использует его.
-
-**Решение:** Переписать `_free_node_tree()` и `_resolve_refs_in_subtree()` через `pjson_traverse_subtree()` с соответствующими visitor-функторами.
+**Решено в Этапе 9.3:** Добавлена функция `pjson_traverse_subtree_postorder()` для post-order обхода (дети → родитель).
+`_free_node_tree()` переписан через `pjson_traverse_subtree_postorder()` с visitor `pjson_free_node_visitor` (в `pjson_db_helpers.h`).
+`_resolve_refs_in_subtree()` переписан через `pjson_traverse_subtree()` с visitor `_resolve_refs_visitor` (в `pjson_db_pmm.h`).
+Дублирование рекурсивного обхода array/object устранено.
 
 ---
 
@@ -203,7 +202,7 @@ pvector был бы предпочтительнее **только** при ч�
 |---|----------|------|-----------|---------|
 | ~~5~~ | ~~Побайтовое копирование binary~~ | ~~pjson_node.h~~ | ~~Средняя~~ | ✅ |
 | ~~6~~ | ~~Лишние аллокации в node_clone~~ | ~~pjson_node.h~~ | ~~Средняя~~ | ✅ |
-| 9 | Дублирование обхода поддерева | pjson_db_pmm.h | Средняя | Кодовая база |
+| ~~9~~ | ~~Дублирование обхода поддерева~~ | ~~pjson_db_pmm.h~~ | ~~Средняя~~ | ✅ |
 | 2 | Двойной парсинг объектов | pjson_codec.h | Высокая | Производительность |
 
 ### Приоритет 3 (архитектурные)
@@ -230,7 +229,7 @@ pvector был бы предпочтительнее **только** при ч�
 Этап 9: Приоритет 2 — оптимизация
   9.1  ✅ Bulk-копирование binary в node_clone() (std::vector + resize + memcpy)
   9.2  ✅ Прямая вставка node_id в массив/объект (node_array_push_back_id, node_object_insert_id)
-  9.3  _free_node_tree и _resolve_refs через pjson_traverse_subtree
+  9.3  ✅ _free_node_tree и _resolve_refs через pjson_traverse_subtree (postorder + visitor)
   9.4  Оптимизация parse_object: один проход вместо двух
        → тесты: бенчмарки подтверждают улучшения
 
@@ -247,6 +246,7 @@ pvector был бы предпочтительнее **только** при ч�
 
 | Дата | Изменение |
 |------|-----------|
+| 2026-03-22 | Этап 9.3: _free_node_tree и _resolve_refs_in_subtree через pjson_traverse_subtree с visitor-функторами (Issue #191) |
 | 2026-03-22 | Этап 9.2: прямая вставка node_id в массив/объект без временных слотов (Issue #190) |
 | 2026-03-21 | Этап 9.1: bulk-копирование binary в node_clone(); обновление PMM до v0.45.0 (Issue #189) |
 | 2026-03-21 | Этап 8.4: устранена утечка временных узлов метрик; анализ pvector vs parray (Issue #188) |

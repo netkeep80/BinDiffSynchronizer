@@ -944,69 +944,7 @@ class pjson_db_pmm
     // Вспомогательные методы: удаление узлов
     // -----------------------------------------------------------------------
 
-    void _free_node_tree( node_id id )
-    {
-        if ( id == 0 )
-            return;
-        node_view v{ id };
-        if ( !v.valid() )
-            return;
-
-        switch ( v.tag() )
-        {
-        case node_tag::array:
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view elem = v.at( i );
-                if ( elem.valid() )
-                    _free_node_tree( elem.id );
-            }
-            node* n = pmm_resolve<node>( id );
-            if ( n != nullptr )
-                n->array_val.free_data();
-            break;
-        }
-        case node_tag::object:
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view val = v.value_at( i );
-                if ( val.valid() )
-                    _free_node_tree( val.id );
-            }
-            node* n = pmm_resolve<node>( id );
-            if ( n != nullptr )
-                n->object_val.free_data();
-            break;
-        }
-        case node_tag::string:
-        {
-            node* n = pmm_resolve<node>( id );
-            if ( n != nullptr )
-            {
-                n->string_val.free_data();
-            }
-            break;
-        }
-        case node_tag::binary:
-        {
-            node* n = pmm_resolve<node>( id );
-            if ( n != nullptr )
-                n->binary_val.free_data();
-            break;
-        }
-        case node_tag::ref:
-            break;
-        default:
-            break;
-        }
-
-        // Освобождаем сам узел.
-        pam_pmm_delete( id );
-    }
+    void _free_node_tree( node_id id ) { pjson_free_node_tree( id ); }
 
     bool _object_erase( node_id obj_id, const char* key )
     {
@@ -1203,47 +1141,30 @@ class pjson_db_pmm
     // Вспомогательные методы: разрешение ref
     // -----------------------------------------------------------------------
 
-    void _resolve_refs_in_subtree( node_id id )
+    /// Visitor для разрешения ref-узлов (используется с pjson_traverse_subtree).
+    struct _resolve_refs_visitor
     {
-        if ( id == 0 )
-            return;
-        node_view v{ id };
-        if ( !v.valid() )
-            return;
+        pjson_db_pmm& db;
 
-        if ( v.is_ref() )
+        void visit( node_id id, const node_view& v )
         {
+            if ( !v.is_ref() )
+                return;
             std::string_view path_sv = v.ref_path();
             if ( !path_sv.empty() )
             {
                 std::string path_str( path_sv );
-                node_view   target = get( path_str.c_str(), false );
+                node_view   target = db.get( path_str.c_str(), false );
                 if ( target.valid() && !target.is_ref() )
                     node_set_ref_target( id, target.id );
             }
-            return;
         }
+    };
 
-        if ( v.is_array() )
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view elem = v.at( i );
-                if ( elem.valid() )
-                    _resolve_refs_in_subtree( elem.id );
-            }
-        }
-        else if ( v.is_object() )
-        {
-            uintptr_t sz = v.size();
-            for ( uintptr_t i = 0; i < sz; ++i )
-            {
-                node_view val = v.value_at( i );
-                if ( val.valid() )
-                    _resolve_refs_in_subtree( val.id );
-            }
-        }
+    void _resolve_refs_in_subtree( node_id id )
+    {
+        _resolve_refs_visitor vis{ *this };
+        pjson_traverse_subtree( id, vis );
     }
 };
 
