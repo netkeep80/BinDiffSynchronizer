@@ -15,6 +15,7 @@
 
 #include "pjson_node.h"
 #include "pjson_pool_pmm.h"
+#include "pjson_db_helpers.h"
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
@@ -538,6 +539,11 @@ inline bool parse_array( ParseState& st, uintptr_t node_off )
 
 /// Разобрать JSON-объект (позиция уже ПОСЛЕ '{').
 /// Распознаёт специальные объекты $ref и $base64.
+///
+/// Оптимизация (Этап 9.4): один проход вместо двух.
+/// Первый ключ-значение парсится напрямую. Если объект оказывается
+/// $ref/$base64, временный узел значения извлекается и освобождается.
+/// Для обычных объектов первый ключ-значение вставляется без повторного парсинга.
 inline bool parse_object( ParseState& st, uintptr_t node_off )
 {
     skip_ws( st );
@@ -548,102 +554,53 @@ inline bool parse_object( ParseState& st, uintptr_t node_off )
         return true;
     }
 
-    // Первый проход: подсчитываем ключи и проверяем на $ref/$base64.
+    // --- Парсим первый ключ ---
     std::string first_key;
-    std::string first_val;
-    bool        first_val_is_string = false;
-    int         key_count           = 0;
-    const char* reparse_pos         = st.pos;
+    skip_ws( st );
+    if ( !expect( st, '"' ) )
+        return false;
+    if ( !parse_string( st, first_key ) )
+        return false;
 
-    // Парсим только первый ключ-значение для проверки $ref/$base64.
+    skip_ws( st );
+    if ( !expect( st, ':' ) )
+        return false;
+    skip_ws( st );
+
+    // --- Парсим первое значение во временный узел ---
+    fptr<node> tmp_fv;
+    tmp_fv.New();
+    node_id tmp_val_id = tmp_fv.addr();
+
+    if ( !parse_value( st, tmp_val_id ) )
     {
-        skip_ws( st );
-        if ( !expect( st, '"' ) )
-            return false;
-        if ( !parse_string( st, first_key ) )
-            return false;
-
-        skip_ws( st );
-        if ( !expect( st, ':' ) )
-            return false;
-        skip_ws( st );
-
-        first_val_is_string = ( peek( st ) == '"' );
-        if ( first_val_is_string )
-        {
-            advance( st );
-            if ( !parse_string( st, first_val ) )
-                return false;
-        }
-        else
-        {
-            // Пропускаем значение.
-            int depth = 0;
-            while ( st.pos < st.end )
-            {
-                char c = *st.pos;
-                if ( c == '{' || c == '[' )
-                {
-                    depth++;
-                    advance( st );
-                }
-                else if ( c == '}' || c == ']' )
-                {
-                    if ( depth == 0 )
-                        break;
-                    depth--;
-                    advance( st );
-                }
-                else if ( c == ',' && depth == 0 )
-                {
-                    break;
-                }
-                else if ( c == '"' )
-                {
-                    advance( st );
-                    std::string dummy;
-                    if ( !parse_string( st, dummy ) )
-                        return false;
-                }
-                else
-                {
-                    advance( st );
-                }
-            }
-        }
-        key_count = 1;
-
-        skip_ws( st );
-        char c = peek( st );
-        if ( c == ',' )
-        {
-            // Есть ещё ключи — не $ref/$base64.
-            key_count = 2;
-        }
-        else if ( c != '}' )
-        {
-            return false;
-        }
+        pjson_free_node_tree( tmp_val_id );
+        return false;
     }
 
-    // Проверяем на $ref/$base64: ровно 1 ключ и строковое значение.
-    if ( key_count == 1 && first_val_is_string )
+    // --- Проверяем: $ref/$base64 = ровно 1 ключ + строковое значение ---
+    skip_ws( st );
+    char after_first = peek( st );
+
+    if ( after_first == '}' && ( first_key == "$ref" || first_key == "$base64" ) )
     {
-        // Проглатываем закрывающую скобку.
-        skip_ws( st );
-        if ( !expect( st, '}' ) )
-            return false;
-
-        if ( first_key == "$ref" )
+        node_view tmp_view{ tmp_val_id };
+        if ( tmp_view.tag() == node_tag::string )
         {
-            node_set_ref( node_off, first_val.c_str() );
-            return true;
-        }
+            advance( st ); // поглощаем '}'
 
-        if ( first_key == "$base64" )
-        {
+            std::string val_str( tmp_view.as_string() );
+            pjson_free_node_tree( tmp_val_id );
+
+            if ( first_key == "$ref" )
+            {
+                node_set_ref( node_off, val_str.c_str() );
+                return true;
+            }
+
+            // $base64
             std::vector<uint8_t> bytes;
-            if ( !base64_decode( first_val.c_str(), static_cast<uintptr_t>( first_val.size() ), bytes ) )
+            if ( !base64_decode( val_str.c_str(), static_cast<uintptr_t>( val_str.size() ), bytes ) )
             {
                 node_set_binary( node_off );
                 return true;
@@ -655,10 +612,21 @@ inline bool parse_object( ParseState& st, uintptr_t node_off )
         }
     }
 
-    // Обычный объект — перепарсиваем с начала.
-    st.pos = reparse_pos;
+    // --- Обычный объект: создаём объект и вставляем первый ключ-значение ---
     node_set_object( node_off );
+    node_object_insert_id( node_off, first_key.c_str(), tmp_val_id );
 
+    // Если после первого значения стоит '}' — объект из одного ключа.
+    if ( after_first == '}' )
+    {
+        advance( st );
+        return true;
+    }
+    if ( after_first != ',' )
+        return false;
+    advance( st );
+
+    // --- Парсим остальные ключи-значения ---
     std::string key_buf;
     for ( ;; )
     {
