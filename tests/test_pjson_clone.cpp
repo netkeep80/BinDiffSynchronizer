@@ -609,7 +609,7 @@ TEST_CASE( "node_object_insert_id: ignores zero arguments", "[clone]" )
     REQUIRE( ov.size() == 0 );
 }
 
-TEST_CASE( "node_clone: array clone uses no temporary slots (Этап 9.2)", "[clone]" )
+TEST_CASE( "node_clone: array clone uses no temporary slots (Step 9.2)", "[clone]" )
 {
     reset_pam();
 
@@ -637,7 +637,7 @@ TEST_CASE( "node_clone: array clone uses no temporary slots (Этап 9.2)", "[c
     REQUIRE( cv[uintptr_t( 2 )].as_bool() == true );
 }
 
-TEST_CASE( "node_clone: object clone uses no temporary slots (Этап 9.2)", "[clone]" )
+TEST_CASE( "node_clone: object clone uses no temporary slots (Step 9.2)", "[clone]" )
 {
     reset_pam();
 
