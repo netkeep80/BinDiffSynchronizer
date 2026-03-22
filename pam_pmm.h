@@ -174,16 +174,16 @@ static_assert( std::is_trivially_copyable<pam_pmm_registry>::value,
  */
 struct pam_pmm_state
 {
-    char      filename[256] = {};   ///< Имя файла хранилища
-    uintptr_t root_offset   = 0;   ///< Смещение корневой структуры в ПАП
+    char      filename[256] = {};    ///< Имя файла хранилища
+    uintptr_t root_offset   = 0;     ///< Смещение корневой структуры в ПАП
     bool      initialized   = false; ///< Флаг инициализации
 
     /// Сбросить все поля к начальным значениям.
     void reset()
     {
-        filename[0]  = '\0';
-        root_offset  = 0;
-        initialized  = false;
+        filename[0] = '\0';
+        root_offset = 0;
+        initialized = false;
     }
 };
 
