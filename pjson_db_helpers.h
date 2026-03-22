@@ -14,7 +14,44 @@
 // Вспомогательные функции: путевая адресация
 // ===========================================================================
 
+/// Декодировать сегмент пути по RFC 6901 (JSON Pointer):
+///   ~1 → /
+///   ~0 → ~
+/// Порядок декодирования важен: сначала ~1, затем ~0.
+inline std::string pjson_decode_rfc6901_segment( const char* data, uintptr_t len )
+{
+    std::string result;
+    result.reserve( len );
+    for ( uintptr_t i = 0; i < len; ++i )
+    {
+        if ( data[i] == '~' && i + 1 < len )
+        {
+            if ( data[i + 1] == '1' )
+            {
+                result += '/';
+                ++i;
+                continue;
+            }
+            else if ( data[i + 1] == '0' )
+            {
+                result += '~';
+                ++i;
+                continue;
+            }
+        }
+        result += data[i];
+    }
+    return result;
+}
+
+/// Декодировать сегмент пути по RFC 6901 (JSON Pointer) из std::string.
+inline std::string pjson_decode_rfc6901_segment( const std::string& seg )
+{
+    return pjson_decode_rfc6901_segment( seg.c_str(), static_cast<uintptr_t>( seg.size() ) );
+}
+
 /// Разбить путь на родительский путь и последний сегмент.
+/// Последний сегмент декодируется по RFC 6901.
 inline void pjson_split_path( const char* path, std::string& parent, std::string& last )
 {
     if ( path == nullptr || path[0] == '\0' )
@@ -33,17 +70,17 @@ inline void pjson_split_path( const char* path, std::string& parent, std::string
     if ( pos == std::string::npos )
     {
         parent = "";
-        last   = full;
+        last   = pjson_decode_rfc6901_segment( full );
     }
     else if ( pos == 0 )
     {
         parent = "/";
-        last   = full.substr( 1 );
+        last   = pjson_decode_rfc6901_segment( full.substr( 1 ) );
     }
     else
     {
         parent = full.substr( 0, pos );
-        last   = full.substr( pos + 1 );
+        last   = pjson_decode_rfc6901_segment( full.substr( pos + 1 ) );
     }
 }
 

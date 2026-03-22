@@ -627,7 +627,7 @@ class pjson_db_pmm
             if ( seg_len == 0 )
                 continue;
 
-            std::string seg( seg_start, seg_len );
+            std::string seg = pjson_decode_rfc6901_segment( seg_start, seg_len );
 
             // --- разыменование $ref ---
             if ( deref_refs )
