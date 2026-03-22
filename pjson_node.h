@@ -1065,7 +1065,7 @@ inline void node_object_insert_id( uintptr_t node_off, const char* key, node_id 
             {
                 // Ключ существует — перезаписываем value.
                 // data() возвращает const*, но мы знаем, что можем модифицировать.
-                object_entry* mut_entries = const_cast<object_entry*>( entries );
+                object_entry* mut_entries            = const_cast<object_entry*>( entries );
                 mut_entries[find_result.index].value = existing_id;
                 return;
             }
