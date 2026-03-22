@@ -394,8 +394,8 @@ inline void pam_pmm_init( pam_pmm_state& state, const char* filename )
         PamManager::create( PAM_PMM_INITIAL_SIZE );
 
         // Создаём корневую структуру и реестр.
-        uintptr_t root_off  = pam_pmm_create_root_and_registry();
-        state.root_offset   = root_off;
+        uintptr_t root_off = pam_pmm_create_root_and_registry();
+        state.root_offset  = root_off;
     }
 
     state.initialized = true;
@@ -455,8 +455,8 @@ inline void pam_pmm_reset( pam_pmm_state& state )
 
     // Создаём корневую структуру и реестр.
     uintptr_t root_off = pam_pmm_create_root_and_registry();
-    state.root_offset   = root_off;
-    state.initialized   = true;
+    state.root_offset  = root_off;
+    state.initialized  = true;
 }
 
 /// Обёртка для обратной совместимости.
@@ -566,7 +566,8 @@ template <typename T> inline uintptr_t pam_pmm_create( const char* name = nullpt
  * @param name Имя массива (может быть nullptr).
  * @return Байтовое смещение первого элемента; 0 при ошибке.
  */
-template <typename T> inline uintptr_t pam_pmm_create_array( pam_pmm_state& state, unsigned count, const char* name = nullptr )
+template <typename T>
+inline uintptr_t pam_pmm_create_array( pam_pmm_state& state, unsigned count, const char* name = nullptr )
 {
     static_assert( std::is_trivially_copyable<T>::value,
                    "pam_pmm_create_array<T> требует, чтобы T был тривиально копируемым" );
@@ -996,7 +997,8 @@ inline uintptr_t pam_pmm_ptr_to_offset( const void* p )
 /**
  * @brief Перевыделить память (явное состояние).
  */
-template <typename T> inline uintptr_t pam_pmm_realloc( pam_pmm_state& state, uintptr_t old_offset, uintptr_t old_count, uintptr_t new_count )
+template <typename T>
+inline uintptr_t pam_pmm_realloc( pam_pmm_state& state, uintptr_t old_offset, uintptr_t old_count, uintptr_t new_count )
 {
     if ( old_offset == 0 || new_count == 0 )
         return 0;
@@ -1154,9 +1156,9 @@ inline void pstringview_pmm_restore_root()
 /// без вызова pam_pmm_init() (Issue #161).
 inline void pstringview_pmm_reset_restored_flag()
 {
-    pstringview_pmm_root_restored_flag()          = false;
-    pam_pmm_global_state().initialized  = false;
-    pam_pmm_global_state().root_offset  = 0;
+    pstringview_pmm_root_restored_flag() = false;
+    pam_pmm_global_state().initialized   = false;
+    pam_pmm_global_state().root_offset   = 0;
 }
 
 /// Регистрация callbacks для персистентности корня AVL-дерева pstringview.

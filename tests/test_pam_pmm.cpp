@@ -665,7 +665,8 @@ TEST_CASE( "pam_pmm_state explicit: create_array with explicit state", "[pam_pmm
     pam_pmm_destroy( gs );
 }
 
-TEST_CASE( "pam_pmm_state explicit: get_root and get_registry with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+TEST_CASE( "pam_pmm_state explicit: get_root and get_registry with explicit state",
+           "[pam_pmm][pam_pmm_state][explicit]" )
 {
     pam_pmm_state& gs = pam_pmm_global_state();
     pam_pmm_init( gs, nullptr );
@@ -701,7 +702,8 @@ TEST_CASE( "pam_pmm_state explicit: reset with explicit state", "[pam_pmm][pam_p
     pam_pmm_destroy( gs );
 }
 
-TEST_CASE( "pam_pmm_state explicit: slot_count and named_count with explicit state", "[pam_pmm][pam_pmm_state][explicit]" )
+TEST_CASE( "pam_pmm_state explicit: slot_count and named_count with explicit state",
+           "[pam_pmm][pam_pmm_state][explicit]" )
 {
     pam_pmm_state& gs = pam_pmm_global_state();
     pam_pmm_init( gs, nullptr );

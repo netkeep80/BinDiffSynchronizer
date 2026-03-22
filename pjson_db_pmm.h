@@ -126,7 +126,7 @@ class pjson_db_pmm
     }
 
     /// Получить ссылку на используемое состояние PMM.
-    pam_pmm_state& state() { return *_state_ptr; }
+    pam_pmm_state&       state() { return *_state_ptr; }
     const pam_pmm_state& state() const { return *_state_ptr; }
 
     // -----------------------------------------------------------------------
@@ -589,8 +589,8 @@ class pjson_db_pmm
     /// Указатель вместо ссылки, чтобы const-методы (get, find) могли читать
     /// состояние через pam_pmm_get_registry(), возвращающий не-const указатель в ПАП.
     pam_pmm_state* _state_ptr;
-    uintptr_t _batch_depth = 0;        ///< Глубина вложенности пакетных операций.
-    uintptr_t _metrics_tmp_off = 0;    ///< Этап 8.4: pre-allocated узел для возврата значений метрик.
+    uintptr_t      _batch_depth = 0; ///< Глубина вложенности пакетных операций.
+    uintptr_t _metrics_tmp_off = 0; ///< Этап 8.4: pre-allocated узел для возврата значений метрик.
 
     // -----------------------------------------------------------------------
     // Общий шаблон для put-методов
