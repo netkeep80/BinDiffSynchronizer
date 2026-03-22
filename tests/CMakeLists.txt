@@ -40,6 +40,7 @@ set(TEST_SOURCES
     test_pjson_ref_stability.cpp
     test_pjson_rfc6901.cpp
     test_pjson_tag_opt.cpp
+    test_pjson_const_correctness.cpp
 )
 
 add_executable(tests ${TEST_SOURCES})

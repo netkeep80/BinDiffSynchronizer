@@ -183,7 +183,7 @@ class pjson_db_pmm
             return _get_metrics( path );
 
         node_error err = node_error::none;
-        node_id    cur = _walk_path<false>( path, deref_refs, &err );
+        node_id    cur = _walk_path_read( path, deref_refs, &err );
         if ( cur == 0 )
             return node_view_error( err );
 
@@ -586,17 +586,16 @@ class pjson_db_pmm
     }
 
     // -----------------------------------------------------------------------
-    // Общий обход пути: _walk_path
+    // Обход пути: _walk_path_read / _walk_path_create (Этап 10.4)
     // -----------------------------------------------------------------------
 
-    /// Обход пути по сегментам с двумя режимами:
-    ///   CreateMode=false (read) — возвращает 0 при отсутствии узла;
-    ///   CreateMode=true  (create) — создаёт промежуточные узлы.
+    /// Обход пути по сегментам (read-only).
+    /// Возвращает 0 при отсутствии узла, не создаёт промежуточных узлов.
     /// @param path        абсолютный путь вида /a/b/0/c
     /// @param deref_refs  разыменовывать ли $ref-узлы при обходе
-    /// @param out_err     (только read) указатель на код ошибки (может быть nullptr)
+    /// @param out_err     указатель на код ошибки (может быть nullptr)
     /// @return node_id целевого узла или 0 при ошибке
-    template <bool CreateMode> node_id _walk_path( const char* path, bool deref_refs, node_error* out_err ) const
+    node_id _walk_path_read( const char* path, bool deref_refs, node_error* out_err ) const
     {
         auto fail = [&]( node_error e ) -> node_id
         {
@@ -646,7 +645,91 @@ class pjson_db_pmm
 
             node_view cur_v{ cur };
 
-            [[maybe_unused]] bool is_last = ( *p == '\0' );
+            // Единственный вызов tag() вместо отдельных is_object() + is_array() (Этап 10.3).
+            node_tag cur_tag = cur_v.tag();
+
+            // --- навигация по object ---
+            if ( cur_tag == node_tag::object )
+            {
+                node_view child = cur_v.at( seg.c_str() );
+                if ( child.valid() )
+                    cur = child.id;
+                else
+                    return fail( node_error::not_found );
+            }
+            // --- навигация по array ---
+            else if ( cur_tag == node_tag::array )
+            {
+                char*     end_ptr = nullptr;
+                uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );
+                if ( end_ptr == seg.c_str() || *end_ptr != '\0' )
+                    return fail( node_error::wrong_type );
+
+                node_view elem = cur_v.at( idx );
+                if ( elem.valid() )
+                    cur = elem.id;
+                else
+                    return fail( node_error::index_out_of_range );
+            }
+            // --- ни object, ни array ---
+            else
+            {
+                return fail( node_error::wrong_type );
+            }
+        }
+
+        return cur;
+    }
+
+    /// Обход пути по сегментам (create).
+    /// Создаёт промежуточные узлы при их отсутствии.
+    /// @param path        абсолютный путь вида /a/b/0/c
+    /// @param deref_refs  разыменовывать ли $ref-узлы при обходе
+    /// @return node_id целевого узла или 0 при ошибке
+    node_id _walk_path_create( const char* path, bool deref_refs )
+    {
+        if ( path == nullptr )
+            return 0;
+
+        node_id cur = _find_root();
+        if ( cur == 0 )
+            return 0;
+
+        const char* p = path;
+        if ( *p == '/' )
+            ++p;
+
+        while ( *p != '\0' )
+        {
+            // --- разбор сегмента ---
+            const char* seg_start = p;
+            while ( *p != '\0' && *p != '/' )
+                ++p;
+            uintptr_t seg_len = static_cast<uintptr_t>( p - seg_start );
+            if ( *p == '/' )
+                ++p;
+
+            if ( seg_len == 0 )
+                continue;
+
+            std::string seg = pjson_decode_rfc6901_segment( seg_start, seg_len );
+
+            // --- разыменование $ref ---
+            if ( deref_refs )
+            {
+                node_view cur_v{ cur };
+                if ( cur_v.is_ref() )
+                {
+                    node_view resolved = cur_v.deref( true, 32 );
+                    if ( !resolved.valid() )
+                        return 0;
+                    cur = resolved.id;
+                }
+            }
+
+            node_view cur_v{ cur };
+
+            bool is_last = ( *p == '\0' );
 
             // Единственный вызов tag() вместо отдельных is_object() + is_array() (Этап 10.3).
             node_tag cur_tag = cur_v.tag();
@@ -659,7 +742,7 @@ class pjson_db_pmm
                 {
                     cur = child.id;
                 }
-                else if constexpr ( CreateMode )
+                else
                 {
                     node_id slot = node_object_insert( cur, seg.c_str() );
                     if ( slot == 0 )
@@ -673,10 +756,6 @@ class pjson_db_pmm
                     }
                     cur = slot;
                 }
-                else
-                {
-                    return fail( node_error::not_found );
-                }
             }
             // --- навигация по array ---
             else if ( cur_tag == node_tag::array )
@@ -684,14 +763,14 @@ class pjson_db_pmm
                 char*     end_ptr = nullptr;
                 uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );
                 if ( end_ptr == seg.c_str() || *end_ptr != '\0' )
-                    return fail( node_error::wrong_type );
+                    return 0;
 
                 node_view elem = cur_v.at( idx );
                 if ( elem.valid() )
                 {
                     cur = elem.id;
                 }
-                else if constexpr ( CreateMode )
+                else
                 {
                     uintptr_t cur_size = cur_v.size();
                     for ( uintptr_t i = cur_size; i <= idx; ++i )
@@ -710,21 +789,13 @@ class pjson_db_pmm
                         }
                     }
                 }
-                else
-                {
-                    return fail( node_error::index_out_of_range );
-                }
             }
             // --- ни object, ни array ---
-            else if constexpr ( CreateMode )
+            else
             {
                 if ( is_last )
                     return cur;
                 return 0;
-            }
-            else
-            {
-                return fail( node_error::wrong_type );
             }
         }
 
@@ -943,7 +1014,7 @@ class pjson_db_pmm
         return node_view{ tmp_off };
     }
 
-    node_id _ensure_path( const char* path ) { return _walk_path<true>( path, true, nullptr ); }
+    node_id _ensure_path( const char* path ) { return _walk_path_create( path, true ); }
 
     // -----------------------------------------------------------------------
     // Вспомогательные методы: удаление узлов
