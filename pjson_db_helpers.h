@@ -96,6 +96,85 @@ template <typename Visitor> inline void pjson_traverse_subtree( node_id id, Visi
     }
 }
 
+/// Рекурсивный обход поддерева JSON-дерева в post-order (дети → родитель).
+/// Visitor должен реализовать метод visit(node_id, const node_view&).
+/// Используется для операций, требующих обработки детей до родителя (например, освобождение).
+template <typename Visitor> inline void pjson_traverse_subtree_postorder( node_id id, Visitor&& vis )
+{
+    if ( id == 0 )
+        return;
+    const node_view v{ id };
+    if ( !v.valid() )
+        return;
+
+    if ( v.is_array() )
+    {
+        uintptr_t sz = v.size();
+        for ( uintptr_t i = 0; i < sz; ++i )
+        {
+            node_view elem = v.at( i );
+            if ( elem.valid() )
+                pjson_traverse_subtree_postorder( elem.id, vis );
+        }
+    }
+    else if ( v.is_object() )
+    {
+        uintptr_t sz = v.size();
+        for ( uintptr_t i = 0; i < sz; ++i )
+        {
+            node_view val = v.value_at( i );
+            if ( val.valid() )
+                pjson_traverse_subtree_postorder( val.id, vis );
+        }
+    }
+
+    vis.visit( id, v );
+}
+
+// ===========================================================================
+// Visitor для освобождения поддерева узлов (post-order)
+// ===========================================================================
+
+/// Visitor для post-order обхода: освобождает ресурсы узла и удаляет его из ПАП.
+/// Должен использоваться с pjson_traverse_subtree_postorder(), чтобы дети
+/// были освобождены раньше родителей.
+struct pjson_free_node_visitor
+{
+    void visit( node_id id, const node_view& v )
+    {
+        node* n = pmm_resolve<node>( id );
+        switch ( v.tag() )
+        {
+        case node_tag::array:
+            if ( n != nullptr )
+                n->array_val.free_data();
+            break;
+        case node_tag::object:
+            if ( n != nullptr )
+                n->object_val.free_data();
+            break;
+        case node_tag::string:
+            if ( n != nullptr )
+                n->string_val.free_data();
+            break;
+        case node_tag::binary:
+            if ( n != nullptr )
+                n->binary_val.free_data();
+            break;
+        default:
+            break;
+        }
+        pam_pmm_delete( id );
+    }
+};
+
+/// Освободить поддерево JSON-узлов: рекурсивно удаляет все дочерние узлы и сам узел.
+inline void pjson_free_node_tree( node_id id )
+{
+    pjson_free_node_visitor vis;
+    pjson_traverse_subtree_postorder( id, vis );
+}
+
 // ===========================================================================
 // Вспомогательные функции: подсчёт узлов (для метрик)
 // ===========================================================================
@@ -187,5 +266,6 @@ inline void pjson_search_node_strings_in_subtree( node_id id, const char* patter
 // Вспомогательные функции: разрешение ref
 // ===========================================================================
 
-// Примечание: _resolve_refs_in_subtree осталась в pjson_db_pmm.h, т.к. зависит от
-// pjson_db_pmm::get() — нельзя вынести как свободную функцию без передачи db.
+// Примечание: _resolve_refs_in_subtree реализована в pjson_db_pmm.h через
+// pjson_traverse_subtree с visitor-функтором _resolve_refs_visitor,
+// т.к. зависит от pjson_db_pmm::get().
