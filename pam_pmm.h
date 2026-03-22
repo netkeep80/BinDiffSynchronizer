@@ -23,6 +23,7 @@
 #include "pstringview_pmm.h"
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <type_traits>
 
 namespace pjson
@@ -170,14 +171,20 @@ static_assert( std::is_trivially_copyable<pam_pmm_registry>::value,
  * Этап B (Issue #209): все pam_pmm_* функции принимают pam_pmm_state&
  * как явный параметр. Глобальные обёртки без параметра сохранены для
  * обратной совместимости и делегируют глобальному синглтону.
+ *
+ * Этап C (Issue #210): добавлен std::mutex для потокобезопасной
+ * инициализации. Мьютекс защищает init/destroy/reset/save от
+ * гонок при одновременном доступе из нескольких потоков.
  */
 struct pam_pmm_state
 {
     char      filename[256] = {};    ///< Имя файла хранилища
     uintptr_t root_offset   = 0;     ///< Смещение корневой структуры в ПАП
     bool      initialized   = false; ///< Флаг инициализации
+    mutable std::mutex mtx; ///< Мьютекс для потокобезопасной инициализации (Этап C)
 
     /// Сбросить все поля к начальным значениям.
+    /// @note Вызывающий должен удерживать mtx (или гарантировать эксклюзивный доступ).
     void reset()
     {
         filename[0] = '\0';
@@ -330,6 +337,8 @@ inline uintptr_t pam_pmm_create_root_and_registry()
  */
 inline void pam_pmm_init( pam_pmm_state& state, const char* filename )
 {
+    std::lock_guard<std::mutex> lock( state.mtx );
+
     // Сохраняем имя файла.
     if ( filename != nullptr )
     {
@@ -410,12 +419,23 @@ inline void pam_pmm_init( const char* filename )
 /**
  * @brief Сохранить PMM в файл (явное состояние).
  */
-inline void pam_pmm_save( pam_pmm_state& state )
+/// Внутренняя реализация save без блокировки мьютекса.
+/// @note Вызывающий должен удерживать state.mtx.
+inline void pam_pmm_save_unlocked( pam_pmm_state& state )
 {
     if ( state.filename[0] == '\0' )
         return;
 
     pmm::save_manager<PamManager>( state.filename );
+}
+
+/**
+ * @brief Сохранить PMM в файл (явное состояние).
+ */
+inline void pam_pmm_save( pam_pmm_state& state )
+{
+    std::lock_guard<std::mutex> lock( state.mtx );
+    pam_pmm_save_unlocked( state );
 }
 
 /// Обёртка для обратной совместимости.
@@ -431,7 +451,8 @@ inline void pam_pmm_save()
  */
 inline void pam_pmm_destroy( pam_pmm_state& state )
 {
-    pam_pmm_save( state );
+    std::lock_guard<std::mutex> lock( state.mtx );
+    pam_pmm_save_unlocked( state );
     PamManager::destroy();
     state.reset();
 }
@@ -449,6 +470,8 @@ inline void pam_pmm_destroy()
  */
 inline void pam_pmm_reset( pam_pmm_state& state )
 {
+    std::lock_guard<std::mutex> lock( state.mtx );
+
     // Уничтожаем и создаём заново.
     PamManager::destroy();
     PamManager::create( PAM_PMM_INITIAL_SIZE );
@@ -470,6 +493,7 @@ inline void pam_pmm_reset()
  */
 inline bool pam_pmm_is_initialized( const pam_pmm_state& state )
 {
+    std::lock_guard<std::mutex> lock( state.mtx );
     return state.initialized && PamManager::is_initialized();
 }
 
@@ -1074,6 +1098,7 @@ inline void pam_pmm_reserve_slots( uintptr_t /*min_slots*/ )
  */
 inline bool pam_pmm_validate( const pam_pmm_state& state )
 {
+    std::lock_guard<std::mutex> lock( state.mtx );
     return state.initialized && PamManager::is_initialized();
 }
 
