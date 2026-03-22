@@ -111,7 +111,9 @@ template <typename Visitor> inline void pjson_traverse_subtree( node_id id, Visi
 
     vis.visit( id, v );
 
-    if ( v.is_array() )
+    // Единственный вызов tag() вместо отдельных is_array() + is_object() (Этап 10.3).
+    node_tag t = v.tag();
+    if ( t == node_tag::array )
     {
         uintptr_t sz = v.size();
         for ( uintptr_t i = 0; i < sz; ++i )
@@ -121,7 +123,7 @@ template <typename Visitor> inline void pjson_traverse_subtree( node_id id, Visi
                 pjson_traverse_subtree( elem.id, vis );
         }
     }
-    else if ( v.is_object() )
+    else if ( t == node_tag::object )
     {
         uintptr_t sz = v.size();
         for ( uintptr_t i = 0; i < sz; ++i )
@@ -144,7 +146,9 @@ template <typename Visitor> inline void pjson_traverse_subtree_postorder( node_i
     if ( !v.valid() )
         return;
 
-    if ( v.is_array() )
+    // Единственный вызов tag() вместо отдельных is_array() + is_object() (Этап 10.3).
+    node_tag t = v.tag();
+    if ( t == node_tag::array )
     {
         uintptr_t sz = v.size();
         for ( uintptr_t i = 0; i < sz; ++i )
@@ -154,7 +158,7 @@ template <typename Visitor> inline void pjson_traverse_subtree_postorder( node_i
                 pjson_traverse_subtree_postorder( elem.id, vis );
         }
     }
-    else if ( v.is_object() )
+    else if ( t == node_tag::object )
     {
         uintptr_t sz = v.size();
         for ( uintptr_t i = 0; i < sz; ++i )
@@ -177,10 +181,11 @@ template <typename Visitor> inline void pjson_traverse_subtree_postorder( node_i
 /// были освобождены раньше родителей.
 struct pjson_free_node_visitor
 {
-    void visit( node_id id, const node_view& v )
+    void visit( node_id id, const node_view& /* v */ )
     {
         node* n = pmm_resolve<node>( id );
-        switch ( v.tag() )
+        // Используем n->tag напрямую вместо v.tag(), чтобы избежать повторного pmm_resolve (Этап 10.3).
+        switch ( n != nullptr ? n->tag : node_tag::null )
         {
         case node_tag::array:
             if ( n != nullptr )
@@ -225,10 +230,14 @@ struct pjson_count_visitor
     uint64_t& object_cnt;
     uint64_t& binary_bytes;
 
-    void visit( node_id id, const node_view& v )
+    void visit( node_id id, const node_view& /* v */ )
     {
         ++node_cnt;
-        switch ( v.tag() )
+        // Единственный pmm_resolve: читаем tag напрямую из узла (Этап 10.3).
+        const node* n = pmm_resolve<node>( id );
+        if ( n == nullptr )
+            return;
+        switch ( n->tag )
         {
         case node_tag::array:
             ++array_cnt;
@@ -240,12 +249,8 @@ struct pjson_count_visitor
             ++ref_cnt;
             break;
         case node_tag::binary:
-        {
-            const node* n = pmm_resolve<node>( id );
-            if ( n != nullptr )
-                binary_bytes += static_cast<uint64_t>( n->binary_val.size() );
+            binary_bytes += static_cast<uint64_t>( n->binary_val.size() );
             break;
-        }
         default:
             break;
         }
