@@ -158,37 +158,61 @@ static_assert( std::is_trivially_copyable<pam_pmm_registry>::value,
                "pam_pmm_registry должен быть тривиально копируемым" );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ГЛОБАЛЬНОЕ СОСТОЯНИЕ PAM_PMM
+// ГЛОБАЛЬНОЕ СОСТОЯНИЕ PAM_PMM (Этап 10.1: инкапсуляция в структуру)
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @brief Инкапсулированное состояние PMM-фасада.
+ *
+ * Три ранее разрозненные статические переменные (filename, root_offset,
+ * initialized) объединены в одну структуру. Это первый шаг к поддержке
+ * нескольких экземпляров БД в одном процессе (Проблема 3, plan.md).
+ *
+ * Текущая реализация использует глобальный синглтон (pam_pmm_global_state()),
+ * а функции detail:: делегируют ему. В дальнейшем (Этап 10.1b) состояние
+ * будет передаваться как явный параметр.
+ */
+struct pam_pmm_state
+{
+    char      filename[256] = {};    ///< Имя файла хранилища
+    uintptr_t root_offset   = 0;     ///< Смещение корневой структуры в ПАП
+    bool      initialized   = false; ///< Флаг инициализации
+
+    /// Сбросить все поля к начальным значениям.
+    void reset()
+    {
+        filename[0] = '\0';
+        root_offset = 0;
+        initialized = false;
+    }
+};
+
+/// Глобальный синглтон состояния PMM.
+inline pam_pmm_state& pam_pmm_global_state()
+{
+    static pam_pmm_state state;
+    return state;
+}
 
 namespace detail
 {
 
-/// Имя файла хранилища (глобальное состояние).
-inline char& pam_pmm_filename_char( std::size_t idx )
-{
-    static char filename[256] = {};
-    return filename[idx];
-}
-
+/// Имя файла хранилища (делегирует глобальному состоянию).
 inline char* pam_pmm_filename()
 {
-    return &pam_pmm_filename_char( 0 );
+    return pam_pmm_global_state().filename;
 }
 
-/// Смещение корневой структуры в ПАП (глобальное состояние).
-/// Корневая структура аллоцируется первой и хранится по известному смещению.
+/// Смещение корневой структуры в ПАП (делегирует глобальному состоянию).
 inline uintptr_t& pam_pmm_root_offset()
 {
-    static uintptr_t offset = 0;
-    return offset;
+    return pam_pmm_global_state().root_offset;
 }
 
-/// Флаг инициализации.
+/// Флаг инициализации (делегирует глобальному состоянию).
 inline bool& pam_pmm_initialized()
 {
-    static bool initialized = false;
-    return initialized;
+    return pam_pmm_global_state().initialized;
 }
 
 } // namespace detail

@@ -541,3 +541,54 @@ TEST_CASE( "pam_pmm: root object survives reset", "[pam_pmm]" )
 
     pam_pmm_destroy();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ТЕСТЫ pam_pmm_state (Этап 10.1: инкапсуляция глобального состояния)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_CASE( "pam_pmm_state: default construction zeroed", "[pam_pmm][pam_pmm_state]" )
+{
+    pam_pmm_state s{};
+    REQUIRE( s.filename[0] == '\0' );
+    REQUIRE( s.root_offset == 0 );
+    REQUIRE( s.initialized == false );
+}
+
+TEST_CASE( "pam_pmm_state: reset clears all fields", "[pam_pmm][pam_pmm_state]" )
+{
+    pam_pmm_state s{};
+    std::strncpy( s.filename, "test.pam", sizeof( s.filename ) - 1 );
+    s.root_offset = 42;
+    s.initialized = true;
+
+    s.reset();
+
+    REQUIRE( s.filename[0] == '\0' );
+    REQUIRE( s.root_offset == 0 );
+    REQUIRE( s.initialized == false );
+}
+
+TEST_CASE( "pam_pmm_state: global_state singleton is consistent with detail:: accessors", "[pam_pmm][pam_pmm_state]" )
+{
+    pam_pmm_state& gs = pam_pmm_global_state();
+
+    // detail:: functions should return pointers/references into the same state.
+    REQUIRE( detail::pam_pmm_filename() == gs.filename );
+    REQUIRE( &detail::pam_pmm_root_offset() == &gs.root_offset );
+    REQUIRE( &detail::pam_pmm_initialized() == &gs.initialized );
+}
+
+TEST_CASE( "pam_pmm_state: init/destroy cycle reflected in global state", "[pam_pmm][pam_pmm_state]" )
+{
+    pam_pmm_init( nullptr );
+
+    pam_pmm_state& gs = pam_pmm_global_state();
+    REQUIRE( gs.initialized == true );
+    REQUIRE( gs.root_offset != 0 );
+
+    pam_pmm_destroy();
+
+    REQUIRE( gs.initialized == false );
+    REQUIRE( gs.root_offset == 0 );
+    REQUIRE( gs.filename[0] == '\0' );
+}
