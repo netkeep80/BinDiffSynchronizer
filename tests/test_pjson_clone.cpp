@@ -467,3 +467,200 @@ TEST_CASE( "node_clone: empty binary clone", "[clone]" )
     REQUIRE( cv.is_binary() == true );
     REQUIRE( cv.size() == 0 );
 }
+
+// ---------------------------------------------------------------------------
+// Тесты прямой вставки node_id (Этап 9.2, Issue #190)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "node_array_push_back_id: direct insert into array", "[clone]" )
+{
+    reset_pam();
+
+    // Создаём array-узел.
+    fptr<node> arr;
+    arr.New();
+    node_set_array( arr.addr() );
+
+    // Создаём отдельные узлы.
+    fptr<node> n1;
+    n1.New();
+    node_set_int( n1.addr(), 10 );
+
+    fptr<node> n2;
+    n2.New();
+    node_set_int( n2.addr(), 20 );
+
+    fptr<node> n3;
+    n3.New();
+    node_set_int( n3.addr(), 30 );
+
+    // Вставляем напрямую через node_array_push_back_id.
+    node_array_push_back_id( arr.addr(), n1.addr() );
+    node_array_push_back_id( arr.addr(), n2.addr() );
+    node_array_push_back_id( arr.addr(), n3.addr() );
+
+    // Проверяем результат.
+    node_view av{ arr.addr() };
+    REQUIRE( av.is_array() == true );
+    REQUIRE( av.size() == 3 );
+    REQUIRE( av[uintptr_t( 0 )].as_int() == 10 );
+    REQUIRE( av[uintptr_t( 1 )].as_int() == 20 );
+    REQUIRE( av[uintptr_t( 2 )].as_int() == 30 );
+}
+
+TEST_CASE( "node_array_push_back_id: ignores zero node_off and zero existing_id", "[clone]" )
+{
+    reset_pam();
+
+    // Вызов с нулевым node_off — не падает.
+    node_array_push_back_id( 0, 42 );
+
+    // Создаём array-узел.
+    fptr<node> arr;
+    arr.New();
+    node_set_array( arr.addr() );
+
+    // Вызов с нулевым existing_id — не добавляет элемент.
+    node_array_push_back_id( arr.addr(), 0 );
+
+    node_view av{ arr.addr() };
+    REQUIRE( av.size() == 0 );
+}
+
+TEST_CASE( "node_object_insert_id: direct insert into object", "[clone]" )
+{
+    reset_pam();
+
+    // Создаём object-узел.
+    fptr<node> obj;
+    obj.New();
+    node_set_object( obj.addr() );
+
+    // Создаём отдельные узлы.
+    fptr<node> val1;
+    val1.New();
+    node_set_string( val1.addr(), "Alice" );
+
+    fptr<node> val2;
+    val2.New();
+    node_set_int( val2.addr(), 30 );
+
+    // Вставляем напрямую через node_object_insert_id.
+    node_object_insert_id( obj.addr(), "name", val1.addr() );
+    node_object_insert_id( obj.addr(), "age", val2.addr() );
+
+    // Проверяем результат.
+    node_view ov{ obj.addr() };
+    REQUIRE( ov.is_object() == true );
+    REQUIRE( ov.size() == 2 );
+    REQUIRE( ov.at( "name" ).as_string() == "Alice" );
+    REQUIRE( ov.at( "age" ).as_int() == 30 );
+}
+
+TEST_CASE( "node_object_insert_id: overwrite existing key", "[clone]" )
+{
+    reset_pam();
+
+    // Создаём object-узел.
+    fptr<node> obj;
+    obj.New();
+    node_set_object( obj.addr() );
+
+    // Вставляем первое значение.
+    fptr<node> val1;
+    val1.New();
+    node_set_int( val1.addr(), 100 );
+    node_object_insert_id( obj.addr(), "key", val1.addr() );
+
+    // Перезаписываем тем же ключом.
+    fptr<node> val2;
+    val2.New();
+    node_set_int( val2.addr(), 200 );
+    node_object_insert_id( obj.addr(), "key", val2.addr() );
+
+    // Должно быть одно значение, обновлённое.
+    node_view ov{ obj.addr() };
+    REQUIRE( ov.size() == 1 );
+    REQUIRE( ov.at( "key" ).as_int() == 200 );
+}
+
+TEST_CASE( "node_object_insert_id: ignores zero arguments", "[clone]" )
+{
+    reset_pam();
+
+    // Вызов с нулевым node_off — не падает.
+    node_object_insert_id( 0, "key", 42 );
+
+    // Создаём object-узел.
+    fptr<node> obj;
+    obj.New();
+    node_set_object( obj.addr() );
+
+    // Вызов с нулевым existing_id — не добавляет запись.
+    node_object_insert_id( obj.addr(), "key", 0 );
+
+    // Вызов с nullptr key — не добавляет запись.
+    fptr<node> val;
+    val.New();
+    node_set_int( val.addr(), 42 );
+    node_object_insert_id( obj.addr(), nullptr, val.addr() );
+
+    node_view ov{ obj.addr() };
+    REQUIRE( ov.size() == 0 );
+}
+
+TEST_CASE( "node_clone: array clone uses no temporary slots (Step 9.2)", "[clone]" )
+{
+    reset_pam();
+
+    // Создаём массив [1, "hello", true].
+    fptr<node> src;
+    src.New();
+    node_set_array( src.addr() );
+
+    node_id s1 = node_array_push_back( src.addr() );
+    node_set_int( s1, 1 );
+    node_id s2 = node_array_push_back( src.addr() );
+    node_set_string( s2, "hello" );
+    node_id s3 = node_array_push_back( src.addr() );
+    node_set_bool( s3, true );
+
+    // Клонируем — должно работать корректно без временных слотов.
+    node_id cloned = node_clone( src.addr() );
+    REQUIRE( cloned != 0 );
+
+    node_view cv{ cloned };
+    REQUIRE( cv.is_array() == true );
+    REQUIRE( cv.size() == 3 );
+    REQUIRE( cv[uintptr_t( 0 )].as_int() == 1 );
+    REQUIRE( cv[uintptr_t( 1 )].as_string() == "hello" );
+    REQUIRE( cv[uintptr_t( 2 )].as_bool() == true );
+}
+
+TEST_CASE( "node_clone: object clone uses no temporary slots (Step 9.2)", "[clone]" )
+{
+    reset_pam();
+
+    // Создаём объект {"name": "Alice", "age": 30, "active": true}.
+    fptr<node> src;
+    src.New();
+    node_set_object( src.addr() );
+
+    node_id name_slot = node_object_insert( src.addr(), "name" );
+    node_set_string( name_slot, "Alice" );
+    node_id age_slot = node_object_insert( src.addr(), "age" );
+    node_set_int( age_slot, 30 );
+    node_id active_slot = node_object_insert( src.addr(), "active" );
+    node_set_bool( active_slot, true );
+
+    // Клонируем — должно работать корректно без временных слотов.
+    node_id cloned = node_clone( src.addr() );
+    REQUIRE( cloned != 0 );
+
+    node_view cv{ cloned };
+    REQUIRE( cv.is_object() == true );
+    REQUIRE( cv.size() == 3 );
+    REQUIRE( cv.at( "name" ).as_string() == "Alice" );
+    REQUIRE( cv.at( "age" ).as_int() == 30 );
+    REQUIRE( cv.at( "active" ).as_bool() == true );
+}

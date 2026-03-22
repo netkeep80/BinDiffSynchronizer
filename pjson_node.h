@@ -963,6 +963,24 @@ inline node_id node_array_push_back( uintptr_t node_off )
     return slot_off;
 }
 
+/// Добавить существующий node_id в array-узел (push_back) без создания временного слота.
+/// В отличие от node_array_push_back(), не аллоцирует новый node —
+/// напрямую вставляет existing_id в массив (Issue #190, Этап 9.2).
+/// Безопасна при realloc.
+inline void node_array_push_back_id( uintptr_t node_off, node_id existing_id )
+{
+    if ( node_off == 0 || existing_id == 0 )
+        return;
+
+    node* n = pmm_resolve<node>( node_off );
+    if ( n == nullptr || n->tag != node_tag::array )
+        return;
+
+    // Добавляем existing_id в массив через parray::push_back.
+    // push_back может вызвать рост PMM-пула, инвалидируя n.
+    parray_push_back_safe<node_id>( node_off, &node::array_val, existing_id );
+}
+
 /// Вставить или обновить ключ key в object-узле.
 /// Возвращает node_id нового/существующего слота (инициализирован как null при новом).
 /// Ключ интернируется как pstringview (readonly).
@@ -1015,6 +1033,52 @@ inline node_id node_object_insert( uintptr_t node_off, const char* key )
     parray_insert_sorted_object_entry( node_off, new_entry );
 
     return slot_off;
+}
+
+/// Вставить существующий node_id по ключу key в object-узел без создания временного слота.
+/// Если ключ уже существует — перезаписывает value.
+/// В отличие от node_object_insert(), не аллоцирует новый node —
+/// напрямую вставляет existing_id (Issue #190, Этап 9.2).
+/// Безопасна при realloc.
+inline void node_object_insert_id( uintptr_t node_off, const char* key, node_id existing_id )
+{
+    if ( node_off == 0 || key == nullptr || existing_id == 0 )
+        return;
+
+    // Интернируем ключ через pstringview_table (readonly).
+    auto key_result = pam_intern_string( key );
+    // После intern — переразрешаем node.
+    node* n = pmm_resolve<node>( node_off );
+    if ( n == nullptr || n->tag != node_tag::object )
+        return;
+
+    uintptr_t sz = n->object_val.size();
+
+    // Ищем существующий ключ через бинарный поиск.
+    if ( sz > 0 )
+    {
+        const object_entry* entries = n->object_val.data();
+        if ( entries != nullptr )
+        {
+            auto find_result = node_object_find_key( entries, sz, key );
+            if ( find_result.found )
+            {
+                // Ключ существует — перезаписываем value.
+                // data() возвращает const*, но мы знаем, что можем модифицировать.
+                object_entry* mut_entries            = const_cast<object_entry*>( entries );
+                mut_entries[find_result.index].value = existing_id;
+                return;
+            }
+        }
+    }
+
+    // Ключ не найден — вставляем новую запись с existing_id.
+    object_entry new_entry;
+    new_entry.key_length       = key_result.length;
+    new_entry.key_chars_offset = key_result.chars_offset;
+    new_entry.value            = existing_id;
+
+    parray_insert_sorted_object_entry( node_off, new_entry );
 }
 
 /// Добавить байт в binary-узел (push_back).
@@ -1143,6 +1207,8 @@ inline node_id node_clone( node_id src_id )
     case node_tag::array:
     {
         // Инициализируем array-узел и рекурсивно копируем элементы.
+        // Используем node_array_push_back_id() для прямой вставки склонированного
+        // node_id без создания временного слота (Issue #190, Этап 9.2).
         node_set_array( dst_id );
         // Переразрешаем src после set_array.
         src = pmm_resolve<node>( src_id );
@@ -1157,27 +1223,8 @@ inline node_id node_clone( node_id src_id )
                 continue;
             // Рекурсивно клонируем элемент.
             node_id elem_clone = node_clone( src_elem.id );
-            // Добавляем слот в целевой массив.
-            node_id slot_id = node_array_push_back( dst_id );
-            // Копируем содержимое склонированного элемента в слот.
-            // Так как push_back создаёт null-узел, а clone создаёт полную копию,
-            // нужно переместить данные. Проще: записываем node_id прямо в массив.
-            node* dst_node = pmm_resolve<node>( dst_id );
-            if ( dst_node != nullptr && dst_node->tag == node_tag::array )
-            {
-                node_id* arr = dst_node->array_val.data();
-                if ( arr != nullptr && dst_node->array_val.size() > 0 )
-                {
-                    arr[dst_node->array_val.size() - 1] = elem_clone;
-                }
-            }
-            // Удаляем временный null-слот.
-            if ( slot_id != 0 && slot_id != elem_clone )
-            {
-                fptr<node> tmp;
-                tmp.set_addr( slot_id );
-                tmp.Delete();
-            }
+            // Вставляем склонированный node_id напрямую в целевой массив.
+            node_array_push_back_id( dst_id, elem_clone );
         }
         break;
     }
@@ -1185,6 +1232,8 @@ inline node_id node_clone( node_id src_id )
     case node_tag::object:
     {
         // Инициализируем object-узел и рекурсивно копируем пары ключ-значение.
+        // Используем node_object_insert_id() для прямой вставки склонированного
+        // node_id без создания временного слота (Issue #190, Этап 9.2).
         node_set_object( dst_id );
         node_view src_view{ src_id };
         uintptr_t obj_size = src_view.size();
@@ -1197,33 +1246,8 @@ inline node_id node_clone( node_id src_id )
             std::string key_s( key_sv );
             // Рекурсивно клонируем значение.
             node_id val_clone = node_clone( val_v.id );
-            // Вставляем ключ в целевой объект.
-            node_id slot_id = node_object_insert( dst_id, key_s.c_str() );
-            // Записываем склонированное значение в слот.
-            node* dst_node = pmm_resolve<node>( dst_id );
-            if ( dst_node != nullptr && dst_node->tag == node_tag::object )
-            {
-                object_entry* entries = dst_node->object_val.data();
-                if ( entries != nullptr )
-                {
-                    // Ищем запись по slot_id (value) и заменяем.
-                    for ( uintptr_t j = 0; j < dst_node->object_val.size(); ++j )
-                    {
-                        if ( entries[j].value == slot_id )
-                        {
-                            entries[j].value = val_clone;
-                            break;
-                        }
-                    }
-                }
-            }
-            // Удаляем временный null-слот, если он не был использован.
-            if ( slot_id != 0 && slot_id != val_clone )
-            {
-                fptr<node> tmp;
-                tmp.set_addr( slot_id );
-                tmp.Delete();
-            }
+            // Вставляем склонированный node_id по ключу напрямую в целевой объект.
+            node_object_insert_id( dst_id, key_s.c_str(), val_clone );
         }
         break;
     }
