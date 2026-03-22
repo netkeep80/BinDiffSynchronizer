@@ -288,7 +288,9 @@ class pjson_db_pmm
 
         node_view parent{ parent_id };
 
-        if ( parent.is_object() )
+        // Единственный вызов tag() вместо отдельных is_object() + is_array() (Этап 10.3).
+        node_tag parent_tag = parent.tag();
+        if ( parent_tag == node_tag::object )
         {
             node_view child = parent.at( last_seg.c_str() );
             if ( !child.valid() )
@@ -299,7 +301,7 @@ class pjson_db_pmm
                 _update_metrics_after_mutation();
             return ok;
         }
-        else if ( parent.is_array() )
+        else if ( parent_tag == node_tag::array )
         {
             char*     end_ptr = nullptr;
             uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( last_seg.c_str(), &end_ptr, 10 ) );
@@ -646,8 +648,11 @@ class pjson_db_pmm
 
             [[maybe_unused]] bool is_last = ( *p == '\0' );
 
+            // Единственный вызов tag() вместо отдельных is_object() + is_array() (Этап 10.3).
+            node_tag cur_tag = cur_v.tag();
+
             // --- навигация по object ---
-            if ( cur_v.is_object() )
+            if ( cur_tag == node_tag::object )
             {
                 node_view child = cur_v.at( seg.c_str() );
                 if ( child.valid() )
@@ -674,7 +679,7 @@ class pjson_db_pmm
                 }
             }
             // --- навигация по array ---
-            else if ( cur_v.is_array() )
+            else if ( cur_tag == node_tag::array )
             {
                 char*     end_ptr = nullptr;
                 uintptr_t idx     = static_cast<uintptr_t>( std::strtoull( seg.c_str(), &end_ptr, 10 ) );

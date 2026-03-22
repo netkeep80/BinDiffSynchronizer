@@ -305,12 +305,18 @@ struct node_view
 
     /// Проверить, является ли узел JSON null-значением.
     /// Возвращает true только для id==0 или узлов с tag==null (но не для ошибочных view).
-    bool is_null() const { return !is_error() && tag() == node_tag::null; }
+    bool is_null() const { return tag() == node_tag::null; }
     bool is_boolean() const { return tag() == node_tag::boolean; }
     bool is_integer() const { return tag() == node_tag::integer; }
     bool is_uinteger() const { return tag() == node_tag::uinteger; }
     bool is_real() const { return tag() == node_tag::real; }
-    bool is_number() const { return is_integer() || is_uinteger() || is_real(); }
+    /// Проверить, является ли узел числовым (integer, uinteger или real).
+    /// Выполняет единственный pmm_resolve вместо трёх отдельных вызовов tag().
+    bool is_number() const
+    {
+        node_tag t = tag();
+        return t == node_tag::integer || t == node_tag::uinteger || t == node_tag::real;
+    }
     bool is_string() const { return tag() == node_tag::string; }
     bool is_binary() const { return tag() == node_tag::binary; }
     bool is_array() const { return tag() == node_tag::array; }
@@ -517,14 +523,16 @@ struct node_view
     /// Если recursive == true, разыменовывает цепочку ref-узлов.
     /// Защита от зависания: ограничение глубиной max_depth.
     /// Если текущий узел не ref — возвращает себя.
+    /// Оптимизировано: единственный pmm_resolve за итерацию (вместо отдельных is_ref + ref_target).
     node_view deref( bool recursive = true, uintptr_t max_depth = PJSON_MAX_REF_DEPTH ) const
     {
         node_view cur = *this;
         for ( uintptr_t depth = 0; depth < max_depth; depth++ )
         {
-            if ( !cur.is_ref() )
+            const node* n = cur._resolve();
+            if ( n == nullptr || n->tag != node_tag::ref )
                 return cur;
-            node_id target = cur.ref_target();
+            node_id target = n->ref_val.target;
             if ( target == 0 )
                 return node_view{}; // не разрешён
             node_view next{ target };
